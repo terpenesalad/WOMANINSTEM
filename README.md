@@ -94,7 +94,7 @@ cmake --build build --config Release --parallel
 - **Model**: put `ggml-model-htdemucs-6s-f16.bin` in a `models/` folder next to the exe, or let the app download it on first use.
 - `rigtest` runs the DSP/engine test-suite; `stemsplit --selftest` checks separation end-to-end.
 
-Every push builds and tests on Windows and Linux via GitHub Actions; tagging `v*` publishes a release with the installer and portable zip.
+Every push builds and tests on Windows and Linux via GitHub Actions. **To publish a new release**, bump `VERSION` in the `project(...)` line of `CMakeLists.txt` and push to `main`: the Windows job builds the installer and portable zip and creates the GitHub Release `vX.Y.Z` automatically.
 
 ### Project layout
 
