@@ -48,7 +48,7 @@ private:
     void browseForSong();
     void exportStems (const SongInfo& info);
 
-    void startJob (std::unique_ptr<SongJob> job, const juce::String& title);
+    void startJob (std::unique_ptr<SongJob> job, const juce::String& title, const juce::String& heading);
     void jobFinished();
     void cancelJob();
     void rebuildForSampleRate();

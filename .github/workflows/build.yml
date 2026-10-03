@@ -191,6 +191,7 @@ jobs:
           echo "::notice title=Separation self-test (Linux)::$(tail -15 selftest.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')"
 
       - name: Benchmark - memory and speed per worker thread (3-minute song)
+        if: github.event_name == 'workflow_dispatch'
         run: |
           for t in 1 3; do
             ./build/stemsplit_artefacts/Release/stemsplit --selftest --long --threads $t bench-$t > bench-$t.log 2>&1 || true

@@ -64,7 +64,7 @@ Stems are cached in your **Library** (24-bit FLAC), so a song is only ever split
 | `Ctrl+O` | open a song |
 
 ### How long does separation take?
-It depends on your CPU. As a rough guide, a 4-minute song takes **2–6 minutes** on a modern 6–8 core desktop CPU at Standard quality. *Max quality* runs three extra fine-tuned models (vocals/drums/bass) for cleaner results and takes about 4× longer. You can tune up and noodle on the rig while it works.
+It runs on your CPU, so it depends on your computer. Measured on GitHub's 4-core cloud server, a **3-minute song took about 5 minutes**. A modern 8-core desktop with 16 GB of RAM should be roughly 2–3× faster. Each worker thread needs about 1.2 GB of RAM, so the app picks the thread count from your cores *and* your memory (8 GB machines use 2 workers). *Max quality* adds three fine-tuned models (vocals, drums, bass) and takes about 4× longer. Songs are only split once; after that they open instantly from the Library, and you can tune up and noodle on the rig while you wait.
 
 ### Latency tips
 - Use your interface's **ASIO** driver (Focusrite, Audient, PreSonus, MOTU, Behringer and others all ship one), or *Windows Audio (Exclusive Mode)*.
@@ -113,7 +113,7 @@ packaging/      installer script, end-user readme, release notes
 
 - **Strings and horns** don't get their own stems: no open model separates them reliably yet, so they live in *Other*.
 - **Backing vocals** are split from the lead by stereo position. This works well on most modern mixes, but not on mono recordings or songs where harmonies are panned centre.
-- Separation is CPU-only, which keeps the app small (~10 MB plus a 55 MB model) and runs on any PC, but it's slower than a GPU.
+- Separation is CPU-only, which keeps the app small (a few MB plus a 55 MB model) and runs on any PC, but it's slower than GPU-based tools.
 
 ## License
 

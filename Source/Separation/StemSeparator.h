@@ -54,9 +54,10 @@ public:
 
     static int defaultThreadCount();
 
-    /** Measured with `stemsplit --selftest --long --threads N` (see CI benchmark). */
-    static constexpr int baseMemoryMB = 1200;
-    static constexpr int perWorkerMemoryMB = 700;
+    /** Measured with `stemsplit --selftest --long --threads N` (CI benchmark, 3-minute song):
+        1 worker peaks at ~2.9 GB, each extra worker adds ~1.15 GB. */
+    static constexpr int baseMemoryMB = 1800;
+    static constexpr int perWorkerMemoryMB = 1150;
 
 private:
     struct CancelledException {};

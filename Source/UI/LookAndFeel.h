@@ -54,6 +54,12 @@ public:
     juce::Font getLabelFont (juce::Label&) override;
 
     void drawProgressBar (juce::Graphics&, juce::ProgressBar&, int width, int height, double progress, const juce::String& textToShow) override;
+
+    void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
+    int getAlertWindowButtonHeight() override { return 32; }
+    juce::Font getAlertWindowTitleFont() override { return uiFont (17.0f, true); }
+    juce::Font getAlertWindowMessageFont() override { return uiFont (14.5f); }
+    juce::Font getAlertWindowFont() override { return uiFont (14.0f); }
 };
 
 /** A small round "LED" power switch used on every effect module. */

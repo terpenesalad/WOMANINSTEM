@@ -11,9 +11,10 @@ SeparationOverlay::SeparationOverlay()
     setInterceptsMouseClicks (true, true);
 }
 
-void SeparationOverlay::start (const juce::String& songTitle)
+void SeparationOverlay::start (const juce::String& songTitle, const juce::String& h)
 {
     title = songTitle;
+    heading = h;
     stage = "Starting...";
     detail.clear();
     progress = 0.0f;
@@ -58,7 +59,7 @@ void SeparationOverlay::paint (juce::Graphics& g)
 
     g.setColour (theme::accent);
     g.setFont (uiFont (12.0f, true));
-    g.drawText ("SPLITTING INTO STEMS", r.removeFromTop (18.0f), juce::Justification::centredLeft);
+    g.drawText (heading, r.removeFromTop (18.0f), juce::Justification::centredLeft);
 
     g.setColour (theme::text);
     g.setFont (uiFont (22.0f, true));

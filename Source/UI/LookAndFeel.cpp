@@ -267,6 +267,31 @@ void WisLookAndFeel::drawProgressBar (juce::Graphics& g, juce::ProgressBar&, int
     }
 }
 
+void WisLookAndFeel::drawAlertBox (juce::Graphics& g, juce::AlertWindow& alert, const juce::Rectangle<int>& textArea, juce::TextLayout& layout)
+{
+    auto bounds = alert.getLocalBounds().toFloat();
+    g.setColour (theme::panel);
+    g.fillRoundedRectangle (bounds, 10.0f);
+    g.setColour (theme::outline);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 10.0f, 1.0f);
+
+    juce::Colour accentCol = theme::accent;
+    switch (alert.getAlertType())
+    {
+        case juce::MessageBoxIconType::WarningIcon:  accentCol = theme::warn;    break;
+        case juce::MessageBoxIconType::QuestionIcon: accentCol = theme::accent2; break;
+        case juce::MessageBoxIconType::InfoIcon:
+        case juce::MessageBoxIconType::NoIcon:
+        default: break;
+    }
+
+    g.setColour (accentCol);
+    g.fillRoundedRectangle (bounds.withHeight (4.0f).reduced (14.0f, 0.0f), 2.0f);
+
+    g.setColour (theme::text);
+    layout.draw (g, textArea.toFloat());
+}
+
 // ---- PowerButton ------------------------------------------------------------------------------------
 
 void PowerButton::paintButton (juce::Graphics& g, bool over, bool)

@@ -512,7 +512,7 @@ void MainComponent::openFile (const juce::File& file)
     s.splitBackingVocals = true;
 
     const double rate = engine.getSampleRate() > 0 ? engine.getSampleRate() : 48000.0;
-    startJob (std::make_unique<SongJob> (SongJob::Kind::openFile, file, SongInfo {}, s, rate), file.getFileNameWithoutExtension());
+    startJob (std::make_unique<SongJob> (SongJob::Kind::openFile, file, SongInfo {}, s, rate), file.getFileNameWithoutExtension(), "SPLITTING INTO STEMS");
 }
 
 void MainComponent::openFromLibrary (const SongInfo& info)
@@ -520,7 +520,7 @@ void MainComponent::openFromLibrary (const SongInfo& info)
     if (job != nullptr) return;
     if (libraryWindow != nullptr) libraryWindow->exitModalState (0);
     const double rate = engine.getSampleRate() > 0 ? engine.getSampleRate() : 48000.0;
-    startJob (std::make_unique<SongJob> (SongJob::Kind::openLibrary, juce::File(), info, SeparationSettings {}, rate), info.displayName());
+    startJob (std::make_unique<SongJob> (SongJob::Kind::openLibrary, juce::File(), info, SeparationSettings {}, rate), info.displayName(), "OPENING FROM YOUR LIBRARY");
 }
 
 void MainComponent::rebuildForSampleRate()
@@ -530,14 +530,16 @@ void MainComponent::rebuildForSampleRate()
         return;
 
     startJob (std::make_unique<SongJob> (SongJob::Kind::rebuild, juce::File(), currentInfo, SeparationSettings {}, pendingRate),
-              currentInfo.displayName());
+              currentInfo.displayName(), "PREPARING FOR " + juce::String (pendingRate / 1000.0, 1) + " KHZ");
 }
 
-void MainComponent::startJob (std::unique_ptr<SongJob> j, const juce::String& title)
+void MainComponent::startJob (std::unique_ptr<SongJob> j, const juce::String& title, const juce::String& heading)
 {
     job = std::move (j);
     job->onDone = [safe = juce::Component::SafePointer<MainComponent> (this)] { if (safe != nullptr) safe->jobFinished(); };
-    overlay.start (title);
+    overlay.start (title, heading);
+    if (! heading.startsWith ("SPLITTING"))
+        overlay.setDetail ("Loading your stems - this only takes a moment.");
     overlay.setVisible (true);
     overlay.toFront (false);
     player.pause();

@@ -11,7 +11,7 @@ class SeparationOverlay : public juce::Component
 public:
     SeparationOverlay();
 
-    void start (const juce::String& songTitle);
+    void start (const juce::String& songTitle, const juce::String& heading = "SPLITTING INTO STEMS");
     void update (float progress01, const juce::String& stage);
     void setDetail (const juce::String& text) { detail = text; repaint(); }
 
@@ -22,7 +22,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override {}   // swallow clicks
 
 private:
-    juce::String title, stage, detail;
+    juce::String title, heading, stage, detail;
     float progress = 0.0f;
     double startTime = 0.0;
     float rateEstimate = 0.0f;   // progress per second, smoothed
