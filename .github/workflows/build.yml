@@ -1,0 +1,154 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish releases
+
+env:
+  MODEL_URL: https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/main/ggml-model-htdemucs-6s-f16.bin
+  MODEL_FILE: ggml-model-htdemucs-6s-f16.bin
+  ASIO_URL: https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip
+  ASIO_SHA256: d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca
+
+jobs:
+  windows:
+    name: Windows x64 (exe + installer)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-win-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Cache stem model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: model-htdemucs-6s-f16-v1
+
+      - name: Download stem model (Demucs v4 6-stem, 55 MB)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path models | Out-Null
+          Invoke-WebRequest -Uri $env:MODEL_URL -OutFile "models/$env:MODEL_FILE"
+          (Get-Item "models/$env:MODEL_FILE").Length
+
+      - name: Get the ASIO SDK (GPLv3) for low-latency audio
+        id: asio
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Invoke-WebRequest -Uri $env:ASIO_URL -OutFile asiosdk.zip
+          $hash = (Get-FileHash asiosdk.zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:ASIO_SHA256) { throw "ASIO SDK checksum mismatch: $hash" }
+          Expand-Archive asiosdk.zip -DestinationPath asio
+          $dir = (Get-ChildItem -Path asio -Recurse -Filter iasiodrv.h | Select-Object -First 1).Directory.Parent.FullName
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+          Write-Host "ASIO SDK at $dir"
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $asio = "${{ steps.asio.outputs.dir }}"
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWIS_ASIO_SDK_DIR="$asio"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test - rig DSP, tuner, player, engine
+        run: build\rigtest_artefacts\Release\rigtest.exe
+
+      - name: Test - end-to-end stem separation
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:APPDATA\WOMANINSTEM\models" | Out-Null
+          Copy-Item "models/$env:MODEL_FILE" "$env:APPDATA\WOMANINSTEM\models\"
+          build\stemsplit_artefacts\Release\stemsplit.exe --selftest selftest-out
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(WOMANINSTEM VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          "VERSION=$ver" >> $env:GITHUB_ENV
+          $d = "dist/WOMANINSTEM"
+          New-Item -ItemType Directory -Force -Path "$d/models" | Out-Null
+          Copy-Item build/WOMANINSTEM_artefacts/Release/WOMANINSTEM.exe $d/
+          Copy-Item build/stemsplit_artefacts/Release/stemsplit.exe $d/
+          Copy-Item "models/$env:MODEL_FILE" "$d/models/"
+          Copy-Item LICENSE "$d/LICENSE.txt"
+          Copy-Item THIRD_PARTY_NOTICES.md "$d/THIRD_PARTY_NOTICES.txt"
+          Copy-Item packaging/README.txt "$d/README.txt"
+          Compress-Archive -Path $d -DestinationPath "dist/WOMANINSTEM-$ver-windows-x64.zip" -Force
+          Get-ChildItem dist
+
+      - name: Build installer
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /DAppVersion=$env:VERSION /DSourceDir="$PWD\dist\WOMANINSTEM" /O"$PWD\dist" packaging\installer.iss
+          Get-ChildItem dist
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: WOMANINSTEM-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WOMANINSTEM ${{ github.ref_name }}
+          body_path: packaging/RELEASE_NOTES.md
+          files: |
+            dist/*.zip
+            dist/*-setup.exe
+
+  linux:
+    name: Linux (build + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libgl1-mesa-dev libcurl4-openssl-dev ninja-build
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-linux-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure & build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Test - rig DSP, tuner, player, engine
+        run: ./build/rigtest_artefacts/Release/rigtest
+
+      - name: Test - end-to-end stem separation (downloads the model)
+        run: ./build/stemsplit_artefacts/Release/stemsplit --selftest selftest-out

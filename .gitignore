@@ -1,0 +1,13 @@
+build/
+build-*/
+dist/
+models/
+asio/
+asiosdk.zip
+selftest-out/
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeUserPresets.json
+.DS_Store

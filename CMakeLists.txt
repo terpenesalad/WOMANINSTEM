@@ -1,0 +1,215 @@
+cmake_minimum_required(VERSION 3.24)
+
+# ------------------------------------------------------------------------------
+#  WOMANINSTEM - stem separation + play-along amp rig
+# ------------------------------------------------------------------------------
+project(WOMANINSTEM VERSION 1.0.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+option(WIS_BUILD_APP   "Build the GUI application"                      ON)
+option(WIS_BUILD_TOOLS "Build command line tools (stem CLI, DSP tests)"   ON)
+option(WIS_AVX2        "Compile with AVX2 (much faster separation)"       ON)
+set(WIS_ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK (folder containing 'common'). Enables ASIO on Windows.")
+
+if(MSVC)
+    # Static runtime -> single self-contained exe, no VC++ redistributable needed.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+include(FetchContent)
+set(FETCHCONTENT_QUIET OFF)
+
+# ---- Dependencies ------------------------------------------------------------
+# JUCE: application framework, audio I/O (ASIO/WASAPI), audio file decoding, DSP.
+FetchContent_Declare(juce
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG        8.0.9
+    GIT_SHALLOW    ON)
+
+# Eigen: linear algebra used by both Demucs and NAM (header only).
+FetchContent_Declare(eigen
+    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+    GIT_TAG        3.4.0
+    GIT_SHALLOW    ON
+    SOURCE_SUBDIR  do-not-build)   # header only; never run Eigen's own CMake
+
+# demucs.cpp: C++ inference for Meta's Demucs v4 hybrid transformer (6-stem model).
+FetchContent_Declare(demucs
+    GIT_REPOSITORY https://github.com/sevagh/demucs.cpp.git
+    GIT_TAG        f1206e9adeea103aef4a636b9e62297cf1f8e34e
+    SOURCE_SUBDIR  do-not-build)   # we compile its sources ourselves
+
+# Neural Amp Modeler core: real-time inference of .nam amp captures.
+FetchContent_Declare(nam
+    GIT_REPOSITORY https://github.com/sdatkinson/NeuralAmpModelerCore.git
+    GIT_TAG        v0.6.0
+    GIT_SHALLOW    ON
+    SOURCE_SUBDIR  do-not-build)
+
+# Signalsmith Stretch: high quality time-stretch / pitch-shift for practice speed + transpose.
+FetchContent_Declare(signalsmith-stretch
+    GIT_REPOSITORY https://github.com/Signalsmith-Audio/signalsmith-stretch.git
+    GIT_TAG        1.4.0
+    GIT_SHALLOW    ON)
+
+# r8brain: high quality sample-rate conversion (file -> 44.1 kHz for Demucs, stems -> device rate).
+FetchContent_Declare(r8brain
+    GIT_REPOSITORY https://github.com/avaneev/r8brain-free-src.git
+    GIT_TAG        version-6.5
+    GIT_SHALLOW    ON
+    SOURCE_SUBDIR  do-not-build)
+
+FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain)
+
+set(EIGEN_DIR  "${eigen_SOURCE_DIR}")
+set(DEMUCS_DIR "${demucs_SOURCE_DIR}")
+set(NAM_DIR    "${nam_SOURCE_DIR}")
+set(R8B_DIR    "${r8brain_SOURCE_DIR}")
+
+# ---- Common optimisation flags for the heavy maths libraries -----------------
+function(wis_fast_math target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast /bigobj /permissive- /Zc:__cplusplus /utf-8)
+        if(WIS_AVX2)
+            target_compile_options(${target} PRIVATE /arch:AVX2)
+        endif()
+        target_compile_definitions(${target} PRIVATE _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+    else()
+        target_compile_options(${target} PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-O3> -fno-signed-zeros -freciprocal-math -w)
+        if(WIS_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+            target_compile_options(${target} PRIVATE -mavx2 -mfma)
+        endif()
+    endif()
+endfunction()
+
+# ---- demucs library ----------------------------------------------------------
+file(GLOB DEMUCS_SOURCES "${DEMUCS_DIR}/src/*.cpp")
+add_library(wis_demucs STATIC ${DEMUCS_SOURCES})
+target_include_directories(wis_demucs SYSTEM PUBLIC "${EIGEN_DIR}" "${DEMUCS_DIR}/src")
+target_compile_definitions(wis_demucs PUBLIC EIGEN_MPL2_ONLY NDEBUG)
+wis_fast_math(wis_demucs)
+
+# ---- NAM library -------------------------------------------------------------
+file(GLOB NAM_SOURCES "${NAM_DIR}/NAM/*.cpp" "${NAM_DIR}/NAM/wavenet/*.cpp")
+add_library(wis_nam STATIC ${NAM_SOURCES})
+target_include_directories(wis_nam SYSTEM PUBLIC "${EIGEN_DIR}" "${NAM_DIR}" "${NAM_DIR}/Dependencies/nlohmann")
+target_compile_definitions(wis_nam PUBLIC NAM_SAMPLE_FLOAT NAM_ENABLE_A2_FAST)
+wis_fast_math(wis_nam)
+
+# ---- JUCE --------------------------------------------------------------------
+FetchContent_MakeAvailable(juce)
+
+# Sources shared by the GUI app and the command line tools (no GUI code here).
+set(WIS_ENGINE_SOURCES
+    Source/Separation/AudioFileLoader.cpp
+    Source/Separation/ModelManager.cpp
+    Source/Separation/StemSeparator.cpp
+    Source/Separation/VocalSplitter.cpp
+    Source/Library/SongLibrary.cpp
+    Source/Rig/AmpModels.cpp
+    Source/Rig/CabSim.cpp
+    Source/Rig/NamAmp.cpp
+    Source/Rig/RigProcessor.cpp
+    Source/Rig/Tuner.cpp
+    Source/Engine/AudioEngine.cpp
+    Source/Engine/StemPlayer.cpp
+    Source/Engine/Recorder.cpp)
+
+set(WIS_JUCE_DEFS
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=1
+    JUCE_LOAD_CURL_SYMBOLS_LAZILY=1
+    JUCE_USE_MP3AUDIOFORMAT=1
+    JUCE_USE_FLAC=1
+    JUCE_USE_OGGVORBIS=1
+    JUCE_USE_WINDOWS_MEDIA_FORMAT=1
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_REPORT_APP_USAGE=0
+    JUCE_STRICT_REFCOUNTEDPOINTER=1
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    WIS_VERSION_STRING="${PROJECT_VERSION}")
+
+set(WIS_JUCE_MODULES
+    juce::juce_audio_basics
+    juce::juce_audio_devices
+    juce::juce_audio_formats
+    juce::juce_audio_processors
+    juce::juce_audio_utils
+    juce::juce_core
+    juce::juce_cryptography
+    juce::juce_data_structures
+    juce::juce_dsp
+    juce::juce_events
+    juce::juce_graphics
+    juce::juce_gui_basics
+    juce::juce_gui_extra)
+
+function(wis_configure_target target)
+    target_include_directories(${target} PRIVATE Source)
+    target_include_directories(${target} SYSTEM PRIVATE "${R8B_DIR}")
+    target_compile_definitions(${target} PRIVATE ${WIS_JUCE_DEFS})
+    target_link_libraries(${target} PRIVATE wis_demucs wis_nam signalsmith-stretch ${WIS_JUCE_MODULES}
+        juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /bigobj /utf-8 /Zc:__cplusplus /fp:fast)
+        if(WIS_AVX2)
+            target_compile_options(${target} PRIVATE /arch:AVX2)
+        endif()
+        target_compile_definitions(${target} PRIVATE _USE_MATH_DEFINES NOMINMAX)
+    elseif(WIS_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        target_compile_options(${target} PRIVATE -mavx2 -mfma)
+    endif()
+    if(WIS_ASIO_SDK_DIR AND WIN32)
+        target_include_directories(${target} PRIVATE "${WIS_ASIO_SDK_DIR}/common")
+        target_compile_definitions(${target} PRIVATE JUCE_ASIO=1)
+    endif()
+endfunction()
+
+# ---- GUI application -------------------------------------------------------------
+if(WIS_BUILD_APP)
+    juce_add_gui_app(WOMANINSTEM
+        PRODUCT_NAME          "WOMANINSTEM"
+        COMPANY_NAME          "WOMANINSTEM"
+        BUNDLE_ID             "com.womaninstem.app"
+        VERSION               "${PROJECT_VERSION}"
+        ICON_BIG              "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "WOMANINSTEM needs audio input to hear your instrument.")
+
+    target_sources(WOMANINSTEM PRIVATE
+        Source/Main.cpp
+        Source/UI/MainComponent.cpp
+        Source/UI/LookAndFeel.cpp
+        Source/UI/WaveformView.cpp
+        Source/UI/StemMixer.cpp
+        Source/UI/RigPanel.cpp
+        Source/UI/TunerView.cpp
+        Source/UI/SeparationOverlay.cpp
+        Source/UI/LibraryView.cpp
+        ${WIS_ENGINE_SOURCES})
+    wis_configure_target(WOMANINSTEM)
+    target_compile_definitions(WOMANINSTEM PRIVATE
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:WOMANINSTEM,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:WOMANINSTEM,JUCE_VERSION>")
+endif()
+
+# ---- Command line tools --------------------------------------------------------
+if(WIS_BUILD_TOOLS)
+    # stemsplit: headless separation (batch use, and the CI smoke test)
+    juce_add_console_app(stemsplit PRODUCT_NAME "stemsplit")
+    target_sources(stemsplit PRIVATE Tools/StemSplitCli.cpp ${WIS_ENGINE_SOURCES})
+    wis_configure_target(stemsplit)
+
+    # rigtest: renders test signals through every rig block and checks the output is sane
+    juce_add_console_app(rigtest PRODUCT_NAME "rigtest")
+    target_sources(rigtest PRIVATE Tools/RigTest.cpp ${WIS_ENGINE_SOURCES})
+    wis_configure_target(rigtest)
+endif()
