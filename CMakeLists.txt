@@ -32,19 +32,22 @@ set(FETCHCONTENT_QUIET OFF)
 FetchContent_Declare(juce
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG        8.0.9
-    GIT_SHALLOW    ON)
+    GIT_SHALLOW    ON
+    GIT_SUBMODULES "")
 
 # Eigen: linear algebra used by both Demucs and NAM (header only).
 FetchContent_Declare(eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
     GIT_TAG        3.4.0
     GIT_SHALLOW    ON
+    GIT_SUBMODULES ""
     SOURCE_SUBDIR  do-not-build)   # header only; never run Eigen's own CMake
 
 # demucs.cpp: C++ inference for Meta's Demucs v4 hybrid transformer (6-stem model).
 FetchContent_Declare(demucs
     GIT_REPOSITORY https://github.com/sevagh/demucs.cpp.git
     GIT_TAG        f1206e9adeea103aef4a636b9e62297cf1f8e34e
+    GIT_SUBMODULES ""              # its vendored deps (eigen, pytorch demucs, gtest...) aren't needed
     SOURCE_SUBDIR  do-not-build)   # we compile its sources ourselves
 
 # Neural Amp Modeler core: real-time inference of .nam amp captures.
@@ -52,19 +55,22 @@ FetchContent_Declare(nam
     GIT_REPOSITORY https://github.com/sdatkinson/NeuralAmpModelerCore.git
     GIT_TAG        v0.6.0
     GIT_SHALLOW    ON
+    GIT_SUBMODULES ""
     SOURCE_SUBDIR  do-not-build)
 
 # Signalsmith Stretch: high quality time-stretch / pitch-shift for practice speed + transpose.
 FetchContent_Declare(signalsmith-stretch
     GIT_REPOSITORY https://github.com/Signalsmith-Audio/signalsmith-stretch.git
     GIT_TAG        1.4.0
-    GIT_SHALLOW    ON)
+    GIT_SHALLOW    ON
+    GIT_SUBMODULES "")
 
 # r8brain: high quality sample-rate conversion (file -> 44.1 kHz for Demucs, stems -> device rate).
 FetchContent_Declare(r8brain
     GIT_REPOSITORY https://github.com/avaneev/r8brain-free-src.git
     GIT_TAG        version-6.5
     GIT_SHALLOW    ON
+    GIT_SUBMODULES ""
     SOURCE_SUBDIR  do-not-build)
 
 FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain)
