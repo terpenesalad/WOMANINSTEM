@@ -11,6 +11,7 @@
 #endif
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 namespace wis
@@ -93,101 +94,127 @@ bool StemSeparator::runModel (ModelId id, const juce::AudioBuffer<float>& mix, i
     const int numSources = model->is_4sources ? 4 : 6;
     const int total = mix.getNumSamples();
 
-    // ---- split into overlapping chunks, one per worker ---------------------------------------
-    const int overlap   = (int) (demucscpp::SUPPORTED_SAMPLE_RATE * 1.0);     // 1 s crossfade between chunks
-    const int minChunk  = (int) (demucscpp::SUPPORTED_SAMPLE_RATE * 15.0);    // don't bother splitting tiny chunks
-    const int workers   = juce::jlimit (1, juce::jmax (1, numThreads), juce::jmax (1, total / minChunk));
-    const int coreLen   = (total + workers - 1) / workers;
+    // ---- work queue of overlapping ~30 s chunks ------------------------------------------------
+    // Short chunks keep each worker's memory small and balance the load; each finished chunk is
+    // cross-faded straight into the output and freed.
+    const int overlap   = (int) (demucscpp::SUPPORTED_SAMPLE_RATE * 1.0);     // 1 s crossfade either side
+    const int chunkLen  = (int) (demucscpp::SUPPORTED_SAMPLE_RATE * 30.0);
+    const int numChunks = juce::jmax (1, (total + chunkLen - 1) / chunkLen);
+    const int coreLen   = (total + numChunks - 1) / numChunks;                // equalise chunk sizes
+    const int workers   = juce::jlimit (1, numChunks, juce::jmax (1, numThreads));
 
-    struct Chunk
+    sourcesOut.clear();
+    for (int s = 0; s < numSources; ++s)
     {
-        int coreStart = 0, coreEnd = 0;   // the region this chunk "owns"
-        int padStart = 0, padEnd = 0;     // the region actually processed (with overlap)
-        Eigen::MatrixXf input;
-        Eigen::Tensor3dXf output;
-        bool failed = false;
-        std::string failure;
+        sourcesOut.emplace_back (2, total);
+        sourcesOut.back().clear();
+    }
+    std::vector<float> weightSum ((size_t) total, 0.0f);
+    std::mutex accumulateLock;
+
+    std::vector<std::atomic<float>> chunkProgress ((size_t) numChunks);
+    for (auto& p : chunkProgress) p.store (0.0f);
+
+    std::atomic<int> nextChunk { 0 };
+    std::atomic<bool> cancelFlag { false }, failed { false };
+    std::atomic<int> activeWorkers { workers };
+    std::mutex failureLock;
+    juce::String failure;
+
+    auto setFailure = [&] (const juce::String& f)
+    {
+        const std::lock_guard<std::mutex> l (failureLock);
+        if (failure.isEmpty()) failure = f;
+        failed = true;
+        cancelFlag = true;
     };
 
-    std::vector<Chunk> chunks ((size_t) workers);
-    for (int w = 0; w < workers; ++w)
+    auto processChunk = [&] (int idx)
     {
-        auto& c = chunks[(size_t) w];
-        c.coreStart = w * coreLen;
-        c.coreEnd   = juce::jmin (total, c.coreStart + coreLen);
-        c.padStart  = juce::jmax (0, c.coreStart - overlap);
-        c.padEnd    = juce::jmin (total, c.coreEnd + overlap);
+        const int coreStart = idx * coreLen;
+        const int coreEnd   = juce::jmin (total, coreStart + coreLen);
+        const int padStart  = juce::jmax (0, coreStart - overlap);
+        const int padEnd    = juce::jmin (total, coreEnd + overlap);
+        const int len = padEnd - padStart;
 
-        const int len = c.padEnd - c.padStart;
-        c.input.resize (2, len);
-
-        auto* l = mix.getReadPointer (0, c.padStart);
-        auto* r = mix.getReadPointer (1, c.padStart);
+        Eigen::MatrixXf input (2, len);
+        auto* l = mix.getReadPointer (0, padStart);
+        auto* r = mix.getReadPointer (1, padStart);
 
         // A fully silent chunk would make Demucs' normalisation divide by zero, so add inaudible dither.
-        juce::Random rng ((juce::int64) w * 7919 + 17);
+        juce::Random rng ((juce::int64) idx * 7919 + 17);
         for (int i = 0; i < len; ++i)
         {
-            c.input (0, i) = l[i] + (rng.nextFloat() - 0.5f) * 2.0e-6f;
-            c.input (1, i) = r[i] + (rng.nextFloat() - 0.5f) * 2.0e-6f;
+            input (0, i) = l[i] + (rng.nextFloat() - 0.5f) * 2.0e-6f;
+            input (1, i) = r[i] + (rng.nextFloat() - 0.5f) * 2.0e-6f;
         }
-    }
 
-    // ---- run workers ----------------------------------------------------------------------------
-    std::vector<std::atomic<float>> workerProgress ((size_t) workers);
-    for (auto& p : workerProgress) p.store (0.0f);
+        demucscpp::ProgressCallback cb = [&, idx] (float p, const std::string&)
+        {
+            chunkProgress[(size_t) idx].store (juce::jlimit (0.0f, 0.99f, p));
+            if (cancelFlag.load())
+                throw CancelledException {};
+        };
 
-    std::atomic<bool> cancelFlag { false };
+        Eigen::Tensor3dXf output = demucscpp::demucs_inference (*model, input, cb);
+        input.resize (0, 0);
+
+        const int fadeIn  = coreStart - padStart;   // 0 for the first chunk
+        const int fadeOut = padEnd - coreEnd;       // 0 for the last chunk
+
+        const std::lock_guard<std::mutex> lock (accumulateLock);
+        for (int i = 0; i < len; ++i)
+        {
+            float wgt = 1.0f;
+            // linear ramps spanning 2x overlap, centred on the boundary -> neighbours sum to 1
+            if (fadeIn > 0 && i < 2 * fadeIn)
+                wgt = juce::jmin (wgt, (float) (i + 1) / (float) (2 * fadeIn + 1));
+            if (fadeOut > 0 && i >= len - 2 * fadeOut)
+                wgt = juce::jmin (wgt, (float) (len - i) / (float) (2 * fadeOut + 1));
+
+            const int g = padStart + i;
+            weightSum[(size_t) g] += wgt;
+            for (int s = 0; s < numSources; ++s)
+            {
+                sourcesOut[(size_t) s].getWritePointer (0)[g] += output (s, 0, i) * wgt;
+                sourcesOut[(size_t) s].getWritePointer (1)[g] += output (s, 1, i) * wgt;
+            }
+        }
+        chunkProgress[(size_t) idx].store (1.0f);
+    };
+
     std::vector<std::thread> threads;
-
     for (int w = 0; w < workers; ++w)
     {
-        threads.emplace_back ([&, w]
+        threads.emplace_back ([&]
         {
-            auto& c = chunks[(size_t) w];
-
-            demucscpp::ProgressCallback cb = [&, w] (float p, const std::string&)
+            for (;;)
             {
-                workerProgress[(size_t) w].store (juce::jlimit (0.0f, 1.0f, p));
-                if (cancelFlag.load())
-                    throw CancelledException {};
-            };
+                const int idx = nextChunk.fetch_add (1);
+                if (idx >= numChunks || cancelFlag.load())
+                    break;
 
-            try
-            {
-                c.output = demucscpp::demucs_inference (*model, c.input, cb);
-                workerProgress[(size_t) w].store (1.0f);
+                try                               { processChunk (idx); }
+                catch (const CancelledException&) { break; }
+                catch (const std::bad_alloc&)     { setFailure ("Out of memory"); break; }
+                catch (const std::exception& e)   { setFailure (e.what()); break; }
+                catch (...)                       { setFailure ("Unknown error"); break; }
             }
-            catch (const CancelledException&) { c.failed = true; c.failure = "Cancelled"; }
-            catch (const std::bad_alloc&)     { c.failed = true; c.failure = "Out of memory"; cancelFlag = true; }
-            catch (const std::exception& e)   { c.failed = true; c.failure = e.what(); cancelFlag = true; }
-            catch (...)                       { c.failed = true; c.failure = "Unknown error"; cancelFlag = true; }
+            --activeWorkers;
         });
     }
 
     // Poll progress / cancellation from this (coordinating) thread.
-    for (;;)
+    while (activeWorkers.load() > 0)
     {
-        bool allDone = true;
         float sum = 0.0f;
-        for (auto& p : workerProgress)
-        {
-            const float v = p.load();
-            sum += v;
-            allDone = allDone && v >= 1.0f;
-        }
-
-        bool anyFailed = false;
-        for (auto& c : chunks) anyFailed = anyFailed || c.failed;
+        for (auto& p : chunkProgress) sum += p.load();
 
         if (progress)
-            progress (progressStart + (progressEnd - progressStart) * (sum / (float) workers), stage);
+            progress (progressStart + (progressEnd - progressStart) * (sum / (float) numChunks), stage);
 
         if (shouldCancel && shouldCancel())
             cancelFlag = true;
-
-        if (allDone || anyFailed || cancelFlag.load())
-            break;
 
         std::this_thread::sleep_for (std::chrono::milliseconds (150));
     }
@@ -195,61 +222,18 @@ bool StemSeparator::runModel (ModelId id, const juce::AudioBuffer<float>& mix, i
     for (auto& t : threads)
         t.join();
 
-    for (auto& c : chunks)
+    if (failed.load())
     {
-        if (c.failed)
-        {
-            error = c.failure == "Out of memory"
-                  ? juce::String ("Ran out of memory while separating. Close other programs, or lower the thread count in Settings.")
-                  : juce::String (c.failure);
-            return false;
-        }
+        error = failure == "Out of memory"
+              ? juce::String ("Ran out of memory while separating. Close other programs and try again.")
+              : failure;
+        return false;
     }
 
     if (cancelFlag.load() || (shouldCancel && shouldCancel()))
     {
         error = "Cancelled";
         return false;
-    }
-
-    // ---- overlap-add the chunks back together with linear crossfades -----------------------------
-    sourcesOut.clear();
-    for (int s = 0; s < numSources; ++s)
-    {
-        sourcesOut.emplace_back (2, total);
-        sourcesOut.back().clear();
-    }
-
-    std::vector<float> weightSum ((size_t) total, 0.0f);
-
-    for (int w = 0; w < workers; ++w)
-    {
-        auto& c = chunks[(size_t) w];
-        const int len = c.padEnd - c.padStart;
-        const int fadeIn  = c.coreStart - c.padStart;   // 0 for the first chunk
-        const int fadeOut = c.padEnd - c.coreEnd;       // 0 for the last chunk
-
-        for (int i = 0; i < len; ++i)
-        {
-            float wgt = 1.0f;
-            // ramps span 2x overlap centred on the chunk boundary
-            if (fadeIn > 0 && i < 2 * fadeIn)
-                wgt = juce::jmin (wgt, (float) (i + 1) / (float) (2 * fadeIn + 1));
-            if (fadeOut > 0 && i >= len - 2 * fadeOut)
-                wgt = juce::jmin (wgt, (float) (len - i) / (float) (2 * fadeOut + 1));
-
-            const int g = c.padStart + i;
-            weightSum[(size_t) g] += wgt;
-
-            for (int s = 0; s < numSources; ++s)
-            {
-                sourcesOut[(size_t) s].getWritePointer (0)[g] += c.output (s, 0, i) * wgt;
-                sourcesOut[(size_t) s].getWritePointer (1)[g] += c.output (s, 1, i) * wgt;
-            }
-        }
-
-        c.output = Eigen::Tensor3dXf();   // free memory early
-        c.input.resize (0, 0);
     }
 
     size_t badSamples = 0;
