@@ -38,9 +38,11 @@ FetchContent_Declare(juce
 # Eigen: linear algebra used by both Demucs and NAM (header only).
 FetchContent_Declare(eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG        3.4.0
+    GIT_TAG        3.4.1
     GIT_SHALLOW    ON
     GIT_SUBMODULES ""
+    PATCH_COMMAND  ${CMAKE_COMMAND} -DEIGEN_SRC=<SOURCE_DIR> -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchEigen.cmake
+    UPDATE_DISCONNECTED ON
     SOURCE_SUBDIR  do-not-build)   # header only; never run Eigen's own CMake
 
 # demucs.cpp: C++ inference for Meta's Demucs v4 hybrid transformer (6-stem model).
@@ -68,14 +70,16 @@ FetchContent_Declare(signalsmith-stretch
 # r8brain: high quality sample-rate conversion (file -> 44.1 kHz for Demucs, stems -> device rate).
 FetchContent_Declare(r8brain
     GIT_REPOSITORY https://github.com/avaneev/r8brain-free-src.git
-    GIT_TAG        version-6.5
-    GIT_SHALLOW    ON
+    GIT_TAG        cb2abb9977efe2471979b380ed95daa56ab4fdb9   # header-only (no r8bbase.cpp needed)
     GIT_SUBMODULES ""
     SOURCE_SUBDIR  do-not-build)
 
 FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain)
 
 set(EIGEN_DIR  "${eigen_SOURCE_DIR}")
+if(FETCHCONTENT_SOURCE_DIR_EIGEN)   # local override: PATCH_COMMAND doesn't run, so patch here (idempotent)
+    execute_process(COMMAND ${CMAKE_COMMAND} -DEIGEN_SRC=${EIGEN_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchEigen.cmake)
+endif()
 set(DEMUCS_DIR "${demucs_SOURCE_DIR}")
 set(NAM_DIR    "${nam_SOURCE_DIR}")
 set(R8B_DIR    "${r8brain_SOURCE_DIR}")
@@ -165,7 +169,8 @@ function(wis_configure_target target)
     target_link_libraries(${target} PRIVATE wis_demucs wis_nam signalsmith-stretch ${WIS_JUCE_MODULES}
         juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /bigobj /utf-8 /Zc:__cplusplus /fp:fast)
+        # no fast-math here: the real-time code relies on std::isfinite() as a safety net
+        target_compile_options(${target} PRIVATE /bigobj /utf-8 /Zc:__cplusplus)
         if(WIS_AVX2)
             target_compile_options(${target} PRIVATE /arch:AVX2)
         endif()

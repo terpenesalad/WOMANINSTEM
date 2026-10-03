@@ -65,11 +65,12 @@ jobs:
 
       # Every step below reports failures as an annotation containing the relevant log lines,
       # so problems are readable from the run summary / API without downloading logs.
-      - name: Configure
+      - name: Configure (clang-cl + MSVC libraries)
         shell: pwsh
         run: |
+          clang-cl --version
           $asio = "${{ steps.asio.outputs.dir }}"
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DWIS_ASIO_SDK_DIR="$asio" 2>&1 | Tee-Object -FilePath configure.log
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWIS_ASIO_SDK_DIR="$asio" 2>&1 | Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
             $msg = ((Get-Content configure.log | Select-Object -Last 70) -replace '%','%25') -join '%0A'
             Write-Host "::error title=Configure failed::$msg"
