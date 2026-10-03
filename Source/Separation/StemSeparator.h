@@ -54,6 +54,10 @@ public:
 
     static int defaultThreadCount();
 
+    /** Measured with `stemsplit --selftest --long --threads N` (see CI benchmark). */
+    static constexpr int baseMemoryMB = 1200;
+    static constexpr int perWorkerMemoryMB = 700;
+
 private:
     struct CancelledException {};
 

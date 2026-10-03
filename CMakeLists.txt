@@ -86,7 +86,16 @@ set(R8B_DIR    "${r8brain_SOURCE_DIR}")
 
 # ---- Common optimisation flags for the heavy maths libraries -----------------
 function(wis_fast_math target)
-    if(MSVC)
+    if(MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # clang-cl: same "safe" fast-math subset as GCC below. Full /fp:fast (-ffast-math) assumes no
+        # NaN/Inf and breaks Demucs' numerics.
+        target_compile_options(${target} PRIVATE /O2 /bigobj /Zc:__cplusplus /utf-8
+            /clang:-O3 /clang:-fno-signed-zeros /clang:-freciprocal-math /clang:-fno-math-errno -Wno-everything)
+        if(WIS_AVX2)
+            target_compile_options(${target} PRIVATE /arch:AVX2 /clang:-mfma)
+        endif()
+        target_compile_definitions(${target} PRIVATE _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+    elseif(MSVC)
         target_compile_options(${target} PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast /bigobj /permissive- /Zc:__cplusplus /utf-8)
         if(WIS_AVX2)
             target_compile_options(${target} PRIVATE /arch:AVX2)

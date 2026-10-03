@@ -23,7 +23,13 @@ int StemSeparator::defaultThreadCount()
 {
     const int hw = (int) std::max (1u, std::thread::hardware_concurrency());
     // Leave one core for the UI / audio; Demucs workers are single threaded each.
-    return juce::jlimit (1, 16, hw > 2 ? hw - 1 : hw);
+    const int byCores = juce::jlimit (1, 16, hw > 2 ? hw - 1 : hw);
+
+    // Each worker needs its own working memory; never plan to use more than ~60% of the RAM.
+    const int ramMB = juce::SystemStats::getMemorySizeInMegabytes();
+    const int byRam = ramMB > 0 ? juce::jmax (1, (int) ((ramMB * 0.6 - baseMemoryMB) / perWorkerMemoryMB)) : byCores;
+
+    return juce::jmin (byCores, byRam);
 }
 
 juce::Array<ModelId> StemSeparator::missingModels (SeparationQuality q)
@@ -246,14 +252,26 @@ bool StemSeparator::runModel (ModelId id, const juce::AudioBuffer<float>& mix, i
         c.input.resize (0, 0);
     }
 
+    size_t badSamples = 0;
     for (auto& buf : sourcesOut)
         for (int ch = 0; ch < 2; ++ch)
         {
             auto* d = buf.getWritePointer (ch);
             for (int i = 0; i < total; ++i)
+            {
                 if (weightSum[(size_t) i] > 0.0f)
                     d[i] /= weightSum[(size_t) i];
+                if (! std::isfinite (d[i])) { d[i] = 0.0f; ++badSamples; }
+            }
         }
+
+    // A handful of bad samples can be patched; lots means the model output is broken.
+    if (badSamples > (size_t) total / 100)
+    {
+        error = "The separation produced invalid audio (" + juce::String ((juce::int64) badSamples)
+              + " bad samples). Please report this on GitHub along with your CPU model.";
+        return false;
+    }
 
     return true;
 }
