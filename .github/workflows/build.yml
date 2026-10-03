@@ -59,25 +59,54 @@ jobs:
           "dir=$dir" >> $env:GITHUB_OUTPUT
           Write-Host "ASIO SDK at $dir"
 
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Every step below reports failures as an annotation containing the relevant log lines,
+      # so problems are readable from the run summary / API without downloading logs.
       - name: Configure
         shell: pwsh
         run: |
           $asio = "${{ steps.asio.outputs.dir }}"
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWIS_ASIO_SDK_DIR="$asio"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DWIS_ASIO_SDK_DIR="$asio" 2>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = ((Get-Content configure.log | Select-Object -Last 70) -replace '%','%25') -join '%0A'
+            Write-Host "::error title=Configure failed::$msg"
+            exit 1
+          }
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --parallel 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $errs = Get-Content build.log | Where-Object { $_ -match 'error|FAILED|fatal' } | Select-Object -First 60
+            if (-not $errs) { $errs = Get-Content build.log | Select-Object -Last 60 }
+            $msg = (($errs) -replace '%','%25') -join '%0A'
+            Write-Host "::error title=Build failed::$msg"
+            exit 1
+          }
 
       - name: Test - rig DSP, tuner, player, engine
-        run: build\rigtest_artefacts\Release\rigtest.exe
+        shell: pwsh
+        run: |
+          build\rigtest_artefacts\Release\rigtest.exe 2>&1 | Tee-Object -FilePath rigtest.log
+          $code = $LASTEXITCODE
+          $msg = ((Get-Content rigtest.log) -replace '%','%25') -join '%0A'
+          if ($code -ne 0) { Write-Host "::error title=rigtest failed::$msg"; exit 1 }
+          Write-Host "::notice title=rigtest (Windows)::$msg"
 
       - name: Test - end-to-end stem separation
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "$env:APPDATA\WOMANINSTEM\models" | Out-Null
           Copy-Item "models/$env:MODEL_FILE" "$env:APPDATA\WOMANINSTEM\models\"
-          build\stemsplit_artefacts\Release\stemsplit.exe --selftest selftest-out
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          build\stemsplit_artefacts\Release\stemsplit.exe --selftest selftest-out 2>&1 | Tee-Object -FilePath selftest.log
+          $code = $LASTEXITCODE
+          $msg = ((Get-Content selftest.log | Select-Object -Last 40) -replace '%','%25') -join '%0A'
+          if ($code -ne 0) { Write-Host "::error title=Separation self-test failed::$msg"; exit 1 }
+          Write-Host "::notice title=Separation self-test (Windows)::$msg"
 
       - name: Package
         shell: pwsh
@@ -144,11 +173,18 @@ jobs:
 
       - name: Configure & build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel
+          set -o pipefail
+          report() { echo "::error title=$1::$(grep -E 'error|FAILED|Error' "$2" | head -60 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log || report "Configure failed" configure.log
+          cmake --build build --parallel 2>&1 | tee build.log || report "Build failed" build.log
 
       - name: Test - rig DSP, tuner, player, engine
-        run: ./build/rigtest_artefacts/Release/rigtest
+        run: |
+          set -o pipefail
+          ./build/rigtest_artefacts/Release/rigtest 2>&1 | tee rigtest.log || { echo "::error title=rigtest failed::$(sed 's/%/%25/g' rigtest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
 
       - name: Test - end-to-end stem separation (downloads the model)
-        run: ./build/stemsplit_artefacts/Release/stemsplit --selftest selftest-out
+        run: |
+          set -o pipefail
+          ./build/stemsplit_artefacts/Release/stemsplit --selftest selftest-out 2>&1 | tee selftest.log || { echo "::error title=Separation self-test failed::$(tail -40 selftest.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+          echo "::notice title=Separation self-test (Linux)::$(tail -15 selftest.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')"
