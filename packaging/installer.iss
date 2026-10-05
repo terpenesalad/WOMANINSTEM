@@ -1,8 +1,8 @@
 ; Inno Setup script for WOMANINSTEM
-; Built by CI:  ISCC /DAppVersion=1.0.0 /DSourceDir=dist\WOMANINSTEM /Odist packaging\installer.iss
+; Built by CI:  ISCC /DAppVersion=2.0.0 /DSourceDir=dist\WOMANINSTEM /Odist packaging\installer.iss
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "2.0.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\WOMANINSTEM"
@@ -52,6 +52,11 @@ Root: HKA; Subkey: "Software\Classes\Applications\WOMANINSTEM.exe\shell\open\com
 Root: HKA; Subkey: "Software\Classes\.mp3\OpenWithList\WOMANINSTEM.exe"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\.flac\OpenWithList\WOMANINSTEM.exe"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\.wav\OpenWithList\WOMANINSTEM.exe"; Flags: uninsdeletekey; Tasks: openwith
+; Studio songs (.wisproj) open in WOMANINSTEM
+Root: HKA; Subkey: "Software\Classes\.wisproj"; ValueType: string; ValueName: ""; ValueData: "WOMANINSTEM.Song"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\WOMANINSTEM.Song"; ValueType: string; ValueName: ""; ValueData: "WOMANINSTEM Song"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\WOMANINSTEM.Song\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\WOMANINSTEM.exe,0"
+Root: HKA; Subkey: "Software\Classes\WOMANINSTEM.Song\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\WOMANINSTEM.exe"" ""%1"""
 
 [Run]
 Filename: "{app}\WOMANINSTEM.exe"; Description: "{cm:LaunchProgram,WOMANINSTEM}"; Flags: nowait postinstall skipifsilent

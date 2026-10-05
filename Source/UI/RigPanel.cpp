@@ -151,7 +151,7 @@ void EffectModule::resized()
 
 // ---- RigPanel ------------------------------------------------------------------------------------------
 
-RigPanel::RigPanel (RigProcessor& r, AudioEngine& e)
+RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     : rig (r), engine (e), state (r.getState())
 {
     title.setText ("YOUR RIG", juce::dontSendNotification);
@@ -172,14 +172,14 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine& e)
     inputBox.onChange = [this]
     {
         const int id = inputBox.getSelectedId();
-        engine.selectedInput = id == 900 ? AudioEngine::stereoSum : id == 901 ? AudioEngine::noInput : id - 1;
+        if (engine != nullptr) engine->selectedInput = id == 900 ? AudioEngine::stereoSum : id == 901 ? AudioEngine::noInput : id - 1;
     };
     inputModule->addExtra (inputBox, 0);
     inputModule->addKnob (pid::inputGain, "Gain");
     monitor.setClickingTogglesState (true);
     monitor.setToggleState (true, juce::dontSendNotification);
     monitor.setTooltip ("Hear your instrument through the rig");
-    monitor.onClick = [this] { engine.monitorOn = monitor.getToggleState(); };
+    monitor.onClick = [this] { if (engine != nullptr) engine->monitorOn = monitor.getToggleState(); };
     clipLed.setText ("CLIP", juce::dontSendNotification);
     clipLed.setFont (uiFont (10.0f, true));
     clipLed.setJustificationType (juce::Justification::centred);
@@ -290,11 +290,20 @@ RigPanel::~RigPanel()
 
 void RigPanel::refreshInputs()
 {
-    const int previous = engine.selectedInput.load();
+    if (engine == nullptr)
+    {
+        inputBox.clear (juce::dontSendNotification);
+        inputBox.addItem ("From the track's input", 1);
+        inputBox.setSelectedId (1, juce::dontSendNotification);
+        inputBox.setEnabled (false);
+        monitor.setVisible (false);
+        return;
+    }
+    const int previous = engine->selectedInput.load();
     inputBox.clear (juce::dontSendNotification);
 
-    auto names = engine.getActiveInputNames();
-    auto chans = engine.getActiveInputChannels();
+    auto names = engine->getActiveInputNames();
+    auto chans = engine->getActiveInputChannels();
     for (int i = 0; i < chans.size(); ++i)
         inputBox.addItem (names[i], chans[i] + 1);
     if (chans.size() >= 2)

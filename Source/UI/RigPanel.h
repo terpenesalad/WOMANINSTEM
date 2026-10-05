@@ -74,7 +74,8 @@ private:
 class RigPanel : public juce::Component, private juce::Timer
 {
 public:
-    RigPanel (RigProcessor& rig, AudioEngine& engine);
+    /** engine may be null when the rig is used as a Studio plugin (inputs then come from the track). */
+    RigPanel (RigProcessor& rig, AudioEngine* engine);
     ~RigPanel() override;
 
     void paint (juce::Graphics&) override;
@@ -95,7 +96,7 @@ private:
     void chooseIrFile();
 
     RigProcessor& rig;
-    AudioEngine& engine;
+    AudioEngine* engine;
     juce::AudioProcessorValueTreeState& state;
 
     // header

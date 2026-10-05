@@ -14,12 +14,15 @@ WOMANINSTEM is built on these open-source projects. Thank you to their authors.
 | [r8brain-free-src](https://github.com/avaneev/r8brain-free-src) by Aleksey Vaneev | High quality sample-rate conversion | MIT |
 | [ASIO SDK](https://www.steinberg.net/developers/) by Steinberg Media Technologies | Low-latency audio driver support on Windows | GPL-3.0 (or proprietary) |
 | libFLAC, Ogg Vorbis (bundled in JUCE) | FLAC / OGG decoding and encoding | BSD-style |
+| [TinySoundFont](https://github.com/schellingb/TinySoundFont) by Bernhard Schelling | SoundFont (`.sf2`) playback for the Studio's Sound Library | MIT |
+| [GeneralUser GS](https://www.schristiancollins.com/generaluser.php) v2.0.3 by S. Christian Collins | The built-in Sound Library: 287 General MIDI instruments and drum kits (bundled in `sounds/`) | GeneralUser GS License v2.0 (free for any use, see `sounds/GeneralUser-GS-LICENSE.txt`) |
+| VST3 SDK by Steinberg Media Technologies (bundled in JUCE) | Hosting VST3 instruments and effects in the Studio | BSD-style (the SDK subset bundled with JUCE) |
 
-ASIO is a trademark and software of Steinberg Media Technologies GmbH.
+ASIO and VST are trademarks of Steinberg Media Technologies GmbH.
 
 The separation model is downloaded from the
 [demucs.cpp weights on Hugging Face](https://huggingface.co/datasets/Retrobear/demucs.cpp) (converted from Meta's
 MIT-licensed Demucs checkpoints).
 
-Amp captures (`.nam`) and cabinet impulse responses you load are made by their respective authors and are subject
-to their own licenses; none are bundled with WOMANINSTEM.
+Amp captures (`.nam`), cabinet impulse responses, SoundFonts and VST3 plugins you load are made by their respective
+authors and are subject to their own licenses; apart from GeneralUser GS, none are bundled with WOMANINSTEM.

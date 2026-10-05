@@ -15,6 +15,9 @@ env:
   MODEL_FILE: ggml-model-htdemucs-6s-f16.bin
   ASIO_URL: https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip
   ASIO_SHA256: d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca
+  # GeneralUser GS v2.0.3 by S. Christian Collins - the built-in General MIDI sound library (32 MB, free license)
+  SF_COMMIT: 684543d5e5efaef08d02be50dcda8d552478fa60
+  SF_SHA256: 9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe
 
 jobs:
   windows:
@@ -45,6 +48,24 @@ jobs:
           New-Item -ItemType Directory -Force -Path models | Out-Null
           Invoke-WebRequest -Uri $env:MODEL_URL -OutFile "models/$env:MODEL_FILE"
           (Get-Item "models/$env:MODEL_FILE").Length
+
+      - name: Cache sound library
+        id: sf-cache
+        uses: actions/cache@v4
+        with:
+          path: sounds
+          key: generaluser-gs-${{ env.SF_COMMIT }}
+
+      - name: Download sound library (GeneralUser GS, 32 MB)
+        if: steps.sf-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sounds | Out-Null
+          $base = "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/$env:SF_COMMIT"
+          Invoke-WebRequest -Uri "$base/GeneralUser-GS.sf2" -OutFile "sounds/GeneralUser-GS.sf2"
+          Invoke-WebRequest -Uri "$base/documentation/LICENSE.txt" -OutFile "sounds/GeneralUser-GS-LICENSE.txt"
+          $hash = (Get-FileHash sounds/GeneralUser-GS.sf2 -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:SF_SHA256) { throw "SoundFont checksum mismatch: $hash" }
 
       - name: Get the ASIO SDK (GPLv3) for low-latency audio
         id: asio
@@ -98,6 +119,25 @@ jobs:
           if ($code -ne 0) { Write-Host "::error title=rigtest failed::$msg"; exit 1 }
           Write-Host "::notice title=rigtest (Windows)::$msg"
 
+      - name: Test - Studio (DAW engine, instruments, effects, recording, export)
+        shell: pwsh
+        run: |
+          $env:WIS_SOUNDFONT = "$PWD\sounds\GeneralUser-GS.sf2"
+          build\dawtest_artefacts\Release\dawtest.exe 2>&1 | Tee-Object -FilePath dawtest.log
+          $code = $LASTEXITCODE
+          $msg = ((Get-Content dawtest.log) -replace '%','%25') -join '%0A'
+          if ($code -ne 0) { Write-Host "::error title=dawtest failed::$msg"; exit 1 }
+          Write-Host "::notice title=dawtest (Windows)::$msg"
+
+      - name: Test - every plugin editor opens and paints
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $env:WIS_SOUNDFONT = "$PWD\sounds\GeneralUser-GS.sf2"
+          $p = Start-Process -FilePath build\WOMANINSTEM_artefacts\Release\WOMANINSTEM.exe -ArgumentList '--selftest-ui' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Host "::error title=UI self-test failed::exit code $($p.ExitCode)"; exit 1 }
+          Write-Host "UI self-test passed"
+
       - name: Test - end-to-end stem separation
         shell: pwsh
         run: |
@@ -116,7 +156,10 @@ jobs:
           "VERSION=$ver" >> $env:GITHUB_ENV
           $d = "dist/WOMANINSTEM"
           New-Item -ItemType Directory -Force -Path "$d/models" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$d/sounds" | Out-Null
           Copy-Item build/WOMANINSTEM_artefacts/Release/WOMANINSTEM.exe $d/
+          Copy-Item sounds/GeneralUser-GS.sf2 "$d/sounds/"
+          Copy-Item sounds/GeneralUser-GS-LICENSE.txt "$d/sounds/"
           Copy-Item build/stemsplit_artefacts/Release/stemsplit.exe $d/
           Copy-Item "models/$env:MODEL_FILE" "$d/models/"
           Copy-Item LICENSE "$d/LICENSE.txt"
@@ -181,7 +224,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libgl1-mesa-dev libcurl4-openssl-dev ninja-build
+            libxinerama-dev libxcursor-dev libgl1-mesa-dev libcurl4-openssl-dev ninja-build xvfb
+
+      - name: Cache sound library
+        id: sf-cache
+        uses: actions/cache@v4
+        with:
+          path: sounds
+          key: generaluser-gs-${{ env.SF_COMMIT }}
+
+      - name: Download sound library
+        if: steps.sf-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p sounds
+          curl -fsSL -o sounds/GeneralUser-GS.sf2 "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/$SF_COMMIT/GeneralUser-GS.sf2"
+          echo "$SF_SHA256  sounds/GeneralUser-GS.sf2" | sha256sum -c -
 
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -200,6 +257,17 @@ jobs:
         run: |
           set -o pipefail
           ./build/rigtest_artefacts/Release/rigtest 2>&1 | tee rigtest.log || { echo "::error title=rigtest failed::$(sed 's/%/%25/g' rigtest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+
+      - name: Test - Studio (DAW engine, instruments, effects, recording, export)
+        run: |
+          set -o pipefail
+          WIS_SOUNDFONT=$PWD/sounds/GeneralUser-GS.sf2 ./build/dawtest_artefacts/Release/dawtest 2>&1 | tee dawtest.log || { echo "::error title=dawtest failed::$(sed 's/%/%25/g' dawtest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+
+      - name: Test - every plugin editor opens and paints
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          WIS_SOUNDFONT=$PWD/sounds/GeneralUser-GS.sf2 xvfb-run -a ./build/WOMANINSTEM_artefacts/Release/WOMANINSTEM --selftest-ui 2>&1 | tee uitest.log || { echo "::error title=UI self-test failed::$(sed 's/%/%25/g' uitest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
 
       - name: Test - end-to-end stem separation (downloads the model)
         run: |

@@ -42,6 +42,10 @@ WisLookAndFeel::WisLookAndFeel()
     setColour (juce::TextEditor::focusedOutlineColourId, accent);
     setColour (juce::ListBox::backgroundColourId, panel);
     setColour (juce::ListBox::outlineColourId, outline);
+    setColour (juce::TableHeaderComponent::backgroundColourId, panelRaised);
+    setColour (juce::TableHeaderComponent::textColourId, text);
+    setColour (juce::TableHeaderComponent::outlineColourId, outline);
+    setColour (juce::TableHeaderComponent::highlightColourId, accent.withAlpha (0.25f));
     setColour (juce::ScrollBar::thumbColourId, outline);
     setColour (juce::ProgressBar::backgroundColourId, panelRaised);
     setColour (juce::ProgressBar::foregroundColourId, accent);

@@ -37,14 +37,25 @@ public:
     void openFile (const juce::File& file);
     void openFromLibrary (const SongInfo& info);
 
+    // ---- hosting inside the app shell (Play Along | Studio) ----
+    juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
+    void setEmbedded (bool e) { embedded = e; audioButton.setVisible (! e); helpButton.setVisible (! e); resized(); repaint(); }
+    /** Connects / disconnects the play-along engine from the audio device (only one page owns the audio at a time). */
+    void setActive (bool active);
+    bool isActive() const { return active; }
+    void showAudioSettings();
+    void showHelp();
+
+    /** "Open in Studio": the current song, which stems are muted, the rig and the part being played. */
+    std::function<void (const SongInfo&, const std::array<bool, numStemIds>& muted, const juce::ValueTree& rigState, const juce::String& part)> onOpenInStudio;
+
 private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     void setupAudio();
-    void showAudioSettings();
     void showLibrary();
-    void showHelp();
+    void openInStudio();
     void browseForSong();
     void exportStems (const SongInfo& info);
 
@@ -86,7 +97,7 @@ private:
     int limiterHold = 0;
 
     // ---- transport ----
-    juce::TextButton playButton { "Play" }, startButton { "|<" }, loopButton { "Loop" }, recordButton { "Rec" }, resetMix { "Reset mix" };
+    juce::TextButton playButton { "Play" }, startButton { "|<" }, loopButton { "Loop" }, recordButton { "Rec" }, resetMix { "Reset mix" }, studioButton { "Open in Studio" };
     juce::Label timeLabel, speedLabel, transposeLabel, partLabel;
     juce::Slider speed { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Slider transpose { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
@@ -95,7 +106,7 @@ private:
     // ---- main areas ----
     StemMixer mixer { player };
     WaveformView waveform { player };
-    RigPanel rigPanel { rig, engine };
+    RigPanel rigPanel { rig, &engine };
     SeparationOverlay overlay;
     juce::Label status;
     juce::String statusText;
@@ -106,6 +117,7 @@ private:
     juce::File lastFolder;
     int rigHeight = 336;
     double pendingRate = 0.0;
+    bool embedded = false, active = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

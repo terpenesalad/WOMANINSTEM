@@ -282,6 +282,9 @@ MainComponent::MainComponent (juce::PropertiesFile& s) : settings (s)
     recordButton.onClick = [this] { toggleRecord(); };
     resetMix.setTooltip ("Unmute everything and reset all stem volumes");
     resetMix.onClick = [this] { mixer.resetAll(); partBox.setSelectedId (1, juce::dontSendNotification); };
+    studioButton.setColour (juce::TextButton::buttonColourId, theme::accent2.withAlpha (0.85f));
+    studioButton.setTooltip ("Take this song into the Studio: every stem on its own track, tempo detected, and a track ready for you to record on");
+    studioButton.onClick = [this] { openInStudio(); };
 
     timeLabel.setFont (uiFont (15.0f, true));
     timeLabel.setColour (juce::Label::textColourId, theme::text);
@@ -321,7 +324,7 @@ MainComponent::MainComponent (juce::PropertiesFile& s) : settings (s)
     partBox.setTooltip ("Mutes the part you're going to play, so you replace it");
     partBox.onChange = [this] { applyPartChoice(); };
 
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &playButton, &startButton, &loopButton, &recordButton, &resetMix, &timeLabel,
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &playButton, &startButton, &loopButton, &recordButton, &resetMix, &studioButton, &timeLabel,
                                 &speedLabel, &speed, &transposeLabel, &transpose, &partLabel, &partBox })
         addAndMakeVisible (c);
 
@@ -440,7 +443,7 @@ void MainComponent::setupAudio()
     changeListenerCallback (&deviceManager);
 
     if (err.isNotEmpty())
-        setStatus ("Audio device problem: " + err + " - open Audio Settings.", true);
+        setStatus ("Audio device problem: " + err + " - open Audio & MIDI (top right).", true);
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -456,24 +459,24 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
         deviceInfo.setText (t, juce::dontSendNotification);
 
         if (engine.getRoundTripLatencyMs() > 25.0 && type != "ASIO")
-            deviceInfo.setTooltip ("Latency is high. In Audio Settings choose your interface's ASIO driver (or 'Windows Audio (Exclusive Mode)') and a smaller buffer size (64-128).");
+            deviceInfo.setTooltip ("Latency is high. In Audio & MIDI choose your interface's ASIO driver (or 'Windows Audio (Exclusive Mode)') and a smaller buffer size (64-128).");
         else
             deviceInfo.setTooltip ("Round-trip latency estimate: input + output + one buffer");
     }
     else
     {
-        deviceInfo.setText ("No audio device - open Audio Settings", juce::dontSendNotification);
+        deviceInfo.setText ("No audio device - open Audio & MIDI (top right)", juce::dontSendNotification);
     }
 }
 
 void MainComponent::showAudioSettings()
 {
-    auto* selector = new juce::AudioDeviceSelectorComponent (deviceManager, 0, 8, 2, 8, false, false, true, false);
-    selector->setSize (560, 480);
+    auto* selector = new juce::AudioDeviceSelectorComponent (deviceManager, 0, 8, 2, 8, true, false, true, false);
+    selector->setSize (580, 560);
 
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (selector);
-    o.dialogTitle = "Audio Settings";
+    o.dialogTitle = "Audio & MIDI Settings";
     o.dialogBackgroundColour = theme::panel;
     o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;
@@ -788,7 +791,7 @@ void MainComponent::showHelp()
 {
     juce::String t;
     t << "1. Plug your bass, guitar or mic into your USB audio interface.\n"
-      << "2. Audio Settings: choose the interface's ASIO driver, 48 kHz, 64-128 samples.\n"
+      << "2. Audio & MIDI (top right): choose the interface's ASIO driver, 48 kHz, 64-128 samples.\n"
       << "3. Pick your input in the rig's INPUT box and a preset (e.g. 'Bass - Vintage Tube').\n"
       << "4. Open Song (or drop an MP3/FLAC on the window). The first time, the AI model (55 MB) downloads.\n"
       << "5. Choose 'I'm playing: Bass' to mute the original bass, press Space and play along.\n\n"
@@ -798,6 +801,43 @@ void MainComponent::showHelp()
       << "Cabinet IRs: load any .wav IR in the CABINET section.\n\n"
       << "Recordings go to Music\\WOMANINSTEM Recordings. Your separated songs live in the Library.";
     juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "WOMANINSTEM - quick start", t, "Let's play", this);
+}
+
+// ---- app shell ------------------------------------------------------------------------------------------
+
+void MainComponent::setActive (bool shouldBeActive)
+{
+    if (active == shouldBeActive) return;
+    active = shouldBeActive;
+    if (active)
+    {
+        deviceManager.addAudioCallback (&engine);
+        rigPanel.refreshInputs();
+        startTimerHz (30);
+    }
+    else
+    {
+        if (player.isPlaying()) player.pause();
+        if (recorder.isRecording()) toggleRecord();
+        deviceManager.removeAudioCallback (&engine);
+        stopTimer();
+    }
+}
+
+void MainComponent::openInStudio()
+{
+    if (! hasSong)
+    {
+        setStatus ("Open a song first - then this button builds a multitrack Studio project from its stems.", true);
+        return;
+    }
+    if (onOpenInStudio == nullptr) return;
+    std::array<bool, numStemIds> muted {};
+    const auto audible = mixer.audibleStems();   // takes solo into account
+    for (size_t i = 0; i < muted.size(); ++i)
+        muted[i] = ! audible[i];
+    const auto part = partBox.getSelectedId() > 1 ? partBox.getText() : juce::String();
+    onOpenInStudio (currentInfo, muted, rig.createPresetState(), part);
 }
 
 // ---- state -----------------------------------------------------------------------------------------------
@@ -826,6 +866,15 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (theme::outline);
     g.drawHorizontalLine (header.getBottom() - 1, 0.0f, (float) getWidth());
 
+    if (embedded)
+    {
+        g.setColour (theme::panel);
+        g.fillRect (0, 64, getWidth(), 48);
+        g.setColour (theme::outline);
+        g.drawHorizontalLine (111, 0.0f, (float) getWidth());
+        return;
+    }
+
     // logo
     auto logo = header.reduced (16, 0).removeFromLeft (170).toFloat();
     g.setFont (uiFont (21.0f, true));
@@ -850,7 +899,7 @@ void MainComponent::resized()
 
     // ---- header (64) ----
     auto header = r.removeFromTop (64).reduced (16, 14);
-    header.removeFromLeft (180);
+    if (! embedded) header.removeFromLeft (180);
     openButton.setBounds (header.removeFromLeft (118));
     header.removeFromLeft (8);
     libraryButton.setBounds (header.removeFromLeft (84));
@@ -858,10 +907,13 @@ void MainComponent::resized()
     qualityBox.setBounds (header.removeFromLeft (196));
     header.removeFromLeft (20);
 
-    helpButton.setBounds (header.removeFromRight (36));
-    header.removeFromRight (8);
-    audioButton.setBounds (header.removeFromRight (128));
-    header.removeFromRight (12);
+    if (! embedded)
+    {
+        helpButton.setBounds (header.removeFromRight (36));
+        header.removeFromRight (8);
+        audioButton.setBounds (header.removeFromRight (128));
+        header.removeFromRight (12);
+    }
     auto meters = header.removeFromRight (130);
     limiterLed.setBounds (meters.removeFromRight (36));
     masterVolume.setBounds (meters.removeFromTop (meters.getHeight() / 2 + 2));
@@ -887,6 +939,8 @@ void MainComponent::resized()
     timeLabel.setBounds (tr.removeFromLeft (150));
     tr.removeFromLeft (12);
 
+    studioButton.setBounds (tr.removeFromRight (124));
+    tr.removeFromRight (8);
     resetMix.setBounds (tr.removeFromRight (90));
     tr.removeFromRight (10);
     partBox.setBounds (tr.removeFromRight (150));

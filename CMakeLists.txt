@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # ------------------------------------------------------------------------------
 #  WOMANINSTEM - stem separation + play-along amp rig
 # ------------------------------------------------------------------------------
-project(WOMANINSTEM VERSION 1.0.0 LANGUAGES C CXX)
+project(WOMANINSTEM VERSION 2.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,7 +74,14 @@ FetchContent_Declare(r8brain
     GIT_SUBMODULES ""
     SOURCE_SUBDIR  do-not-build)
 
-FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain)
+# TinySoundFont: SoundFont (.sf2) player behind the Studio's "Sound Library" instrument.
+FetchContent_Declare(tinysoundfont
+    GIT_REPOSITORY https://github.com/schellingb/TinySoundFont.git
+    GIT_TAG        853a0a171759f1ddba0de1442133a75912bbeffa
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR  do-not-build)
+
+FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain tinysoundfont)
 
 set(EIGEN_DIR  "${eigen_SOURCE_DIR}")
 if(FETCHCONTENT_SOURCE_DIR_EIGEN)   # local override: PATCH_COMMAND doesn't run, so patch here (idempotent)
@@ -83,6 +90,7 @@ endif()
 set(DEMUCS_DIR "${demucs_SOURCE_DIR}")
 set(NAM_DIR    "${nam_SOURCE_DIR}")
 set(R8B_DIR    "${r8brain_SOURCE_DIR}")
+set(TSF_DIR    "${tinysoundfont_SOURCE_DIR}")
 
 # ---- Common optimisation flags for the heavy maths libraries -----------------
 function(wis_fast_math target)
@@ -140,7 +148,19 @@ set(WIS_ENGINE_SOURCES
     Source/Rig/Tuner.cpp
     Source/Engine/AudioEngine.cpp
     Source/Engine/StemPlayer.cpp
-    Source/Engine/Recorder.cpp)
+    Source/Engine/Recorder.cpp
+    # Studio (DAW)
+    Source/Daw/Model/Project.cpp
+    Source/Daw/Model/DrumPatterns.cpp
+    Source/Daw/Model/TempoDetect.cpp
+    Source/Daw/Engine/AudioCache.cpp
+    Source/Daw/Engine/DawEngine.cpp
+    Source/Daw/Plugins/BuiltinProcessor.cpp
+    Source/Daw/Plugins/BuiltinEffects.cpp
+    Source/Daw/Plugins/BuiltinRegistry.cpp
+    Source/Daw/Plugins/PluginHost.cpp
+    Source/Daw/Instruments/SoundFontInstrument.cpp
+    Source/Daw/Instruments/StudioSynth.cpp)
 
 set(WIS_JUCE_DEFS
     JUCE_WEB_BROWSER=0
@@ -154,6 +174,9 @@ set(WIS_JUCE_DEFS
     JUCE_REPORT_APP_USAGE=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1
     JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_LV2=0
+    JUCE_PLUGINHOST_AU=0
     WIS_VERSION_STRING="${PROJECT_VERSION}")
 
 set(WIS_JUCE_MODULES
@@ -173,7 +196,7 @@ set(WIS_JUCE_MODULES
 
 function(wis_configure_target target)
     target_include_directories(${target} PRIVATE Source)
-    target_include_directories(${target} SYSTEM PRIVATE "${R8B_DIR}")
+    target_include_directories(${target} SYSTEM PRIVATE "${R8B_DIR}" "${TSF_DIR}")
     target_compile_definitions(${target} PRIVATE ${WIS_JUCE_DEFS})
     target_link_libraries(${target} PRIVATE wis_demucs wis_nam signalsmith-stretch ${WIS_JUCE_MODULES}
         juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
@@ -214,6 +237,15 @@ if(WIS_BUILD_APP)
         Source/UI/TunerView.cpp
         Source/UI/SeparationOverlay.cpp
         Source/UI/LibraryView.cpp
+        Source/UI/AppShell.cpp
+        Source/UI/Studio/TrackHeader.cpp
+        Source/UI/Studio/ArrangementView.cpp
+        Source/UI/Studio/PianoRoll.cpp
+        Source/UI/Studio/MixerView.cpp
+        Source/UI/Studio/BrowserPanel.cpp
+        Source/UI/Studio/ControlBar.cpp
+        Source/UI/Studio/PluginEditors.cpp
+        Source/UI/Studio/StudioPage.cpp
         ${WIS_ENGINE_SOURCES})
     wis_configure_target(WOMANINSTEM)
     target_compile_definitions(WOMANINSTEM PRIVATE
@@ -227,6 +259,11 @@ if(WIS_BUILD_TOOLS)
     juce_add_console_app(stemsplit PRODUCT_NAME "stemsplit")
     target_sources(stemsplit PRIVATE Tools/StemSplitCli.cpp ${WIS_ENGINE_SOURCES})
     wis_configure_target(stemsplit)
+
+    # dawtest: the Studio engine end to end (instruments, clips, recording, export, MIDI files, undo)
+    juce_add_console_app(dawtest PRODUCT_NAME "dawtest")
+    target_sources(dawtest PRIVATE Tools/DawTest.cpp ${WIS_ENGINE_SOURCES})
+    wis_configure_target(dawtest)
 
     # rigtest: renders test signals through every rig block and checks the output is sane
     juce_add_console_app(rigtest PRODUCT_NAME "rigtest")
