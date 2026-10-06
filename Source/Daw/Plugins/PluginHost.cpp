@@ -1,5 +1,7 @@
 #include "PluginHost.h"
 #include "Separation/ModelManager.h"
+#include "Vst2Format.h"
+#include "ClapFormat.h"
 
 namespace wis::daw
 {
@@ -16,6 +18,11 @@ PluginHost::PluginHost()
 {
    #if JUCE_PLUGINHOST_VST3
     formats.addFormat (new juce::VST3PluginFormat());
+   #endif
+    formats.addFormat (new ClapPluginFormat());
+    formats.addFormat (new Vst2PluginFormat());
+   #if JUCE_PLUGINHOST_LV2
+    formats.addFormat (new juce::LV2PluginFormat());
    #endif
 
     if (auto xml = juce::XmlDocument::parse (listFile()))

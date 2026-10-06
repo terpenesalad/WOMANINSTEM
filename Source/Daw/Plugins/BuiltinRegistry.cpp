@@ -1,5 +1,6 @@
 #include "BuiltinProcessor.h"
 #include "BuiltinEffects.h"
+#include "TestEffects.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Instruments/StudioSynth.h"
 
@@ -33,6 +34,8 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         add ("tremolo", "Tremolo / Auto-Pan", "Modulation", "Tempo-synced tremolo and auto-pan", false, make<TremoloFx>());
         add ("saturator", "Saturator", "Distortion", "Tape, tube, clip, fuzz and lo-fi colour", false, make<Saturator>());
         add ("amprig", "Amp & Pedals", "Amps", "The full play-along rig: gate, comp, drive, amps, NAM captures, cabs, IRs, effects", false, make<AmpRigFx>());
+
+        add ("testlatency", "Latency Test", "Hidden", "Used by the automated tests", false, make<LatencyTestFx>());
         return l;
     }();
     return list;

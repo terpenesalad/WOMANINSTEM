@@ -9,6 +9,8 @@
 #include "Daw/Engine/DawEngine.h"
 #include "Daw/Plugins/PluginHost.h"
 #include "Daw/Plugins/BuiltinEffects.h"
+#include "Daw/Plugins/TestEffects.h"
+#include <tuple>
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include <iostream>
@@ -82,6 +84,49 @@ static juce::File writeTestWav (const juce::File& f, double seconds, double tone
     if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
         w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
     return f;
+}
+
+/** Mono WAV: silence with a single-sample click (0.8) at `clickAt` seconds, optionally a sine from `toneFrom`. */
+static juce::File writeClickWav (const juce::File& f, double seconds, double clickAt, double toneHz = 0.0, double toneFrom = 0.0)
+{
+    juce::AudioBuffer<float> b (1, (int) (sr * seconds));
+    b.clear();
+    if (clickAt >= 0.0) b.setSample (0, (int) std::llround (clickAt * sr), 0.3f);
+    if (toneHz > 0.0)
+        for (int i = (int) (toneFrom * sr); i < b.getNumSamples(); ++i)
+            b.setSample (0, i, 0.5f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * toneHz * i / sr));
+    f.deleteFile();
+    std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+    auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (1).withBitsPerSample (24);
+    if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
+        w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+    return f;
+}
+
+static int peakIndex (const juce::AudioBuffer<float>& b, int from = 0, int to = -1)
+{
+    if (to < 0) to = b.getNumSamples();
+    int best = -1; float bv = 0.0f;
+    for (int i = from; i < to; ++i) { const float v = std::abs (b.getSample (0, i)); if (v > bv) { bv = v; best = i; } }
+    return best;
+}
+
+/** Frequency from zero crossings (mono sine-ish signals). */
+static double zeroCrossingHz (const juce::AudioBuffer<float>& b, int from, int to)
+{
+    int crossings = 0, first = -1, last = -1;
+    for (int i = from + 1; i < to; ++i)
+        if (b.getSample (0, i - 1) <= 0.0f && b.getSample (0, i) > 0.0f) { if (first < 0) first = i; last = i; ++crossings; }
+    return crossings > 1 ? (crossings - 1) * sr / (double) (last - first) : 0.0;
+}
+
+static juce::ValueTree addPoint (juce::ValueTree lane, double beat, double value)
+{
+    juce::ValueTree pt (ids::POINT);
+    pt.setProperty (ids::b, beat, nullptr);
+    pt.setProperty (ids::v, value, nullptr);
+    lane.appendChild (pt, nullptr);
+    return pt;
 }
 
 int main (int argc, char** argv)
@@ -396,6 +441,147 @@ int main (int argc, char** argv)
     }
 
     // -------------------------------------------------------------------------------------------
+    std::cout << "Buses, sends and output routing:" << std::endl;
+    {
+        project.setTempo (120.0);
+        auto clickFile = writeClickWav (tmpRoot.getChildFile ("click.wav"), 2.0, 0.5);
+        while (project.numTracks() > 0) project.removeTrack (project.track (0));   // start clean
+        project.masterInserts().removeAllChildren (nullptr);
+        auto a = project.addTrack (kindAudio, "Source");
+        project.addAudioClip (a, clickFile, 0.0, 0.0, 2.0);
+        auto bus = project.addBus ("Reverb Bus");
+        engine.preloadAudio();
+
+        auto dry = renderRange (engine, project, 0.0, 4.0);
+        const float dryPeak = dry.getMagnitude (0, dry.getNumSamples());
+        project.setSend (a, bus.id(), 0.0f);
+        auto wet = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (wet.getMagnitude (0, wet.getNumSamples()) - 2.0f * dryPeak) < 0.01f && peakIndex (wet) == peakIndex (dry),
+               "Post-fader send at 0 dB doubles the signal through the bus (" + juce::String (dryPeak, 3) + " -> " + juce::String (wet.getMagnitude (0, wet.getNumSamples()), 3)
+               + ", at " + juce::String (peakIndex (dry)) + "/" + juce::String (peakIndex (wet)) + ")");
+
+        bus.v.setProperty (ids::mute, true, nullptr);
+        auto busMuted = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (busMuted.getMagnitude (0, busMuted.getNumSamples()) - dryPeak) < 0.01f, "Muting the bus removes the send");
+        bus.v.setProperty (ids::mute, false, nullptr);
+
+        // pre-fader send keeps going when the track fader is down
+        project.setSend (a, bus.id(), 0.0f, true);
+        a.v.setProperty (ids::volume, -96.0, nullptr);
+        auto pre = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (pre.getMagnitude (0, pre.getNumSamples()) - dryPeak) < 0.01f, "Pre-fader send ignores the track fader");
+        a.v.setProperty (ids::volume, 0.0, nullptr);
+        project.removeSend (a, bus.id());
+
+        // route the track's output into the bus, bus at -6 dB
+        project.setOutput (a, bus.id());
+        bus.v.setProperty (ids::volume, -6.0206, nullptr);
+        auto routed = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (routed.getMagnitude (0, routed.getNumSamples()) - 0.5f * dryPeak) < 0.01f, "Track output routed through a bus (-6 dB): " + juce::String (routed.getMagnitude (0, routed.getNumSamples()), 3));
+        check (! project.wouldCreateLoop (a.id(), bus.id()) && project.wouldCreateLoop (bus.id(), bus.id()), "Feedback loops are refused");
+
+        // solo the source: the bus it feeds stays audible
+        a.v.setProperty (ids::solo, true, nullptr);
+        auto soloed = renderRange (engine, project, 0.0, 4.0);
+        check (soloed.getMagnitude (0, soloed.getNumSamples()) > 0.4f * dryPeak, "Soloing a track keeps its bus audible");
+        a.v.setProperty (ids::solo, false, nullptr);
+        bus.v.setProperty (ids::volume, 0.0, nullptr);
+        project.setOutput (a, 0);
+
+        // ---- plugin delay compensation ----
+        auto b = project.addTrack (kindAudio, "Delayed");
+        project.addAudioClip (b, clickFile, 0.0, 0.0, 2.0);
+        project.setPlugin (b.inserts(), -1, builtinRef ("testlatency"));
+        engine.rebuildNow();
+        check (engine.getTrackLatency (b.id()) == LatencyTestFx::latencySamples, "Track latency is measured (" + juce::String (engine.getTrackLatency (b.id())) + " samples)");
+        a.v.setProperty (ids::mute, true, nullptr);
+        auto pdc = renderRange (engine, project, 0.0, 4.0);
+        check (peakIndex (pdc) == (int) (0.5 * sr), "Latency is compensated: the delayed track still clicks at 0.500 s (got "
+                                                     + juce::String (peakIndex (pdc)) + ")");
+        a.v.setProperty (ids::mute, false, nullptr);
+        auto both = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (both.getMagnitude (0, both.getNumSamples()) - 2.0f * dryPeak) < 0.01f, "Compensated and plain tracks line up sample-accurately: " + juce::String (both.getMagnitude (0, both.getNumSamples()), 3));
+
+        // a plain track sending to a bus that has latency: the direct path is delayed to match
+        project.setPlugin (bus.inserts(), -1, builtinRef ("testlatency"));
+        project.setSend (a, bus.id(), 0.0f);
+        b.v.setProperty (ids::mute, true, nullptr);
+        auto viaBus = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (viaBus.getMagnitude (0, viaBus.getNumSamples()) - 2.0f * dryPeak) < 0.01f && peakIndex (viaBus) == (int) (0.5 * sr),
+               "Send through a bus with latency stays aligned with the direct sound: " + juce::String (viaBus.getMagnitude (0, viaBus.getNumSamples()), 3) + " at " + juce::String (peakIndex (viaBus)));
+        project.removeSend (a, bus.id());
+        bus.inserts().removeAllChildren (nullptr);
+        b.v.setProperty (ids::mute, false, nullptr);
+
+        // ---- plugin parameter automation: the test plugin's gain is automated to 0, then to 1 ----
+        auto slotId = b.inserts().getChild (0)[ids::id].toString();
+        auto lane = project.getOrCreateLane (b, "plug:" + slotId + ":0");
+        addPoint (lane, 0.0, 0.0); addPoint (lane, 100.0, 0.0);
+        a.v.setProperty (ids::mute, true, nullptr);
+        auto autoOff = renderRange (engine, project, 0.0, 4.0);
+        check (autoOff.getMagnitude (0, autoOff.getNumSamples()) < 0.01f, "Plugin parameter automation turns the plugin's gain down");
+        lane.getChild (0).setProperty (ids::v, 1.0, nullptr);
+        lane.getChild (1).setProperty (ids::v, 1.0, nullptr);
+        auto autoOn = renderRange (engine, project, 0.0, 4.0);
+        check (std::abs (autoOn.getMagnitude (0, autoOn.getNumSamples()) - dryPeak) < 0.01f, "...and back up");
+        b.automation().removeAllChildren (nullptr);
+
+        project.removeTrack (a);
+        project.removeTrack (b);
+        project.removeTrack (bus);
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Time stretch, pitch and reverse:" << std::endl;
+    {
+        project.setTempo (120.0);
+        auto f = writeClickWav (tmpRoot.getChildFile ("stretch.wav"), 3.0, 1.0);
+        auto t = project.addTrack (kindAudio, "Stretch");
+        auto c = project.addAudioClip (t, f, 0.0, 0.0, 3.0);
+        c.v.setProperty (ids::stretch, 2.0, nullptr);
+        engine.preloadAudio();
+        auto st = renderRange (engine, project, 0.0, 14.0);
+        const int pk = peakIndex (st);
+        check (std::abs (c.lengthBeats (120.0) - 12.0) < 1.0e-6, "Stretch x2 doubles the clip's length (12 beats)");
+        check (std::abs (pk - (int) (2.0 * sr)) < 300, "Stretched x2: the click moves from 1.0 s to 2.0 s (got " + juce::String (pk / sr, 3) + ")");
+
+        c.v.setProperty (ids::stretch, 1.0, nullptr);
+        c.v.setProperty (ids::reverse, true, nullptr);
+        engine.preloadAudio();
+        auto rv = renderRange (engine, project, 0.0, 8.0);
+        check (std::abs (peakIndex (rv) - (int) (2.0 * sr)) < 4, "Reversed: the click at 1.0 s of 3.0 s plays at 2.0 s (" + juce::String (peakIndex (rv)) + ")");
+        c.v.setProperty (ids::reverse, false, nullptr);
+
+        // follow tempo: recorded at 120, song at 60 -> twice as long
+        project.setClipFollowTempo (c, 120.0, true);
+        project.setTempo (60.0);
+        engine.preloadAudio();
+        auto fl = renderRange (engine, project, 0.0, 7.0);
+        check (std::abs (c.lengthBeats (60.0) - 6.0) < 1.0e-6 && std::abs (peakIndex (fl) - (int) (2.0 * sr)) < 300,
+               "Follow tempo: half the tempo plays the audio at half speed (click at " + juce::String (peakIndex (fl) / sr, 3) + " s)");
+        project.setTempo (120.0);
+        project.setClipFollowTempo (c, 0.0, false);
+
+        // pitch: a 440 Hz tone up an octave
+        auto tone = writeClickWav (tmpRoot.getChildFile ("tone.wav"), 2.0, -1.0, 440.0, 0.0);
+        c.v.setProperty (ids::file, project.makeRef (tone), nullptr);
+        c.v.setProperty (ids::length, 2.0, nullptr);
+        c.v.setProperty (ids::pitch, 12.0, nullptr);
+        engine.preloadAudio();
+        auto up = renderRange (engine, project, 0.0, 4.0);
+        const double hz = zeroCrossingHz (up, (int) (0.4 * sr), (int) (1.6 * sr));
+        check (std::abs (hz - 880.0) < 5.0, "Transpose +12 semitones: 440 Hz -> " + juce::String (hz, 1) + " Hz, same length");
+
+        // split / trim respect the stretch
+        c.v.setProperty (ids::pitch, 0.0, nullptr);
+        c.v.setProperty (ids::stretch, 2.0, nullptr);
+        auto right = project.splitClip (c, 4.0);
+        check (right.isValid() && std::abs (c.lengthSeconds() - 1.0) < 1.0e-9 && std::abs (right.offsetSeconds() - 1.0) < 1.0e-9,
+               "Splitting a stretched clip splits its source audio correctly");
+        project.removeTrack (t);
+    }
+
+    // -------------------------------------------------------------------------------------------
     std::cout << "Tempo detection:" << std::endl;
     for (double bpm : { 92.0, 128.0, 140.0 })
     {
@@ -441,8 +627,61 @@ int main (int argc, char** argv)
         juce::ValueTree bad = Project::makePluginNode ({ "external", "VST3-Nope-123", "Nope", {}, {} });
         auto p2 = host.create (bad, sr, block, false, err);
         check (p2 == nullptr && err.isNotEmpty(), "Missing plugin reports an error: " + err);
-        check (host.formats.getNumFormats() >= 1, "VST3 hosting available (" + juce::String (host.formats.getNumFormats()) + " format)");
+        juce::StringArray names;
+        for (auto* f : host.formats.getFormats()) names.add (f->getName());
+        check (names.contains ("VST3") && names.contains ("VST") && names.contains ("CLAP"), "Plugin formats: " + names.joinIntoString (", "));
     }
+
+#if defined (WIS_TEST_VST2) && defined (WIS_TEST_CLAP)
+    for (auto [formatName, path, latency] : { std::tuple<const char*, const char*, int> { "VST", WIS_TEST_VST2, 0 }, { "CLAP", WIS_TEST_CLAP, 32 } })
+    {
+        std::cout << formatName << " hosting:" << std::endl;
+        while (project.numTracks() > 0) project.removeTrack (project.track (0));
+        juce::AudioPluginFormat* format = nullptr;
+        for (auto* f : host.formats.getFormats()) if (f->getName() == formatName) format = f;
+        juce::OwnedArray<juce::PluginDescription> found;
+        if (format != nullptr) format->findAllTypesForFile (found, path);
+        check (found.size() == 1 && found[0]->isInstrument && found[0]->name.startsWith ("WIS Test Synth"),
+               juce::String ("Scan finds the test plugin (") + (found.isEmpty() ? juce::String ("nothing") : found[0]->name) + ")");
+        if (found.isEmpty()) continue;
+
+        project.setTempo (120.0);
+        auto t = project.addTrack (kindInstrument, formatName);
+        project.setInstrument (t, PluginHost::refFor (*found[0]));
+        auto c = project.addMidiClip (t, 0.0, 8.0);
+        project.addNote (c, 69, 2.0, 2.0, 100);   // A4 from 1.0 s to 2.0 s
+        engine.rebuildNow();
+        auto slotId = t.instrument()[ids::id].toString();
+        auto* proc = engine.getProcessor (slotId);
+        check (proc != nullptr && engine.getSlotError (slotId).isEmpty(), "Loads on an instrument track " + engine.getSlotError (slotId));
+        if (proc == nullptr) continue;
+        check (engine.getTrackLatency (t.id()) == latency, "Reports its latency (" + juce::String (engine.getTrackLatency (t.id())) + " samples)");
+
+        auto out = renderRange (engine, project, 0.0, 6.0);
+        const double hz = zeroCrossingHz (out, (int) (1.1 * sr), (int) (1.9 * sr));
+        const int onset = firstSampleAbove (out, 0.01f);
+        check (std::abs (hz - 440.0) < 2.0, "MIDI note plays A4 (" + juce::String (hz, 1) + " Hz)");
+        check (std::abs (onset - (int) sr) < 64, "...on time, latency compensated (onset " + juce::String (onset / sr, 4) + " s)");
+        check (rms (out, (int) (2.2 * sr), (int) (5.5 * sr)) < 1.0e-4f, "Note off stops it");
+
+        // the host's tempo reaches the plugin
+        auto params = proc->getParameters();
+        check (params.size() >= 2 && std::abs (params[1]->getValue() * 300.0f - 120.0f) < 0.5f,
+               "Plugin sees the song tempo (" + (params.size() >= 2 ? params[1]->getText (params[1]->getValue(), 32) : juce::String ("-")) + ")");
+
+        // parameter automation reaches the plugin (gain -> 0 on audio input isn't testable on an instrument; check the value instead)
+        params[0]->setValue (0.25f);
+        renderRange (engine, project, 0.0, 0.5);   // parameter changes reach the plugin with the next block
+        engine.flushPluginStates();
+        auto stateCopy = t.instrument()[ids::state].toString();
+        params[0]->setValue (0.9f);
+        juce::String err;
+        auto fresh = host.create (t.instrument(), sr, block, true, err);
+        check (fresh != nullptr && std::abs (fresh->getParameters()[0]->getValue() - 0.25f) < 0.01f, "State saves and restores (gain 0.25)");
+        project.removeTrack (t);
+        engine.rebuildNow();
+    }
+#endif
 
     tmpRoot.deleteRecursively();
     std::cout << (failures == 0 ? "ALL DAW TESTS PASSED" : juce::String (failures) + " FAILURE(S)") << std::endl;

@@ -1,6 +1,7 @@
 #include "Project.h"
 #include "Daw/Instruments/InstrumentRefs.h"
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <set>
 
 namespace wis::daw
 {
@@ -16,7 +17,7 @@ juce::Colour trackColourForIndex (int index)
 
 double Clip::lengthBeats (double tempo) const
 {
-    return isMidi() ? midiLength() : lengthSeconds() * tempo / 60.0;
+    return isMidi() ? midiLength() : timelineSeconds (tempo) * tempo / 60.0;
 }
 
 // =====================================================================================================
@@ -50,6 +51,8 @@ void Project::ensureStructure()
 {
     if (! root.getChildWithName (ids::TRACKS).isValid())
         root.appendChild (juce::ValueTree (ids::TRACKS), nullptr);
+    if (! root.getChildWithName (ids::MARKERS).isValid())
+        root.appendChild (juce::ValueTree (ids::MARKERS), nullptr);
     auto master = root.getChildWithName (ids::MASTER);
     if (! master.isValid())
     {
@@ -60,9 +63,13 @@ void Project::ensureStructure()
         master.appendChild (juce::ValueTree (ids::INSERTS), nullptr);
 
     for (auto t : tracks())
-        for (auto childId : { ids::INSERTS, ids::CLIPS, ids::AUTOMATION })
+    {
+        for (auto childId : { ids::INSERTS, ids::SENDS, ids::CLIPS, ids::AUTOMATION })
             if (! t.getChildWithName (childId).isValid())
                 t.appendChild (juce::ValueTree (childId), nullptr);
+        if (Track (t).isInstrument() && ! t.getChildWithName (ids::MIDIFX).isValid())
+            t.addChild (juce::ValueTree (ids::MIDIFX), 0, nullptr);
+    }
 }
 
 int Project::allocateId()
@@ -215,6 +222,18 @@ void Project::setTimeSignature (int num, int den)
     root.setProperty (ids::tsDen, den == 2 || den == 8 || den == 16 ? den : 4, um());
 }
 
+void Project::setKey (int k, int sc)
+{
+    root.setProperty (ids::key, ((k % 12) + 12) % 12, um());
+    root.setProperty (ids::scale, sc == 1 ? 1 : 0, um());
+}
+
+juce::String Project::keyName (int k, int sc)
+{
+    static const char* names[] = { "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    return juce::String (names[((k % 12) + 12) % 12]) + (sc == 1 ? " minor" : " major");
+}
+
 // ---- tracks ---------------------------------------------------------------------------------------------
 
 Track Project::trackById (int id) const
@@ -256,12 +275,14 @@ Track Project::addTrack (const juce::String& kind, const juce::String& name, int
     t.setProperty (ids::input, 0, nullptr);
     t.setProperty (ids::inputStereo, false, nullptr);
     t.setProperty (ids::height, 72, nullptr);
+    t.setProperty (ids::output, 0, nullptr);
     if (kind == kindInstrument)
     {
-        juce::ValueTree inst (ids::INSTRUMENT);
-        t.appendChild (inst, nullptr);
+        t.appendChild (juce::ValueTree (ids::MIDIFX), nullptr);
+        t.appendChild (juce::ValueTree (ids::INSTRUMENT), nullptr);
     }
     t.appendChild (juce::ValueTree (ids::INSERTS), nullptr);
+    t.appendChild (juce::ValueTree (ids::SENDS), nullptr);
     t.appendChild (juce::ValueTree (ids::CLIPS), nullptr);
     t.appendChild (juce::ValueTree (ids::AUTOMATION), nullptr);
 
@@ -271,8 +292,26 @@ Track Project::addTrack (const juce::String& kind, const juce::String& name, int
 
 void Project::removeTrack (const Track& t)
 {
-    if (t.isValid())
-        tracks().removeChild (t.v, um());
+    if (! t.isValid()) return;
+    if (t.isBus())
+    {
+        // nothing may keep pointing at a bus that's gone
+        const int id = t.id();
+        for (auto tv : tracks())
+        {
+            Track other (tv);
+            if (other.output() == id) tv.setProperty (ids::output, 0, um());
+            removeSend (other, id);
+        }
+    }
+    // side-chains that listened to this track
+    std::function<void (juce::ValueTree)> clearSc = [&] (juce::ValueTree v)
+    {
+        if (v.hasType (ids::PLUGIN) && (int) v.getProperty (ids::sidechain, 0) == t.id()) v.setProperty (ids::sidechain, 0, um());
+        for (auto c : v) if (! c.hasType (ids::CLIPS)) clearSc (c);
+    };
+    clearSc (root);
+    tracks().removeChild (t.v, um());
 }
 
 void Project::moveTrack (int from, int to)
@@ -290,8 +329,117 @@ Track Project::duplicateTrack (const Track& t)
     copy.setProperty (ids::arm, false, nullptr);
     for (auto c : copy.getChildWithName (ids::CLIPS))
         c.setProperty (ids::id, allocateId(), nullptr);
+    // fresh plugin identities (automation lanes refer to them)
+    std::map<juce::String, juce::String> renamed;
+    std::function<void (juce::ValueTree)> renew = [&] (juce::ValueTree v)
+    {
+        if (v.hasType (ids::PLUGIN)) { auto fresh = juce::Uuid().toString(); renamed[v[ids::id].toString()] = fresh; v.setProperty (ids::id, fresh, nullptr); }
+        for (auto c : v) if (! c.hasType (ids::CLIPS)) renew (c);
+    };
+    renew (copy);
+    for (auto lane : copy.getChildWithName (ids::AUTOMATION))
+    {
+        auto param = lane[ids::param].toString();
+        if (param.startsWith ("plug:"))
+        {
+            auto slot = param.fromFirstOccurrenceOf ("plug:", false, false).upToFirstOccurrenceOf (":", false, false);
+            if (auto it = renamed.find (slot); it != renamed.end())
+                lane.setProperty (ids::param, "plug:" + it->second + ":" + param.fromLastOccurrenceOf (":", false, false), nullptr);
+        }
+    }
     tracks().addChild (copy, tracks().indexOf (t.v) + 1, um());
     return Track (copy);
+}
+
+// ---- buses / sends --------------------------------------------------------------------------------------
+
+Track Project::addBus (const juce::String& name, int insertIndex)
+{
+    auto t = addTrack (kindBus, name, insertIndex);
+    t.v.setProperty (ids::monitor, false, nullptr);
+    t.v.setProperty (ids::height, 56, nullptr);
+    return t;
+}
+
+juce::Array<Track> Project::buses() const
+{
+    juce::Array<Track> r;
+    for (auto tv : tracks()) if (Track (tv).isBus()) r.add (Track (tv));
+    return r;
+}
+
+bool Project::wouldCreateLoop (int fromId, int toBusId) const
+{
+    if (fromId == toBusId) return true;
+    // Does signal flow from toBus back to from? Follow outputs and sends downstream of toBus.
+    std::set<int> seen;
+    std::function<bool (int)> reaches = [&] (int id) -> bool
+    {
+        if (id == fromId) return true;
+        if (! seen.insert (id).second) return false;
+        auto t = trackById (id);
+        if (! t.isValid()) return false;
+        if (t.output() != 0 && reaches (t.output())) return true;
+        for (auto s : t.sends()) if (reaches ((int) s[ids::bus])) return true;
+        return false;
+    };
+    return reaches (toBusId);
+}
+
+juce::ValueTree Project::setSend (const Track& from, int busId, float levelDb, bool preFader)
+{
+    auto sends = from.sends();
+    if (! sends.isValid())
+    {
+        sends = juce::ValueTree (ids::SENDS);
+        from.v.appendChild (sends, um());
+    }
+    auto s = sends.getChildWithProperty (ids::bus, busId);
+    if (! s.isValid())
+    {
+        if (wouldCreateLoop (from.id(), busId)) return {};
+        s = juce::ValueTree (ids::SEND);
+        s.setProperty (ids::bus, busId, nullptr);
+        s.setProperty (ids::level, levelDb, nullptr);
+        s.setProperty (ids::pre, preFader, nullptr);
+        sends.appendChild (s, um());
+        return s;
+    }
+    s.setProperty (ids::level, levelDb, um());
+    s.setProperty (ids::pre, preFader, um());
+    return s;
+}
+
+void Project::removeSend (const Track& from, int busId)
+{
+    auto sends = from.sends();
+    if (! sends.isValid()) return;
+    auto s = sends.getChildWithProperty (ids::bus, busId);
+    if (s.isValid()) sends.removeChild (s, um());
+    if (auto lane = from.lane ("send:" + juce::String (busId)); lane.isValid())
+        from.automation().removeChild (lane, um());
+}
+
+void Project::setOutput (const Track& t, int busId)
+{
+    if (busId != 0 && wouldCreateLoop (t.id(), busId)) return;
+    t.v.setProperty (ids::output, busId, um());
+}
+
+// ---- markers ---------------------------------------------------------------------------------------------
+
+juce::ValueTree Project::addMarker (double beat, const juce::String& name)
+{
+    auto ms = markers();
+    juce::ValueTree m (ids::MARKER);
+    m.setProperty (ids::id, allocateId(), nullptr);
+    m.setProperty (ids::b, juce::jmax (0.0, beat), nullptr);
+    m.setProperty (ids::name, name, nullptr);
+    // keep them sorted by position
+    int index = 0;
+    while (index < ms.getNumChildren() && (double) ms.getChild (index)[ids::b] <= beat) ++index;
+    ms.addChild (m, index, um());
+    return m;
 }
 
 juce::ValueTree Project::makePluginNode (const PluginRef& ref)
@@ -428,7 +576,7 @@ Clip Project::splitClip (const Clip& c, double at)
 
     if (c.isAudio())
     {
-        const double leftSecs = leftBeats * 60.0 / t;
+        const double leftSecs = leftBeats * 60.0 / t / c.stretchRatio (t);   // source seconds
         right.setProperty (ids::offset, c.offsetSeconds() + leftSecs, nullptr);
         right.setProperty (ids::length, c.lengthSeconds() - leftSecs, nullptr);
         right.setProperty (ids::fadeIn, 0.0, nullptr);
@@ -487,11 +635,12 @@ void Project::trimClipStart (const Clip& c, double newStart)
 
     if (c.isAudio())
     {
-        double deltaSecs = delta * 60.0 / t;
+        const double ratio = c.stretchRatio (t);
+        double deltaSecs = delta * 60.0 / t / ratio;   // source seconds
         if (c.offsetSeconds() + deltaSecs < 0.0)   // can't reveal audio before the file start
         {
             deltaSecs = -c.offsetSeconds();
-            delta = deltaSecs * t / 60.0;
+            delta = deltaSecs * ratio * t / 60.0;
         }
         c.v.setProperty (ids::offset, c.offsetSeconds() + deltaSecs, um());
         c.v.setProperty (ids::length, c.lengthSeconds() - deltaSecs, um());
@@ -518,12 +667,35 @@ void Project::trimClipEnd (const Clip& c, double newEnd)
     newEnd = juce::jmax (c.start() + 1.0 / 16.0, newEnd);
     const double beats = newEnd - c.start();
     if (c.isAudio())
-        c.v.setProperty (ids::length, beats * 60.0 / t, um());
+        c.v.setProperty (ids::length, beats * 60.0 / t / c.stretchRatio (t), um());
     else
         c.v.setProperty (ids::length, beats, um());
 }
 
-void Project::quantize (const Clip& c, double grid, float strength, bool selectedOnly, const juce::Array<juce::ValueTree>& selection)
+void Project::stretchClipEnd (const Clip& c, double newEnd)
+{
+    if (! c.isAudio() || c.lengthSeconds() <= 0.0) return;
+    const double t = tempo();
+    newEnd = juce::jmax (c.start() + 1.0 / 16.0, newEnd);
+    const double timeline = (newEnd - c.start()) * 60.0 / t;
+    const double followFactor = c.follows() ? c.srcTempo() / t : 1.0;
+    const double s = juce::jlimit (0.05, 20.0, timeline / c.lengthSeconds() / followFactor);
+    c.v.setProperty (ids::stretch, s, um());
+}
+
+void Project::setClipFollowTempo (const Clip& c, double bpm, bool follow)
+{
+    if (! c.isAudio()) return;
+    // keep the clip's current length on screen when switching modes
+    const double t = tempo();
+    const double ratioBefore = c.stretchRatio (t);
+    c.v.setProperty (ids::srcTempo, bpm, um());
+    c.v.setProperty (ids::follow, follow && bpm > 0.0, um());
+    const double followFactor = (follow && bpm > 0.0) ? bpm / t : 1.0;
+    c.v.setProperty (ids::stretch, juce::jlimit (0.05, 20.0, follow ? 1.0 : ratioBefore / followFactor), um());
+}
+
+void Project::quantize (const Clip& c, double grid, float strength, bool selectedOnly, const juce::Array<juce::ValueTree>& selection, float swing)
 {
     if (! c.isMidi() || grid <= 0.0) return;
     const double clipStart = c.start();
@@ -532,9 +704,52 @@ void Project::quantize (const Clip& c, double grid, float strength, bool selecte
         if (! n.hasType (ids::NOTE)) continue;
         if (selectedOnly && ! selection.contains (n)) continue;
         const double abs = clipStart + (double) n[ids::s];
-        const double q = std::round (abs / grid) * grid;
+        const double step = std::round (abs / grid);
+        double q = step * grid;
+        if (swing > 0.0f && ((juce::int64) step & 1) == 1)
+            q += grid * juce::jlimit (0.0f, 0.75f, swing) * (2.0 / 3.0);   // swing 0.5 = triplet shuffle
         n.setProperty (ids::s, (double) n[ids::s] + (q - abs) * strength, um());
     }
+}
+
+Clip Project::joinMidiClips (const juce::Array<Clip>& clips)
+{
+    juce::Array<Clip> list;
+    for (auto& c : clips) if (c.isValid() && c.isMidi()) list.add (c);
+    if (list.size() < 2) return list.isEmpty() ? Clip() : list.getFirst();
+    std::sort (list.begin(), list.end(), [] (const Clip& a, const Clip& b) { return a.start() < b.start(); });
+    auto first = list.getFirst();
+    const double start = first.start();
+    double end = first.endBeats (tempo());
+    for (int i = 1; i < list.size(); ++i)
+    {
+        auto& c = list.getReference (i);
+        const double shift = c.start() - start;
+        const double len = c.midiLength();
+        for (auto e : c.v)
+        {
+            if (e.hasType (ids::NOTE))
+            {
+                const double s = e[ids::s];
+                if (s < 0.0 || s >= len) continue;   // trimmed-away notes stay away
+                auto copy = e.createCopy();
+                copy.setProperty (ids::s, s + shift, nullptr);
+                first.v.appendChild (copy, um());
+            }
+            else if (e.hasType (ids::CC))
+            {
+                const double b = e[ids::b];
+                if (b < 0.0 || b >= len) continue;
+                auto copy = e.createCopy();
+                copy.setProperty (ids::b, b + shift, nullptr);
+                first.v.appendChild (copy, um());
+            }
+        }
+        end = juce::jmax (end, c.endBeats (tempo()));
+        deleteClip (c);
+    }
+    first.v.setProperty (ids::length, end - start, um());
+    return first;
 }
 
 void Project::setTake (const Clip& c, int takeIndex)

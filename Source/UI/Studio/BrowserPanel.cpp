@@ -178,6 +178,7 @@ void BrowserPanel::populate()
         std::map<juce::String, juce::TreeViewItem*> groups;
         for (auto& b : builtinPlugins())
         {
+            if (b.category == "Hidden") continue;
             if (b.instrument) continue;
             if (groups.count (b.category) == 0) groups[b.category] = addGroup (b.category);
             addLeaf (groups[b.category], b.name, "fx:" + b.id, b.description);

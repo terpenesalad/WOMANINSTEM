@@ -19,6 +19,7 @@ struct PluginMenu
         std::map<juce::String, juce::PopupMenu> cats;
         for (auto& b : builtinPlugins())
         {
+            if (b.category == "Hidden") continue;
             if (b.instrument) continue;
             cats[b.category].addItem (id, b.name);
             m.refs[id++] = builtinRef (b.id);

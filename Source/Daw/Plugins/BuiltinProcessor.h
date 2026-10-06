@@ -13,7 +13,7 @@ class BuiltinProcessor : public juce::AudioProcessor
 {
 public:
     BuiltinProcessor (const juce::String& builtinId, const juce::String& displayName, bool isInstrument,
-                      juce::AudioProcessorValueTreeState::ParameterLayout layout);
+                      juce::AudioProcessorValueTreeState::ParameterLayout layout, bool midiOnly = false);
 
     const juce::String builtinId;
     const juce::String displayName;
@@ -22,9 +22,9 @@ public:
 
     // AudioProcessor
     const juce::String getName() const override        { return displayName; }
-    bool acceptsMidi() const override                   { return instrument; }
-    bool producesMidi() const override                  { return false; }
-    bool isMidiEffect() const override                  { return false; }
+    bool acceptsMidi() const override                   { return instrument || isMidiFx(); }
+    bool producesMidi() const override                  { return isMidiFx(); }
+    bool isMidiEffect() const override                  { return isMidiFx(); }
     double getTailLengthSeconds() const override        { return 2.0; }
     int getNumPrograms() override                       { return juce::jmax (1, getProgramNames().size()); }
     int getCurrentProgram() override                    { return currentProgram; }
@@ -62,11 +62,28 @@ public:
     /** Tempo from the host's playhead (falls back to 120). */
     double hostTempo() const;
 
+    /** Side-chain signal for this block (set by the engine just before processBlock, may be null). */
+    const juce::AudioBuffer<float>* sidechainInput = nullptr;
+    virtual bool wantsSidechain() const { return false; }
+
+    /** MIDI effects (arpeggiator...) have no audio and run before the instrument. */
+    virtual bool isMidiFx() const { return false; }
+
+    /** Files referenced by a plugin's state (samples) are stored relative to the song when possible.
+        The Studio installs these; without them absolute paths are used. */
+    static std::function<juce::String (const juce::File&)> fileToRef;     // copies into the song, returns a reference
+    static std::function<juce::File (const juce::String&)> refToFile;
+    static juce::String makeFileRef (const juce::File& f) { return fileToRef ? fileToRef (f) : f.getFullPathName(); }
+    static juce::File resolveFileRef (const juce::String& r) { return refToFile ? refToFile (r) : juce::File (r); }
+
+    /** Lets a plugin put audio it made (e.g. a looper's loop) onto its own track in the arrangement. */
+    static std::function<void (BuiltinProcessor&, const juce::File&)> onAudioToTrack;
+
 protected:
     int currentProgram = 0;
 
 private:
-    static BusesProperties busesFor (bool instrument);
+    static BusesProperties busesFor (bool instrument, bool midiOnly);
 };
 
 /** Description of a built-in plugin for the browser. */
@@ -74,6 +91,7 @@ struct BuiltinInfo
 {
     juce::String id, name, category, description;
     bool instrument = false;
+    bool midiFx = false;
     std::function<std::unique_ptr<BuiltinProcessor>()> create;
 };
 

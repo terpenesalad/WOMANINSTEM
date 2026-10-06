@@ -81,7 +81,15 @@ FetchContent_Declare(tinysoundfont
     GIT_SUBMODULES ""
     SOURCE_SUBDIR  do-not-build)
 
-FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain tinysoundfont)
+# CLAP: the official (MIT) headers, for hosting CLAP plugins in the Studio.
+FetchContent_Declare(clap
+    GIT_REPOSITORY https://github.com/free-audio/clap.git
+    GIT_TAG        1.2.9
+    GIT_SHALLOW    ON
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR  do-not-build)
+
+FetchContent_MakeAvailable(eigen demucs nam signalsmith-stretch r8brain tinysoundfont clap)
 
 set(EIGEN_DIR  "${eigen_SOURCE_DIR}")
 if(FETCHCONTENT_SOURCE_DIR_EIGEN)   # local override: PATCH_COMMAND doesn't run, so patch here (idempotent)
@@ -91,6 +99,7 @@ set(DEMUCS_DIR "${demucs_SOURCE_DIR}")
 set(NAM_DIR    "${nam_SOURCE_DIR}")
 set(R8B_DIR    "${r8brain_SOURCE_DIR}")
 set(TSF_DIR    "${tinysoundfont_SOURCE_DIR}")
+set(CLAP_DIR   "${clap_SOURCE_DIR}/include")
 
 # ---- Common optimisation flags for the heavy maths libraries -----------------
 function(wis_fast_math target)
@@ -158,6 +167,10 @@ set(WIS_ENGINE_SOURCES
     Source/Daw/Plugins/BuiltinProcessor.cpp
     Source/Daw/Plugins/BuiltinEffects.cpp
     Source/Daw/Plugins/BuiltinRegistry.cpp
+    Source/Daw/Plugins/TestEffects.cpp
+    Source/Daw/Plugins/NativeWindow.cpp
+    Source/Daw/Plugins/Vst2Format.cpp
+    Source/Daw/Plugins/ClapFormat.cpp
     Source/Daw/Plugins/PluginHost.cpp
     Source/Daw/Instruments/SoundFontInstrument.cpp
     Source/Daw/Instruments/StudioSynth.cpp)
@@ -175,7 +188,7 @@ set(WIS_JUCE_DEFS
     JUCE_STRICT_REFCOUNTEDPOINTER=1
     JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1
-    JUCE_PLUGINHOST_LV2=0
+    JUCE_PLUGINHOST_LV2=1
     JUCE_PLUGINHOST_AU=0
     WIS_VERSION_STRING="${PROJECT_VERSION}")
 
@@ -196,7 +209,7 @@ set(WIS_JUCE_MODULES
 
 function(wis_configure_target target)
     target_include_directories(${target} PRIVATE Source)
-    target_include_directories(${target} SYSTEM PRIVATE "${R8B_DIR}" "${TSF_DIR}")
+    target_include_directories(${target} SYSTEM PRIVATE "${R8B_DIR}" "${TSF_DIR}" "${CLAP_DIR}")
     target_compile_definitions(${target} PRIVATE ${WIS_JUCE_DEFS})
     target_link_libraries(${target} PRIVATE wis_demucs wis_nam signalsmith-stretch ${WIS_JUCE_MODULES}
         juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
@@ -264,6 +277,17 @@ if(WIS_BUILD_TOOLS)
     juce_add_console_app(dawtest PRODUCT_NAME "dawtest")
     target_sources(dawtest PRIVATE Tools/DawTest.cpp ${WIS_ENGINE_SOURCES})
     wis_configure_target(dawtest)
+
+    # tiny VST2 and CLAP plugins that dawtest loads through our own plugin hosts
+    add_library(wis_test_vst2 MODULE Tools/TestVst2Plugin.cpp)
+    add_library(wis_test_clap MODULE Tools/TestClapPlugin.cpp)
+    target_include_directories(wis_test_clap SYSTEM PRIVATE "${CLAP_DIR}")
+    set_target_properties(wis_test_clap PROPERTIES PREFIX "" SUFFIX ".clap")
+    set_target_properties(wis_test_vst2 wis_test_clap PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    add_dependencies(dawtest wis_test_vst2 wis_test_clap)
+    target_compile_definitions(dawtest PRIVATE
+        WIS_TEST_VST2="$<TARGET_FILE:wis_test_vst2>"
+        WIS_TEST_CLAP="$<TARGET_FILE:wis_test_clap>")
 
     # rigtest: renders test signals through every rig block and checks the output is sane
     juce_add_console_app(rigtest PRODUCT_NAME "rigtest")

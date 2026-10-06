@@ -1,6 +1,7 @@
 #include "AudioCache.h"
 #include "Separation/AudioFileLoader.h"
 #include "Common/Resample.h"
+#include <signalsmith-stretch/signalsmith-stretch.h>
 
 namespace wis::daw
 {
@@ -12,6 +13,7 @@ AudioCache::AudioCache() : juce::Thread ("Audio loader")
 
 AudioCache::~AudioCache()
 {
+    pool.removeAllJobs (true, 10000);
     signalThreadShouldExit();
     wake.signal();
     stopThread (5000);
@@ -66,7 +68,14 @@ void AudioCache::purgeUnused()
 {
     const juce::ScopedLock sl (lock);
     for (auto it = cache.begin(); it != cache.end();)
-        it = it->second->getReferenceCount() == 1 ? cache.erase (it) : std::next (it);
+    {
+        auto w = wanted.find (it->first);
+        const bool recentlyWanted = w != wanted.end() && w->second >= round - 1;
+        it = it->second->getReferenceCount() == 1 && ! recentlyWanted ? cache.erase (it) : std::next (it);
+    }
+    // forget old requests
+    for (auto it = wanted.begin(); it != wanted.end();)
+        it = it->second < round - 2 ? wanted.erase (it) : std::next (it);
 }
 
 juce::StringArray AudioCache::getFailedFiles() const
@@ -101,6 +110,13 @@ AudioData::Ptr AudioCache::load (const juce::File& f, double sr)
     d->sampleRate = sr;
     d->buffer = std::abs (reader->sampleRate - sr) > 0.5 ? wis::resampleBuffer (raw, reader->sampleRate, sr) : std::move (raw);
 
+    computePeaks (*d);
+    return d;
+}
+
+void AudioCache::computePeaks (AudioData& data)
+{
+    auto* d = &data;
     const int n = d->buffer.getNumSamples();
     d->peaks.resize ((size_t) (n / AudioData::peakStep + 1));
     for (size_t p = 0; p < d->peaks.size(); ++p)
@@ -114,7 +130,141 @@ AudioData::Ptr AudioCache::load (const juce::File& f, double sr)
         }
         d->peaks[p] = pk;
     }
+}
+
+// ---- variants (time-stretch / pitch / reverse) -------------------------------------------------------------
+
+juce::String AudioCache::variantKey (const juce::File& f, double sr, double ratio, double semitones, bool reverse)
+{
+    return keyFor (f, sr) + "#" + juce::String (ratio, 4) + "#" + juce::String (semitones, 2) + (reverse ? "#r" : "");
+}
+
+AudioData::Ptr AudioCache::render (const AudioData& source, double ratio, double semitones, bool reverse)
+{
+    AudioData::Ptr d = new AudioData();
+    d->file = source.file;
+    d->sampleRate = source.sampleRate;
+    const int channels = source.buffer.getNumChannels();
+    const int inLen = source.buffer.getNumSamples();
+
+    juce::AudioBuffer<float> in (channels, inLen);
+    for (int c = 0; c < channels; ++c)
+    {
+        in.copyFrom (c, 0, source.buffer, c, 0, inLen);
+        if (reverse) std::reverse (in.getWritePointer (c), in.getWritePointer (c) + inLen);
+    }
+
+    const bool stretch = std::abs (ratio - 1.0) > 1.0e-4 || std::abs (semitones) > 1.0e-3;
+    if (! stretch)
+    {
+        d->buffer = std::move (in);
+    }
+    else
+    {
+        const int outLen = juce::jmax (1, (int) std::llround (inLen * ratio));
+        d->buffer.setSize (channels, outLen);
+        signalsmith::stretch::SignalsmithStretch<float> st;
+        st.presetDefault (channels, (float) source.sampleRate);
+        st.setTransposeSemitones ((float) semitones);
+        std::vector<const float*> ins;
+        std::vector<float*> outs;
+        for (int c = 0; c < channels; ++c) { ins.push_back (in.getReadPointer (c)); outs.push_back (d->buffer.getWritePointer (c)); }
+        if (! st.exact (ins.data(), inLen, outs.data(), outLen))
+        {
+            // very short sounds: simple resample instead
+            for (int c = 0; c < channels; ++c)
+                for (int i = 0; i < outLen; ++i)
+                {
+                    const double x = i / ratio;
+                    const int a = juce::jlimit (0, inLen - 1, (int) x);
+                    const int b = juce::jmin (inLen - 1, a + 1);
+                    const float f = (float) (x - a);
+                    outs[(size_t) c][i] = ins[(size_t) c][a] * (1.0f - f) + ins[(size_t) c][b] * f;
+                }
+        }
+    }
+    computePeaks (*d);
     return d;
+}
+
+struct AudioCache::VariantJob : public juce::ThreadPoolJob
+{
+    VariantJob (AudioCache& c, juce::File f, double r, double rt, double st, bool rev, juce::String k)
+        : ThreadPoolJob ("stretch"), cache (c), file (std::move (f)), rate (r), ratio (rt), semis (st), reverse (rev), key (std::move (k)) {}
+
+    JobStatus runJob() override
+    {
+        bool stillWanted;
+        {
+            const juce::ScopedLock sl (cache.lock);
+            auto it = cache.wanted.find (key);
+            stillWanted = it != cache.wanted.end() && it->second >= cache.round - 1;
+        }
+        if (stillWanted && ! shouldExit())
+        {
+            if (auto base = cache.getBlocking (file, rate))
+            {
+                auto v = render (*base, ratio, semis, reverse);
+                const juce::ScopedLock sl (cache.lock);
+                cache.cache[key] = v;
+            }
+            else
+            {
+                const juce::ScopedLock sl (cache.lock);
+                cache.failed.addIfNotAlreadyThere (key);
+            }
+        }
+        {
+            const juce::ScopedLock sl (cache.lock);
+            cache.variantsQueued.erase (key);
+        }
+        --cache.variantJobs;
+        cache.triggerAsyncUpdate();
+        return jobHasFinished;
+    }
+
+    AudioCache& cache;
+    juce::File file;
+    double rate, ratio, semis;
+    bool reverse;
+    juce::String key;
+};
+
+void AudioCache::beginRequestRound()
+{
+    const juce::ScopedLock sl (lock);
+    ++round;
+}
+
+AudioData::Ptr AudioCache::getVariant (const juce::File& f, double sr, double ratio, double semitones, bool reverse)
+{
+    const auto key = variantKey (f, sr, ratio, semitones, reverse);
+    const juce::ScopedLock sl (lock);
+    wanted[key] = round;
+    if (auto it = cache.find (key); it != cache.end())
+        return it->second;
+    if (failed.contains (key) || variantsQueued.count (key) > 0)
+        return nullptr;
+    variantsQueued.insert (key);
+    ++variantJobs;
+    pool.addJob (new VariantJob (*this, f, sr, ratio, semitones, reverse, key), true);
+    return nullptr;
+}
+
+AudioData::Ptr AudioCache::getVariantBlocking (const juce::File& f, double sr, double ratio, double semitones, bool reverse)
+{
+    const auto key = variantKey (f, sr, ratio, semitones, reverse);
+    {
+        const juce::ScopedLock sl (lock);
+        if (auto it = cache.find (key); it != cache.end())
+            return it->second;
+    }
+    auto base = getBlocking (f, sr);
+    if (base == nullptr) return nullptr;
+    auto v = render (*base, ratio, semitones, reverse);
+    const juce::ScopedLock sl (lock);
+    cache[key] = v;
+    return v;
 }
 
 void AudioCache::run()

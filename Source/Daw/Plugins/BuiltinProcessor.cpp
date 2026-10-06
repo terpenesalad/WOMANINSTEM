@@ -4,18 +4,22 @@ namespace wis::daw
 {
 
 std::function<juce::AudioProcessorEditor* (BuiltinProcessor&)> BuiltinProcessor::genericEditorFactory;
+std::function<juce::String (const juce::File&)> BuiltinProcessor::fileToRef;
+std::function<juce::File (const juce::String&)> BuiltinProcessor::refToFile;
+std::function<void (BuiltinProcessor&, const juce::File&)> BuiltinProcessor::onAudioToTrack;
 
-juce::AudioProcessor::BusesProperties BuiltinProcessor::busesFor (bool instrument)
+juce::AudioProcessor::BusesProperties BuiltinProcessor::busesFor (bool instrument, bool midiOnly)
 {
     auto b = BusesProperties();
+    if (midiOnly) return b;
     if (! instrument)
         b = b.withInput ("Input", juce::AudioChannelSet::stereo(), true);
     return b.withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
 BuiltinProcessor::BuiltinProcessor (const juce::String& id, const juce::String& name, bool isInstrument,
-                                    juce::AudioProcessorValueTreeState::ParameterLayout layout)
-    : AudioProcessor (busesFor (isInstrument)),
+                                    juce::AudioProcessorValueTreeState::ParameterLayout layout, bool midiOnly)
+    : AudioProcessor (busesFor (isInstrument, midiOnly)),
       builtinId (id), displayName (name), instrument (isInstrument),
       state (*this, nullptr, juce::Identifier ("STATE"), std::move (layout))
 {
@@ -23,6 +27,7 @@ BuiltinProcessor::BuiltinProcessor (const juce::String& id, const juce::String& 
 
 bool BuiltinProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
+    if (isMidiFx()) return layouts.inputBuses.isEmpty() && layouts.outputBuses.isEmpty();
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::stereo() && out != juce::AudioChannelSet::mono())
         return false;

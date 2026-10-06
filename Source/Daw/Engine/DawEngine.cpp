@@ -16,7 +16,14 @@ void Slot::prepare (double sr, int block)
     scratch.setSize (channels, block, false, true, false);
 }
 
-void Slot::process (juce::AudioBuffer<float>& stereo, int n, juce::MidiBuffer& midi)
+bool Slot::acceptsSidechain() const
+{
+    if (proc == nullptr) return false;
+    if (builtin != nullptr) return builtin->wantsSidechain();
+    return proc->getTotalNumInputChannels() >= 4;
+}
+
+void Slot::process (juce::AudioBuffer<float>& stereo, int n, juce::MidiBuffer& midi, const juce::AudioBuffer<float>* sidechain)
 {
     if (proc == nullptr || n > scratch.getNumSamples())
         return;
@@ -44,8 +51,17 @@ void Slot::process (juce::AudioBuffer<float>& stereo, int n, juce::MidiBuffer& m
         view.copyFrom (0, 0, stereo.getReadPointer (0), n, 0.5f);
         view.addFrom (0, 0, stereo.getReadPointer (1), n, 0.5f);
     }
+    // external plugins with a side-chain bus get the key signal on channels 3/4
+    if (builtin == nullptr && sidechain != nullptr && ins >= 4 && channels >= 4)
+    {
+        view.copyFrom (2, 0, *sidechain, 0, 0, n);
+        view.copyFrom (3, 0, *sidechain, juce::jmin (1, sidechain->getNumChannels() - 1), 0, n);
+    }
+    if (builtin != nullptr) builtin->sidechainInput = sidechain;
 
     proc->processBlock (view, midi);
+
+    if (builtin != nullptr) builtin->sidechainInput = nullptr;
 
     if (outs >= 2)
     {
@@ -57,6 +73,39 @@ void Slot::process (juce::AudioBuffer<float>& stereo, int n, juce::MidiBuffer& m
         stereo.copyFrom (0, 0, view, 0, 0, n);
         stereo.copyFrom (1, 0, view, 0, 0, n);
     }
+}
+
+void Slot::processMidi (int n, juce::MidiBuffer& midi)
+{
+    if (proc == nullptr || bypass.load() || n > scratch.getNumSamples())
+        return;
+    const juce::ScopedLock sl (proc->getCallbackLock());
+    if (proc->isSuspended()) return;
+    // MIDI effects get an audio buffer with as many channels as they declare (normally none)
+    juce::AudioBuffer<float> view (scratch.getArrayOfWritePointers(), juce::jmin (channels, proc->getTotalNumOutputChannels()), n);
+    view.clear();
+    proc->processBlock (view, midi);
+}
+
+void DelayLine::process (juce::AudioBuffer<float>& b, int len, int delay) noexcept
+{
+    delay = juce::jlimit (0, capacity - 1, delay);
+    if (delay == 0) return;
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        auto* d = b.getWritePointer (ch);
+        auto* line = buf.getWritePointer (ch);
+        int w = pos;
+        for (int i = 0; i < len; ++i)
+        {
+            line[w] = d[i];
+            int r = w - delay;
+            if (r < 0) r += capacity;
+            d[i] = line[r];
+            if (++w == capacity) w = 0;
+        }
+    }
+    pos = (pos + len) % capacity;
 }
 
 float Snapshot::Lane::valueAt (juce::int64 t) const
@@ -92,7 +141,8 @@ static const std::vector<juce::Identifier>& mixProps()
 static const std::vector<juce::Identifier>& uiOnlyProps()
 {
     static const std::vector<juce::Identifier> v { ids::name, ids::colour, ids::height, ids::zoom, ids::playhead, ids::showAutomation,
-                                                   ids::countIn, ids::state, ids::nextId, ids::version };
+                                                   ids::countIn, ids::state, ids::nextId, ids::version,
+                                                   ids::key, ids::scale, ids::autoParam };
     return v;
 }
 
@@ -183,7 +233,8 @@ void DawEngine::prepareAll()
         slot->prepare (sampleRate, maxBlock);
     for (auto& [id, rt] : runtimes)
     {
-        rt->buffer.setSize (2, maxBlock, false, true, false);
+        for (auto* b : { &rt->buffer, &rt->scratch, &rt->sideOut })
+            b->setSize (2, maxBlock, false, true, false);
         rt->midi.ensureSize (8192);
     }
 }
@@ -218,7 +269,8 @@ TrackRT::Ptr DawEngine::runtimeFor (int id)
         return it->second;
     TrackRT::Ptr rt = new TrackRT();
     rt->id = id;
-    rt->buffer.setSize (2, maxBlock);
+    for (auto* b : { &rt->buffer, &rt->scratch, &rt->sideOut })
+        b->setSize (2, maxBlock);
     rt->midi.ensureSize (8192);
     runtimes[id] = rt;
     return rt;
@@ -245,12 +297,18 @@ void DawEngine::syncMixValues()
     masterVolume = juce::Decibels::decibelsToGain ((float) (double) project.tree()[ids::masterVolume]);
     metronomeOn = (bool) project.tree()[ids::metronome];
 
-    // solo state lives in the snapshot; rebuild cheaply when it changes
+    // solo state (including implied solo through buses) lives in the snapshot
     bool anySolo = false;
     for (auto tv : project.tracks()) anySolo = anySolo || (bool) tv[ids::solo];
     {
         const juce::SpinLock::ScopedLockType sl (snapLock);
-        if (pending != nullptr && pending->anySolo != anySolo) markDirty();
+        if (pending != nullptr)
+        {
+            if (pending->anySolo != anySolo) markDirty();
+            else if (anySolo)
+                for (auto& tr : pending->tracks)
+                    if (tr.rt->solo.load() && ! tr.soloed) { markDirty(); break; }
+        }
     }
 }
 
@@ -269,8 +327,11 @@ Slot::Ptr DawEngine::slotFor (const juce::ValueTree& node, bool instrument)
     s->proc = host.create (node, sampleRate, maxBlock, instrument, s->error);
     if (s->proc != nullptr)
     {
+        s->builtin = dynamic_cast<BuiltinProcessor*> (s->proc.get());
+        s->midiFx = s->proc->isMidiEffect();
         s->proc->setPlayHead (this);
         s->prepare (sampleRate, maxBlock);
+        s->proc->addListener (this);
     }
     else if (onError)
     {
@@ -301,10 +362,20 @@ void DawEngine::rebuild()
     s->tsDen = project.tsDen();
     s->samplesPerBeat = sampleRate * 60.0 / s->tempo;
     const double spb = s->samplesPerBeat;
+    const double tempo = s->tempo;
     auto toSamples = [spb] (double beats) { return (juce::int64) std::llround (beats * spb); };
+    auto makeLane = [&] (const juce::ValueTree& lane)
+    {
+        Snapshot::Lane l;
+        for (auto p : lane)
+            l.points.push_back ({ toSamples ((double) p[ids::b]), (float) (double) p[ids::v] });
+        std::sort (l.points.begin(), l.points.end(), [] (auto& x, auto& y) { return x.first < y.first; });
+        return l;
+    };
 
     std::set<juce::String> usedSlots;
     std::set<int> usedTracks;
+    cache.beginRequestRound();
 
     for (auto tv : project.tracks())
     {
@@ -315,92 +386,143 @@ void DawEngine::rebuild()
         Snapshot::TrackR tr;
         tr.rt = rt;
         tr.instrument = t.isInstrument();
+        tr.bus = t.isBus();
+        std::map<juce::String, Slot::Ptr> trackSlots;
 
         if (tr.instrument)
         {
+            for (auto pnode : t.midiFx())
+            {
+                auto slot = slotFor (pnode, false);
+                usedSlots.insert (slot->slotId);
+                trackSlots[slot->slotId] = slot;
+                tr.midiFx.push_back ({ slot, -1 });
+            }
             auto node = t.instrument();
             if (node.isValid())
             {
                 tr.inst = slotFor (node, true);
                 usedSlots.insert (tr.inst->slotId);
+                trackSlots[tr.inst->slotId] = tr.inst;
             }
         }
         for (auto pnode : t.inserts())
         {
             auto slot = slotFor (pnode, false);
             usedSlots.insert (slot->slotId);
-            tr.inserts.add (slot);
+            trackSlots[slot->slotId] = slot;
+            // side-chain source is resolved to a track index once every track is known
+            tr.inserts.push_back ({ slot, (int) pnode.getProperty (ids::sidechain, 0) });
         }
 
-        for (auto cv : t.clips())
+        if (! tr.bus)
         {
-            Clip c (cv);
-            if (cv[ids::mute]) continue;
+            for (auto cv : t.clips())
+            {
+                Clip c (cv);
+                if (cv[ids::mute]) continue;
 
-            if (c.isAudio())
-            {
-                auto data = cache.get (project.resolve (c.file()), sampleRate);
-                if (data == nullptr) { ++s->missingAudio; continue; }
-                Snapshot::AudioClipR a;
-                a.data = data;
-                a.start = toSamples (c.start());
-                a.length = (juce::int64) std::llround (c.lengthSeconds() * sampleRate);
-                a.offset = (juce::int64) std::llround (c.offsetSeconds() * sampleRate);
-                a.gain = juce::Decibels::decibelsToGain (c.gainDb());
-                a.fadeIn = (int) (c.fadeIn() * sampleRate);
-                a.fadeOut = (int) (c.fadeOut() * sampleRate);
-                if (a.length > 0) tr.audio.push_back (std::move (a));
-            }
-            else
-            {
-                Snapshot::MidiClipR m;
-                const double len = c.midiLength();
-                m.start = toSamples (c.start());
-                m.end = toSamples (c.start() + len);
-                for (auto e : cv)
+                if (c.isAudio())
                 {
-                    if (e.hasType (ids::NOTE))
-                    {
-                        const double ns = e[ids::s], nl = e[ids::l];
-                        if (ns < 0.0 || ns >= len) continue;      // trimmed away (non-destructive)
-                        const int pitch = juce::jlimit (0, 127, (int) e[ids::p]);
-                        const int vel = juce::jlimit (1, 127, (int) e[ids::v]);
-                        const auto on = toSamples (c.start() + ns);
-                        const auto off = juce::jmax (on + 1, toSamples (c.start() + juce::jmin (len, ns + nl)));
-                        m.events.push_back ({ on,  { (juce::uint8) 0x90, (juce::uint8) pitch, (juce::uint8) vel }, 3 });
-                        m.events.push_back ({ off, { (juce::uint8) 0x80, (juce::uint8) pitch, (juce::uint8) 0 }, 3 });
-                    }
-                    else if (e.hasType (ids::CC))
-                    {
-                        const double b = e[ids::b];
-                        if (b < 0.0 || b >= len) continue;
-                        const int num = e[ids::n], val = e[ids::v];
-                        Snapshot::MidiEv ev { toSamples (c.start() + b), {}, 3 };
-                        if (num == ccPitchBend)       { ev.bytes[0] = 0xE0; ev.bytes[1] = (juce::uint8) (val & 127); ev.bytes[2] = (juce::uint8) ((val >> 7) & 127); }
-                        else if (num == ccAftertouch) { ev.bytes[0] = 0xD0; ev.bytes[1] = (juce::uint8) (val & 127); ev.size = 2; }
-                        else                          { ev.bytes[0] = 0xB0; ev.bytes[1] = (juce::uint8) (num & 127); ev.bytes[2] = (juce::uint8) (val & 127); }
-                        m.events.push_back (ev);
-                    }
+                    const double ratio = c.stretchRatio (tempo);
+                    const bool variant = c.needsStretch (tempo);
+                    auto file = project.resolve (c.file());
+                    auto data = variant ? cache.getVariant (file, sampleRate, ratio, c.pitch(), c.reversed())
+                                        : cache.get (file, sampleRate);
+                    if (data == nullptr) { ++s->missingAudio; continue; }
+                    Snapshot::AudioClipR a;
+                    a.data = data;
+                    a.start = toSamples (c.start());
+                    a.length = (juce::int64) std::llround (c.lengthSeconds() * ratio * sampleRate);
+                    // the variant is the whole file, stretched (and maybe reversed): find where this clip's audio sits in it
+                    double srcOffset = c.offsetSeconds();
+                    if (c.reversed())
+                        srcOffset = AudioCache::sourceLengthSeconds (data, ratio) - c.offsetSeconds() - c.lengthSeconds();
+                    a.offset = (juce::int64) std::llround (srcOffset * ratio * sampleRate);
+                    a.gain = juce::Decibels::decibelsToGain (c.gainDb());
+                    a.fadeIn = (int) (c.fadeIn() * sampleRate);
+                    a.fadeOut = (int) (c.fadeOut() * sampleRate);
+                    if (a.length > 0) tr.audio.push_back (std::move (a));
                 }
-                // time order; at the same instant note-offs go first so repeated notes retrigger
-                std::stable_sort (m.events.begin(), m.events.end(), [] (const auto& a, const auto& b)
+                else
                 {
-                    if (a.time != b.time) return a.time < b.time;
-                    return (a.bytes[0] & 0xf0) == 0x80 && (b.bytes[0] & 0xf0) != 0x80;
-                });
-                tr.midi.push_back (std::move (m));
+                    Snapshot::MidiClipR m;
+                    const double len = c.midiLength();
+                    m.start = toSamples (c.start());
+                    m.end = toSamples (c.start() + len);
+                    for (auto e : cv)
+                    {
+                        if (e.hasType (ids::NOTE))
+                        {
+                            const double ns = e[ids::s], nl = e[ids::l];
+                            if (ns < 0.0 || ns >= len) continue;      // trimmed away (non-destructive)
+                            const int pitch = juce::jlimit (0, 127, (int) e[ids::p]);
+                            const int vel = juce::jlimit (1, 127, (int) e[ids::v]);
+                            const auto on = toSamples (c.start() + ns);
+                            const auto off = juce::jmax (on + 1, toSamples (c.start() + juce::jmin (len, ns + nl)));
+                            m.events.push_back ({ on,  { (juce::uint8) 0x90, (juce::uint8) pitch, (juce::uint8) vel }, 3 });
+                            m.events.push_back ({ off, { (juce::uint8) 0x80, (juce::uint8) pitch, (juce::uint8) 0 }, 3 });
+                        }
+                        else if (e.hasType (ids::CC))
+                        {
+                            const double b = e[ids::b];
+                            if (b < 0.0 || b >= len) continue;
+                            const int num = e[ids::n], val = e[ids::v];
+                            Snapshot::MidiEv ev { toSamples (c.start() + b), {}, 3 };
+                            if (num == ccPitchBend)       { ev.bytes[0] = 0xE0; ev.bytes[1] = (juce::uint8) (val & 127); ev.bytes[2] = (juce::uint8) ((val >> 7) & 127); }
+                            else if (num == ccAftertouch) { ev.bytes[0] = 0xD0; ev.bytes[1] = (juce::uint8) (val & 127); ev.size = 2; }
+                            else                          { ev.bytes[0] = 0xB0; ev.bytes[1] = (juce::uint8) (num & 127); ev.bytes[2] = (juce::uint8) (val & 127); }
+                            m.events.push_back (ev);
+                        }
+                    }
+                    // time order; at the same instant note-offs go first so repeated notes retrigger
+                    std::stable_sort (m.events.begin(), m.events.end(), [] (const auto& x, const auto& y)
+                    {
+                        if (x.time != y.time) return x.time < y.time;
+                        return (x.bytes[0] & 0xf0) == 0x80 && (y.bytes[0] & 0xf0) != 0x80;
+                    });
+                    tr.midi.push_back (std::move (m));
+                }
             }
         }
+
+        // sends (bus ids are resolved to indices below)
+        for (auto sv : t.sends())
+        {
+            Snapshot::SendR sr;
+            sr.bus = (int) sv[ids::bus];
+            sr.levelDb = (float) (double) sv.getProperty (ids::level, 0.0);
+            sr.pre = (bool) sv[ids::pre];
+            tr.sends.push_back (std::move (sr));
+        }
+        tr.output = t.output();
 
         for (auto lane : t.automation())
         {
-            Snapshot::Lane l;
-            for (auto p : lane)
-                l.points.push_back ({ toSamples ((double) p[ids::b]), (float) (double) p[ids::v] });
-            std::sort (l.points.begin(), l.points.end(), [] (auto& a, auto& b) { return a.first < b.first; });
             const auto param = lane[ids::param].toString();
-            if (param == "volume") tr.volume = std::move (l);
-            else if (param == "pan") tr.pan = std::move (l);
+            if (lane.getNumChildren() == 0) continue;
+            if (param == "volume") tr.volume = makeLane (lane);
+            else if (param == "pan") tr.pan = makeLane (lane);
+            else if (param.startsWith ("send:"))
+            {
+                const int busId = param.fromFirstOccurrenceOf ("send:", false, false).getIntValue();
+                for (auto& sr : tr.sends) if (sr.bus == busId) sr.lane = makeLane (lane);
+            }
+            else if (param.startsWith ("plug:"))
+            {
+                const auto rest = param.fromFirstOccurrenceOf ("plug:", false, false);
+                const auto slotId = rest.upToLastOccurrenceOf (":", false, false);
+                const int index = rest.fromLastOccurrenceOf (":", false, false).getIntValue();
+                if (auto it = trackSlots.find (slotId); it != trackSlots.end() && it->second->proc != nullptr
+                    && juce::isPositiveAndBelow (index, it->second->proc->getParameters().size()))
+                {
+                    Snapshot::ParamLane pl;
+                    pl.slot = it->second;
+                    pl.index = index;
+                    pl.lane = makeLane (lane);
+                    tr.params.push_back (std::move (pl));
+                }
+            }
         }
 
         s->anySolo = s->anySolo || (bool) tv[ids::solo];
@@ -418,6 +540,8 @@ void DawEngine::rebuild()
     s->cycleStart = toSamples ((double) project.tree()[ids::cycleStart]);
     s->cycleEnd = toSamples ((double) project.tree()[ids::cycleEnd]);
     if (s->cycleEnd - s->cycleStart < (juce::int64) (sampleRate * 0.05)) s->cycleOn = false;
+
+    computeRouting (*s);
 
     // drop runtimes / plugins that no longer exist
     for (auto it = runtimes.begin(); it != runtimes.end();)
@@ -439,6 +563,159 @@ void DawEngine::rebuild()
         pending = s;
     }
     graveyard.add (s);
+}
+
+void DawEngine::computeRouting (Snapshot& s)
+{
+    const int n = (int) s.tracks.size();
+    std::map<int, int> indexOf;
+    for (int i = 0; i < n; ++i) indexOf[s.tracks[(size_t) i].rt->id] = i;
+    auto busIndex = [&] (int id) { auto it = indexOf.find (id); return it != indexOf.end() && s.tracks[(size_t) it->second].bus ? it->second : -1; };
+
+    // ---- graph: an edge a -> b means a must be processed before b ----
+    std::vector<std::vector<int>> next ((size_t) n);
+    auto reaches = [&] (int from, int to)
+    {
+        std::vector<char> seen ((size_t) n, 0);
+        std::vector<int> stack { from };
+        while (! stack.empty())
+        {
+            const int x = stack.back(); stack.pop_back();
+            if (x == to) return true;
+            if (seen[(size_t) x]) continue;
+            seen[(size_t) x] = 1;
+            for (int y : next[(size_t) x]) stack.push_back (y);
+        }
+        return false;
+    };
+    auto addEdge = [&] (int a, int b)
+    {
+        if (a == b || b < 0 || reaches (b, a)) return false;   // would loop
+        next[(size_t) a].push_back (b);
+        return true;
+    };
+
+    for (int i = 0; i < n; ++i)
+    {
+        auto& tr = s.tracks[(size_t) i];
+        tr.output = tr.output != 0 ? busIndex (tr.output) : -1;
+        if (tr.output >= 0 && ! addEdge (i, tr.output)) tr.output = -1;
+        for (auto& sr : tr.sends)
+        {
+            sr.bus = busIndex (sr.bus);
+            if (sr.bus >= 0 && ! addEdge (i, sr.bus)) sr.bus = -1;
+        }
+    }
+    for (int i = 0; i < n; ++i)
+        for (auto& slot : s.tracks[(size_t) i].inserts)
+        {
+            if (slot.sidechain == 0) { slot.sidechain = -1; continue; }
+            auto it = indexOf.find (slot.sidechain);
+            slot.sidechain = it != indexOf.end() && slot.slot->acceptsSidechain() && addEdge (it->second, i) ? it->second : -1;
+            if (slot.sidechain >= 0) s.tracks[(size_t) slot.sidechain].keysSidechain = true;
+        }
+
+    // ---- processing order (Kahn), keeping the arrangement order where possible ----
+    std::vector<int> indeg ((size_t) n, 0);
+    for (int i = 0; i < n; ++i) for (int j : next[(size_t) i]) ++indeg[(size_t) j];
+    std::vector<char> done ((size_t) n, 0);
+    s.order.clear();
+    while ((int) s.order.size() < n)
+    {
+        bool progressed = false;
+        for (int i = 0; i < n; ++i)
+            if (! done[(size_t) i] && indeg[(size_t) i] == 0)
+            {
+                done[(size_t) i] = 1;
+                s.order.push_back (i);
+                for (int j : next[(size_t) i]) --indeg[(size_t) j];
+                progressed = true;
+            }
+        if (! progressed) break;   // can't happen (edges never form loops)
+    }
+
+    // ---- solo: soloing a track keeps the buses it feeds audible; soloing a bus keeps its sources audible ----
+    if (s.anySolo)
+    {
+        std::function<void (int)> down = [&] (int i)
+        {
+            auto& tr = s.tracks[(size_t) i];
+            if (tr.output >= 0 && ! s.tracks[(size_t) tr.output].soloed) { s.tracks[(size_t) tr.output].soloed = true; down (tr.output); }
+            for (auto& sr : tr.sends)
+                if (sr.bus >= 0 && ! s.tracks[(size_t) sr.bus].soloed) { s.tracks[(size_t) sr.bus].soloed = true; down (sr.bus); }
+        };
+        std::function<void (int)> up = [&] (int busI)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                auto& tr = s.tracks[(size_t) i];
+                bool feeds = tr.output == busI;
+                for (auto& sr : tr.sends) feeds = feeds || sr.bus == busI;
+                if (feeds && ! tr.soloed) { tr.soloed = true; if (tr.bus) up (i); }
+            }
+        };
+        std::vector<int> explicitSolo;
+        for (int i = 0; i < n; ++i) if (s.tracks[(size_t) i].rt->solo.load()) explicitSolo.push_back (i);
+        for (int i : explicitSolo) s.tracks[(size_t) i].soloed = true;
+        for (int i : explicitSolo) { down (i); if (s.tracks[(size_t) i].bus) up (i); }
+    }
+
+    // ---- plugin delay compensation ----
+    std::vector<int> own ((size_t) n, 0), path ((size_t) n, 0);
+    for (int i = 0; i < n; ++i)
+    {
+        auto& tr = s.tracks[(size_t) i];
+        int l = tr.inst != nullptr ? tr.inst->latency() : 0;
+        for (auto& sl : tr.inserts) l += sl.slot->latency();
+        own[(size_t) i] = l;
+    }
+    // reverse processing order: destinations are known before their sources
+    for (auto it = s.order.rbegin(); it != s.order.rend(); ++it)
+    {
+        const int i = *it;
+        auto& tr = s.tracks[(size_t) i];
+        auto destLatency = [&] (int d) { return d < 0 ? 0 : path[(size_t) d]; };
+        int downstream = destLatency (tr.output);
+        for (auto& sr : tr.sends) if (sr.bus >= 0) downstream = juce::jmax (downstream, destLatency (sr.bus));
+        path[(size_t) i] = own[(size_t) i] + downstream;
+        tr.lookahead = path[(size_t) i];
+        tr.outDelay = downstream - destLatency (tr.output);
+        for (auto& sr : tr.sends) sr.delay = sr.bus >= 0 ? downstream - destLatency (sr.bus) : 0;
+        s.maxLatency = juce::jmax (s.maxLatency, path[(size_t) i]);
+    }
+
+    // delay lines for connections that need compensating (allocated here, never on the audio thread)
+    for (auto& tr : s.tracks)
+    {
+        auto& rt = *tr.rt;
+        const size_t needed = 1 + tr.sends.size();
+        bool grow = rt.delays.size() < needed;
+        if (! grow)
+        {
+            if (tr.outDelay > 0 && rt.delays[0] == nullptr) grow = true;
+            for (size_t k = 0; k < tr.sends.size(); ++k) if (tr.sends[k].delay > 0 && rt.delays[k + 1] == nullptr) grow = true;
+        }
+        if (! grow) continue;
+        std::vector<std::unique_ptr<DelayLine>> fresh (needed);
+        for (size_t k = 0; k < needed; ++k)
+        {
+            const int d = k == 0 ? tr.outDelay : tr.sends[k - 1].delay;
+            if (d > 0 && (k >= rt.delays.size() || rt.delays[k] == nullptr)) fresh[k] = std::make_unique<DelayLine>();
+        }
+        const juce::ScopedLock sl (processLock);   // the audio thread may be reading the old vector
+        for (size_t k = 0; k < needed && k < rt.delays.size(); ++k)
+            if (fresh[k] == nullptr) fresh[k] = std::move (rt.delays[k]);
+        rt.delays.swap (fresh);
+    }
+}
+
+int DawEngine::getTrackLatency (int trackId)
+{
+    const juce::SpinLock::ScopedLockType sl (snapLock);
+    if (pending != nullptr)
+        for (auto& tr : pending->tracks)
+            if (tr.rt->id == trackId) return (int) tr.lookahead;
+    return 0;
 }
 
 void DawEngine::timerCallback()
@@ -506,11 +783,15 @@ void DawEngine::record()
 
     // Nothing armed? Record onto the selected track (GarageBand style).
     bool anyArmed = false;
-    for (auto tv : project.tracks()) anyArmed = anyArmed || (bool) tv[ids::arm];
+    for (auto tv : project.tracks()) anyArmed = anyArmed || ((bool) tv[ids::arm] && ! Track (tv).isBus());
     if (! anyArmed)
     {
         auto t = project.trackById (selectedTrackId.load());
-        if (! t.isValid() && project.numTracks() > 0) t = project.track (0);
+        if (! t.isValid() || t.isBus())
+        {
+            t = Track();
+            for (auto tv : project.tracks()) if (! Track (tv).isBus()) { t = Track (tv); break; }
+        }
         if (! t.isValid())
         {
             if (onError) onError ("Add a track first, then press Record.");
@@ -551,7 +832,7 @@ void DawEngine::startRecordingSession()
     for (auto tv : project.tracks())
     {
         Track t (tv);
-        if (! (bool) tv[ids::arm]) continue;
+        if (! (bool) tv[ids::arm] || t.isBus()) continue;
 
         auto r = std::make_unique<RecordingTrack>();
         r->trackId = t.id();
@@ -967,7 +1248,9 @@ void DawEngine::renderBlock (const float* const* in, int numIn, float* const* ou
             if (s.cycleOn && pos == s.cycleEnd)
             {
                 pos = s.cycleStart;
-                sendNoteOffsToAll (s);
+                // tracks rendering ahead (latency compensation) already wrapped on their own
+                for (auto& tr : s.tracks)
+                    if (tr.lookahead == 0) tr.rt->sendNotesOff = true;
             }
         }
         done += len;
@@ -975,7 +1258,8 @@ void DawEngine::renderBlock (const float* const* in, int numIn, float* const* ou
     position = pos;
 
     // master volume, metronome, safety limiter, meters
-    const float mv = masterVolume.load();
+    const bool raw = bounceMode.load();
+    const float mv = raw ? 1.0f : masterVolume.load();
     const float clickGain = juce::Decibels::decibelsToGain (metronomeVolumeDb.load());
     bool hit = false;
     float pl = 0, pr = 0;
@@ -984,8 +1268,8 @@ void DawEngine::renderBlock (const float* const* in, int numIn, float* const* ou
     auto* C = clickBuf.getReadPointer (0);
     for (int i = 0; i < n; ++i)
     {
-        const float l = safetyLimit (L[i] * mv + C[i] * clickGain, hit);
-        const float r = safetyLimit (R[i] * mv + C[i] * clickGain, hit);
+        const float l = raw ? L[i] : safetyLimit (L[i] * mv + C[i] * clickGain, hit);
+        const float r = raw ? R[i] : safetyLimit (R[i] * mv + C[i] * clickGain, hit);
         L[i] = l; R[i] = r;
         pl = juce::jmax (pl, std::abs (l));
         pr = juce::jmax (pr, std::abs (r));
@@ -1005,25 +1289,84 @@ void DawEngine::renderBlock (const float* const* in, int numIn, float* const* ou
     }
 }
 
+void DawEngine::gatherClips (Snapshot::TrackR& tr, juce::AudioBuffer<float>& buf, juce::int64 t0, int num, int o)
+{
+    auto& rt = *tr.rt;
+    const juce::int64 t1 = t0 + num;
+    for (auto& mc : tr.midi)
+    {
+        if (mc.end <= t0 || mc.start >= t1 || mc.events.empty()) continue;
+        auto it = std::lower_bound (mc.events.begin(), mc.events.end(), t0, [] (const auto& e, juce::int64 t) { return e.time < t; });
+        for (; it != mc.events.end() && it->time < t1; ++it)
+        {
+            rt.midi.addEvent (it->bytes, it->size, o + (int) (it->time - t0));
+            const int type = it->bytes[0] & 0xf0;
+            if (type == 0x90) rt.playingNotes.set (it->bytes[1]);
+            else if (type == 0x80) rt.playingNotes.reset (it->bytes[1]);
+        }
+    }
+
+    for (auto& ac : tr.audio)
+    {
+        const juce::int64 a = juce::jmax (t0, ac.start), b = juce::jmin (t1, ac.start + ac.length);
+        if (a >= b) continue;
+        auto& src = ac.data->buffer;
+        const juce::int64 srcLen = src.getNumSamples();
+        const float* sl = src.getReadPointer (0);
+        const float* sr = src.getReadPointer (src.getNumChannels() > 1 ? 1 : 0);
+        float* dl = buf.getWritePointer (0, o);
+        float* dr = buf.getWritePointer (1, o);
+        for (juce::int64 t = a; t < b; ++t)
+        {
+            const juce::int64 inClip = t - ac.start;
+            const juce::int64 si = ac.offset + inClip;
+            if (si < 0 || si >= srcLen) continue;
+            float g = ac.gain;
+            if (ac.fadeIn > 0 && inClip < ac.fadeIn) g *= (float) inClip / (float) ac.fadeIn;
+            const juce::int64 toEnd = ac.length - inClip;
+            if (ac.fadeOut > 0 && toEnd < ac.fadeOut) g *= (float) toEnd / (float) ac.fadeOut;
+            const int k = (int) (t - t0);
+            dl[k] += sl[si] * g;
+            dr[k] += sr[si] * g;
+        }
+    }
+}
+
 void DawEngine::renderSegment (Snapshot& s, juce::int64 t0, int len, int off, bool rolling, const float* const* in, int numIn)
 {
-    playheadForPlugins = t0;
     playheadRolling = rolling;
-    const juce::int64 t1 = t0 + len;
     const bool rec = recording.load() && rolling;
     const int selected = selectedTrackId.load();
+    const bool raw = bounceMode.load();
     static juce::MidiBuffer emptyMidi;
 
-    // tracks are summed straight into this segment of the master buffer, then the master inserts run on it
+    // the transport only wraps if it was inside the cycle
+    const bool wraps = rolling && s.cycleOn && t0 < s.cycleEnd && t0 >= s.cycleStart;
+    const juce::int64 cycleLen = s.cycleEnd - s.cycleStart;
+    auto mapTime = [&] (juce::int64 t)
+    {
+        if (wraps && t >= s.cycleEnd && cycleLen > 0) return s.cycleStart + (t - s.cycleEnd) % cycleLen;
+        return t;
+    };
+
+    // tracks and buses are summed into this segment of the master buffer, then the master inserts run on it
     juce::AudioBuffer<float> seg (master.getArrayOfWritePointers(), 2, off, len);
 
     for (auto& tr : s.tracks)
+        if (tr.bus && tr.rt->buffer.getNumSamples() >= len)
+            tr.rt->buffer.clear (0, len);
+
+    for (int index : s.order)
     {
+        auto& tr = s.tracks[(size_t) index];
         auto& rt = *tr.rt;
         if (rt.buffer.getNumSamples() < len) continue;
         juce::AudioBuffer<float> buf (rt.buffer.getArrayOfWritePointers(), 2, len);
-        buf.clear();
         rt.midi.clear();
+
+        // where on the timeline this track is (latency-compensated tracks render ahead)
+        const juce::int64 tp = mapTime (t0 + tr.lookahead);
+        playheadForPlugins = tp;
 
         if (rt.sendNotesOff)
         {
@@ -1035,128 +1378,183 @@ void DawEngine::renderSegment (Snapshot& s, juce::int64 t0, int len, int off, bo
             rt.sendNotesOff = false;
         }
 
-        if (rolling)
+        if (! tr.bus)
         {
-            for (auto& mc : tr.midi)
+            buf.clear();
+            if (rolling)
             {
-                if (mc.end <= t0 || mc.start >= t1 || mc.events.empty()) continue;
-                auto it = std::lower_bound (mc.events.begin(), mc.events.end(), t0, [] (const auto& e, juce::int64 t) { return e.time < t; });
-                for (; it != mc.events.end() && it->time < t1; ++it)
+                if (wraps && tp < s.cycleEnd && tp + len > s.cycleEnd)
                 {
-                    rt.midi.addEvent (it->bytes, it->size, (int) (it->time - t0));
-                    const int type = it->bytes[0] & 0xf0;
-                    if (type == 0x90) rt.playingNotes.set (it->bytes[1]);
-                    else if (type == 0x80) rt.playingNotes.reset (it->bytes[1]);
+                    // this track's lookahead crosses the cycle end inside the block: play up to the end, then from the start
+                    const int first = (int) (s.cycleEnd - tp);
+                    gatherClips (tr, buf, tp, first, 0);
+                    for (int p = 0; p < 128; ++p)
+                        if (rt.playingNotes[(size_t) p]) rt.midi.addEvent (juce::MidiMessage::noteOff (1, p), first);
+                    rt.playingNotes.reset();
+                    gatherClips (tr, buf, s.cycleStart, len - first, first);
+                }
+                else
+                {
+                    gatherClips (tr, buf, tp, len, 0);
                 }
             }
 
-            for (auto& ac : tr.audio)
+            // live MIDI from keyboards / musical typing
+            if (tr.instrument && (rt.id == selected || rt.arm.load()))
             {
-                const juce::int64 a = juce::jmax (t0, ac.start), b = juce::jmin (t1, ac.start + ac.length);
-                if (a >= b) continue;
-                auto& src = ac.data->buffer;
-                const int srcLen = src.getNumSamples();
-                const int srcCh = src.getNumChannels();
-                for (juce::int64 t = a; t < b; ++t)
+                for (const auto meta : liveMidi)
                 {
-                    const juce::int64 inClip = t - ac.start;
-                    const juce::int64 si = ac.offset + inClip;
-                    if (si < 0 || si >= srcLen) continue;
-                    float g = ac.gain;
-                    if (ac.fadeIn > 0 && inClip < ac.fadeIn) g *= (float) inClip / (float) ac.fadeIn;
-                    const juce::int64 toEnd = ac.length - inClip;
-                    if (ac.fadeOut > 0 && toEnd < ac.fadeOut) g *= (float) toEnd / (float) ac.fadeOut;
-                    const int o = (int) (t - t0);
-                    const float l = src.getSample (0, (int) si) * g;
-                    const float r = srcCh > 1 ? src.getSample (1, (int) si) * g : l;
-                    buf.addSample (0, o, l);
-                    buf.addSample (1, o, r);
-                }
-            }
-        }
-
-        // live MIDI from keyboards / musical typing
-        if (tr.instrument && (rt.id == selected || rt.arm.load()))
-        {
-            for (const auto meta : liveMidi)
-            {
-                if (meta.samplePosition < off || meta.samplePosition >= off + len) continue;
-                const auto m = meta.getMessage();
-                rt.midi.addEvent (m, meta.samplePosition - off);
-                if (rec && rt.arm.load() && (m.isNoteOnOrOff() || m.isController() || m.isPitchWheel()))
-                {
-                    int s1, n1, s2, n2;
-                    midiFifo.prepareToWrite (1, s1, n1, s2, n2);
-                    if (n1 > 0)
+                    if (meta.samplePosition < off || meta.samplePosition >= off + len) continue;
+                    const auto m = meta.getMessage();
+                    rt.midi.addEvent (m, meta.samplePosition - off);
+                    if (rec && rt.arm.load() && (m.isNoteOnOrOff() || m.isController() || m.isPitchWheel()))
                     {
-                        auto* raw = m.getRawData();
-                        const auto when = juce::jmax ((juce::int64) 0, t0 + (meta.samplePosition - off) - (juce::int64) outputLatency);
-                        midiFifoData[(size_t) s1] = { when, rt.id, raw[0], (juce::uint8) (m.getRawDataSize() > 1 ? raw[1] : 0),
-                                                      (juce::uint8) (m.getRawDataSize() > 2 ? raw[2] : 0) };
-                        midiFifo.finishedWrite (1);
+                        int s1, n1, s2, n2;
+                        midiFifo.prepareToWrite (1, s1, n1, s2, n2);
+                        if (n1 > 0)
+                        {
+                            auto* rawData = m.getRawData();
+                            const auto when = juce::jmax ((juce::int64) 0, t0 + (meta.samplePosition - off) - (juce::int64) outputLatency);
+                            midiFifoData[(size_t) s1] = { when, rt.id, rawData[0], (juce::uint8) (m.getRawDataSize() > 1 ? rawData[1] : 0),
+                                                          (juce::uint8) (m.getRawDataSize() > 2 ? rawData[2] : 0) };
+                            midiFifo.finishedWrite (1);
+                        }
+                    }
+                }
+            }
+
+            // audio input (monitoring + level meter for armed tracks)
+            if (! tr.instrument && in != nullptr)
+            {
+                const int ch = rt.input.load();
+                const bool stereoIn = rt.inputStereo.load();
+                const float* inL = ch >= 0 && ch < numIn ? in[ch] : nullptr;
+                const float* inR = stereoIn && ch + 1 < numIn ? in[ch + 1] : inL;
+                if (inL != nullptr)
+                {
+                    float pk = 0;
+                    for (int i = 0; i < len; ++i) pk = juce::jmax (pk, std::abs (inL[off + i]));
+                    if (pk > rt.inputMeter.load()) rt.inputMeter = pk;
+                    if (rt.monitor.load())
+                    {
+                        buf.addFrom (0, 0, inL + off, len);
+                        buf.addFrom (1, 0, (inR != nullptr ? inR : inL) + off, len);
                     }
                 }
             }
         }
 
-        // audio input (monitoring + level meter for armed tracks)
-        if (! tr.instrument && in != nullptr)
-        {
-            const int ch = rt.input.load();
-            const bool stereoIn = rt.inputStereo.load();
-            const float* inL = ch >= 0 && ch < numIn ? in[ch] : nullptr;
-            const float* inR = stereoIn && ch + 1 < numIn ? in[ch + 1] : inL;
-            if (inL != nullptr)
+        // plugin parameter automation
+        if (rolling)
+            for (auto& pl : tr.params)
             {
-                float pk = 0;
-                for (int i = 0; i < len; ++i) pk = juce::jmax (pk, std::abs (inL[off + i]));
-                if (pk > rt.inputMeter.load()) rt.inputMeter = pk;
-                if (rt.monitor.load())
+                const float v = juce::jlimit (0.0f, 1.0f, pl.lane.valueAt (tp));
+                if (std::abs (v - pl.last) < 1.0e-5f) continue;
+                pl.last = v;
+                if (auto* p = pl.slot->proc->getParameters()[pl.index])
                 {
-                    buf.addFrom (0, 0, inL + off, len);
-                    buf.addFrom (1, 0, (inR != nullptr ? inR : inL) + off, len);
+                    if (pl.slot->builtin != nullptr) p->setValueNotifyingHost (v);
+                    else p->setValue (v);
                 }
             }
-        }
+
+        for (auto& mfx : tr.midiFx)
+            mfx.slot->processMidi (len, rt.midi);
 
         if (tr.inst != nullptr)
             tr.inst->process (buf, len, rt.midi);
 
-        for (auto* slot : tr.inserts)
+        for (auto& slot : tr.inserts)
         {
             emptyMidi.clear();
-            slot->process (buf, len, emptyMidi);
+            const juce::AudioBuffer<float>* key = nullptr;
+            juce::AudioBuffer<float> keyView;
+            if (slot.sidechain >= 0)
+            {
+                keyView = juce::AudioBuffer<float> (s.tracks[(size_t) slot.sidechain].rt->sideOut.getArrayOfWritePointers(), 2, len);
+                key = &keyView;
+            }
+            slot.slot->process (buf, len, emptyMidi, key);
         }
 
-        // volume / pan (automation overrides the fader)
-        const float volDb = ! tr.volume.points.empty() && rolling ? tr.volume.valueAt (t0) : rt.volumeDb.load();
-        const float pan = ! tr.pan.points.empty() && rolling ? tr.pan.valueAt (t0) : rt.pan.load();
-        const float g = juce::Decibels::decibelsToGain (volDb, -96.0f);
-        const float angle = (juce::jlimit (-1.0f, 1.0f, pan) + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
-        const float gl = g * std::cos (angle) * juce::MathConstants<float>::sqrt2;
-        const float gr = g * std::sin (angle) * juce::MathConstants<float>::sqrt2;
-        buf.applyGainRamp (0, 0, len, rt.lastGainL, gl);
-        buf.applyGainRamp (1, 0, len, rt.lastGainR, gr);
-        rt.lastGainL = gl;
-        rt.lastGainR = gr;
+        const bool contributes = ! rt.mute.load() && (! s.anySolo || tr.soloed);
+
+        auto sendTo = [&] (const Snapshot::SendR& sr, size_t k, float gain, float& last)
+        {
+            auto& dest = s.tracks[(size_t) sr.bus].rt->buffer;
+            juce::AudioBuffer<float> tmp (rt.scratch.getArrayOfWritePointers(), 2, len);
+            tmp.copyFrom (0, 0, buf, 0, 0, len);
+            tmp.copyFrom (1, 0, buf, 1, 0, len);
+            if (last < 0.0f) last = gain;
+            tmp.applyGainRamp (0, len, last, gain);
+            last = gain;
+            if (sr.delay > 0 && k + 1 < rt.delays.size() && rt.delays[k + 1] != nullptr)
+                rt.delays[k + 1]->process (tmp, len, sr.delay);
+            dest.addFrom (0, 0, tmp, 0, 0, len);
+            dest.addFrom (1, 0, tmp, 1, 0, len);
+        };
+        auto sendGain = [&] (const Snapshot::SendR& sr)
+        {
+            const float db = ! sr.lane.empty() && rolling ? sr.lane.valueAt (tp) : sr.levelDb;
+            return db <= -79.0f ? 0.0f : juce::Decibels::decibelsToGain (db);
+        };
+
+        if (contributes)
+            for (size_t k = 0; k < tr.sends.size(); ++k)
+            {
+                auto& sr = tr.sends[k];
+                if (sr.bus >= 0 && sr.pre) sendTo (sr, k, sendGain (sr), sr.lastGain);
+            }
+
+        // volume / pan (automation overrides the fader); bounce renders the raw track
+        if (! raw)
+        {
+            const float volDb = ! tr.volume.points.empty() && rolling ? tr.volume.valueAt (tp) : rt.volumeDb.load();
+            const float pan = ! tr.pan.points.empty() && rolling ? tr.pan.valueAt (tp) : rt.pan.load();
+            const float g = juce::Decibels::decibelsToGain (volDb, -96.0f);
+            const float angle = (juce::jlimit (-1.0f, 1.0f, pan) + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+            const float gl = g * std::cos (angle) * juce::MathConstants<float>::sqrt2;
+            const float gr = g * std::sin (angle) * juce::MathConstants<float>::sqrt2;
+            buf.applyGainRamp (0, 0, len, rt.lastGainL, gl);
+            buf.applyGainRamp (1, 0, len, rt.lastGainR, gr);
+            rt.lastGainL = gl;
+            rt.lastGainR = gr;
+        }
+
+        if (tr.keysSidechain)
+        {
+            rt.sideOut.copyFrom (0, 0, buf, 0, 0, len);
+            rt.sideOut.copyFrom (1, 0, buf, 1, 0, len);
+        }
 
         const float ml = buf.getMagnitude (0, 0, len), mr = buf.getMagnitude (1, 0, len);
         if (ml > rt.meterL.load()) rt.meterL = ml;
         if (mr > rt.meterR.load()) rt.meterR = mr;
 
-        const bool audible = ! rt.mute.load() && (! s.anySolo || rt.solo.load());
-        if (audible)
+        if (! contributes) continue;
+
+        for (size_t k = 0; k < tr.sends.size(); ++k)
         {
-            seg.addFrom (0, 0, buf, 0, 0, len);
-            seg.addFrom (1, 0, buf, 1, 0, len);
+            auto& sr = tr.sends[k];
+            if (sr.bus >= 0 && ! sr.pre) sendTo (sr, k, sendGain (sr), sr.lastGain);
         }
+
+        if (tr.outDelay > 0 && ! rt.delays.empty() && rt.delays[0] != nullptr)
+            rt.delays[0]->process (buf, len, tr.outDelay);
+
+        auto& dest = tr.output >= 0 ? s.tracks[(size_t) tr.output].rt->buffer : master;
+        const int destOffset = tr.output >= 0 ? 0 : off;
+        dest.addFrom (0, destOffset, buf, 0, 0, len);
+        dest.addFrom (1, destOffset, buf, 1, 0, len);
     }
 
-    for (auto* slot : s.masterInserts)
-    {
-        emptyMidi.clear();
-        slot->process (seg, len, emptyMidi);
-    }
+    playheadForPlugins = t0;
+    if (! raw)
+        for (auto* slot : s.masterInserts)
+        {
+            emptyMidi.clear();
+            slot->process (seg, len, emptyMidi);
+        }
 
     // recording: capture the raw input
     if (rec && in != nullptr)
@@ -1225,13 +1623,25 @@ void DawEngine::beginExport()
     if (exportDevice != nullptr) exportDevice->removeAudioCallback (this);   // the audio thread must not run while we render
     stop();
 
+    preloadAudio();
+    offline = true;
+}
+
+void DawEngine::preloadAudio()
+{
     // make sure every file is decoded, and the snapshot is current
+    const double tempo = project.tempo();
     for (auto tv : project.tracks())
         for (auto cv : Track (tv).clips())
-            if (Clip (cv).isAudio())
-                cache.getBlocking (project.resolve (Clip (cv).file()), sampleRate);
+        {
+            Clip c (cv);
+            if (! c.isAudio()) continue;
+            if (c.needsStretch (tempo))
+                cache.getVariantBlocking (project.resolve (c.file()), sampleRate, c.stretchRatio (tempo), c.pitch(), c.reversed());
+            else
+                cache.getBlocking (project.resolve (c.file()), sampleRate);
+        }
     rebuildNow();
-    offline = true;
 }
 
 void DawEngine::endExport()
@@ -1277,6 +1687,7 @@ juce::String DawEngine::renderExport (const ExportOptions& o, const std::functio
     snap->cycleOn = false;
 
     for (auto& [id, slot] : slots) if (slot->proc) slot->proc->setNonRealtime (true);
+    bounceMode = o.bounce;
 
     const double spb = sampleRate * 60.0 / project.tempo();
     const juce::int64 start = (juce::int64) (o.startBeat * spb);
@@ -1314,6 +1725,7 @@ juce::String DawEngine::renderExport (const ExportOptions& o, const std::functio
         }
 
         playing = false;
+        bounceMode = false;
         for (auto& tr : snap->tracks) tr.rt->sendNotesOff = true;
         position = savedPos;
         snap->anySolo = savedAnySolo;
@@ -1344,9 +1756,11 @@ juce::String DawEngine::renderExport (const ExportOptions& o, const std::functio
 
     std::unique_ptr<juce::AudioFormat> fmt;
     auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (outRate).withNumChannels (2);
-    if (o.format == 1)      { fmt = std::make_unique<juce::FlacAudioFormat>(); opts = opts.withBitsPerSample (juce::jmin (24, o.bitDepth)); }
+    if (o.bounce)           { fmt = std::make_unique<juce::WavAudioFormat>(); opts = opts.withBitsPerSample (32).withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint); }
+    else if (o.format == 1) { fmt = std::make_unique<juce::FlacAudioFormat>(); opts = opts.withBitsPerSample (juce::jmin (24, o.bitDepth)); }
     else if (o.format == 2) { fmt = std::make_unique<juce::OggVorbisAudioFormat>(); opts = opts.withBitsPerSample (16).withQualityOptionIndex (8); }
-    else                    { fmt = std::make_unique<juce::WavAudioFormat>(); opts = opts.withBitsPerSample (o.bitDepth); }
+    else                    { fmt = std::make_unique<juce::WavAudioFormat>(); opts = opts.withBitsPerSample (o.bitDepth);
+                              if (o.bitDepth == 32) opts = opts.withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint); }
 
     auto writer = fmt->createWriterFor (stream, opts);
     if (writer == nullptr) return "Couldn't create the " + fmt->getFormatName() + " encoder.";

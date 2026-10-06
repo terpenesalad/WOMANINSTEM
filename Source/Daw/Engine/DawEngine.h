@@ -12,7 +12,7 @@ namespace wis::daw
 
 // ---- Real-time building blocks (built on the message thread, used by the audio thread) -----------------
 
-/** One plugin instance in a track's instrument slot or insert chain. */
+/** One plugin instance in a track's MIDI FX chain, instrument slot or insert chain. */
 struct Slot : public juce::ReferenceCountedObject
 {
     using Ptr = juce::ReferenceCountedObjectPtr<Slot>;
@@ -20,15 +20,31 @@ struct Slot : public juce::ReferenceCountedObject
     juce::String slotId;                       // PLUGIN node "id"
     juce::String uid;                          // what was instantiated (re-create if it changes)
     std::unique_ptr<juce::AudioProcessor> proc;
+    BuiltinProcessor* builtin = nullptr;       // proc, if it's one of ours
     juce::String error;
-    bool instrument = false;
+    bool instrument = false, midiFx = false;
     std::atomic<bool> bypass { false };
     juce::AudioBuffer<float> scratch;
     int channels = 2;
 
     void prepare (double sr, int block);
-    /** Processes `n` samples of the stereo buffer in place. */
-    void process (juce::AudioBuffer<float>& stereo, int n, juce::MidiBuffer& midi);
+    /** Processes `n` samples of the stereo buffer in place (sidechain: optional key signal). */
+    void process (juce::AudioBuffer<float>& stereo, int n, juce::MidiBuffer& midi, const juce::AudioBuffer<float>* sidechain = nullptr);
+    /** MIDI effects: transforms the MIDI buffer. */
+    void processMidi (int n, juce::MidiBuffer& midi);
+    int latency() const { return proc != nullptr && ! bypass.load() ? proc->getLatencySamples() : 0; }
+    bool acceptsSidechain() const;
+};
+
+/** Fixed-size stereo delay (plugin delay compensation on one connection). */
+struct DelayLine
+{
+    static constexpr int capacity = 1 << 16;   // ~1.4 s at 48 kHz
+    juce::AudioBuffer<float> buf { 2, capacity };
+    int pos = 0;
+    DelayLine() { buf.clear(); }
+    /** Delays the first `len` samples of `b` (2 channels) by `delay` samples, in place. */
+    void process (juce::AudioBuffer<float>& b, int len, int delay) noexcept;
 };
 
 /** Per-track state shared by snapshots (mixer values, meters, audio-thread scratch). */
@@ -44,8 +60,9 @@ struct TrackRT : public juce::ReferenceCountedObject
     std::atomic<float> meterL { 0.0f }, meterR { 0.0f }, inputMeter { 0.0f };
 
     // audio thread only
-    juce::AudioBuffer<float> buffer;
+    juce::AudioBuffer<float> buffer, scratch, sideOut;
     juce::MidiBuffer midi;
+    std::vector<std::unique_ptr<DelayLine>> delays;   // [0] = output, [1 + i] = send i (grown on the message thread under the process lock)
     std::bitset<128> playingNotes;
     bool sendNotesOff = false;
     float lastGainL = 1.0f, lastGainR = 1.0f;
@@ -65,21 +82,33 @@ struct Snapshot : public juce::ReferenceCountedObject
     };
     struct MidiEv { juce::int64 time; juce::uint8 bytes[3]; juce::uint8 size; };
     struct MidiClipR { juce::int64 start = 0, end = 0; std::vector<MidiEv> events; };
-    struct Lane { std::vector<std::pair<juce::int64, float>> points; float valueAt (juce::int64 t) const; };
+    struct Lane { std::vector<std::pair<juce::int64, float>> points; float valueAt (juce::int64 t) const; bool empty() const { return points.empty(); } };
+    struct SlotR { Slot::Ptr slot; int sidechain = -1; };            // sidechain: index of the key track
+    struct ParamLane { Slot::Ptr slot; int index = 0; Lane lane; float last = -2.0f; };
+    struct SendR { int bus = -1; float levelDb = 0.0f; bool pre = false; Lane lane; int delay = 0; float lastGain = -1.0f; };
     struct TrackR
     {
         TrackRT::Ptr rt;
-        bool instrument = false;
+        bool instrument = false, bus = false;
         Slot::Ptr inst;
-        juce::ReferenceCountedArray<Slot> inserts;
+        std::vector<SlotR> midiFx, inserts;
         std::vector<AudioClipR> audio;
         std::vector<MidiClipR> midi;
         Lane volume, pan;
+        std::vector<ParamLane> params;
+        std::vector<SendR> sends;
+        int output = -1;                 // index of the destination bus, -1 = master
+        int outDelay = 0;                // compensation on the output connection
+        juce::int64 lookahead = 0;       // plugin delay compensation: this track renders ahead of the playhead
+        bool soloed = false;             // explicit or implied solo
+        bool keysSidechain = false;      // someone uses this track as a side-chain
     };
 
     double sampleRate = 48000.0, tempo = 120.0, samplesPerBeat = 24000.0;
     int tsNum = 4, tsDen = 4;
     std::vector<TrackR> tracks;
+    std::vector<int> order;              // processing order: sources before the buses / side-chains they feed
+    int maxLatency = 0;
     juce::ReferenceCountedArray<Slot> masterInserts;
     bool anySolo = false;
     bool cycleOn = false;
@@ -106,6 +135,7 @@ struct LiveNote { int pitch; int velocity; juce::int64 on, off; };   // off < 0 
 // ---- The engine ----------------------------------------------------------------------------------------
 class DawEngine : public juce::AudioIODeviceCallback,
                   public juce::AudioPlayHead,
+                  private juce::AudioProcessorListener,
                   private juce::ValueTree::Listener,
                   private juce::Timer,
                   private juce::ChangeListener,
@@ -173,6 +203,7 @@ public:
         double tailSeconds = 2.0;
         bool normalise = false;
         juce::Array<int> onlyTracks;    // empty = full mix
+        bool bounce = false;            // raw track sound: no fader / pan / master processing (bounce in place)
     };
     /** Convenience: beginExport + renderExport + endExport. */
     juce::String exportAudio (const ExportOptions& o, const std::function<bool (float)>& progress);
@@ -185,6 +216,11 @@ public:
 
     /** Forces an immediate snapshot rebuild (normally done on a timer after edits). */
     void rebuildNow();
+    /** Decodes (and time-stretches) every audio clip now, then rebuilds. For export, bouncing and tests. */
+    void preloadAudio();
+
+    /** Total plugin latency compensated on a track (samples), for the UI. */
+    int getTrackLatency (int trackId);
 
     // AudioPlayHead
     juce::Optional<PositionInfo> getPosition() const override;
@@ -207,6 +243,8 @@ private:
     void valueTreeRedirected (juce::ValueTree&) override                          { markDirty(); }
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override { markDirty(); }
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+    void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override { if (d.latencyChanged) markDirty(); }
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
 
     void markDirty() { dirty = true; }
@@ -217,6 +255,8 @@ private:
     void prepareAll();
 
     void renderSegment (Snapshot& s, juce::int64 t0, int len, int outOffset, bool rolling, const float* const* in, int numIn);
+    void gatherClips (Snapshot::TrackR& tr, juce::AudioBuffer<float>& buf, juce::int64 from, int num, int bufOffset);
+    void computeRouting (Snapshot& s);
     void renderClick (const Snapshot& s, int outOffset, int len, juce::int64 t0);
     void sendNoteOffsToAll (Snapshot& s);
     void startRecordingSession();
@@ -248,7 +288,7 @@ private:
     std::atomic<juce::int64> position { 0 }, seekRequest { -1 };
     std::atomic<juce::int64> countInRemaining { 0 };
     std::atomic<bool> stopRequest { false };
-    std::atomic<bool> offline { false };
+    std::atomic<bool> offline { false }, bounceMode { false };
     juce::int64 countInTotal = 0;
     std::atomic<float> masterVolume { 1.0f };
     std::atomic<bool> metronomeOn { false };
