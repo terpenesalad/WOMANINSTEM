@@ -181,10 +181,15 @@ void Compressor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const int n = buffer.getNumSamples(), nch = juce::jmin (2, buffer.getNumChannels());
     float maxGr = 0.0f;
 
+    // side-chain: detect on the key track (e.g. kick ducking a bass), apply to this one
+    const auto* key = sidechainInput != nullptr && sidechainInput->getNumSamples() >= n ? sidechainInput : nullptr;
+    const auto& detect = key != nullptr ? *key : buffer;
+    const int dch = juce::jmin (2, detect.getNumChannels());
+
     for (int i = 0; i < n; ++i)
     {
         float peak = 0.0f;
-        for (int ch = 0; ch < nch; ++ch) peak = juce::jmax (peak, std::abs (buffer.getSample (ch, i)));
+        for (int ch = 0; ch < dch; ++ch) peak = juce::jmax (peak, std::abs (detect.getSample (ch, i)));
         const float lvl = juce::Decibels::gainToDecibels (peak, -120.0f);
         const float over = lvl - thresh;
         float gr;
@@ -627,10 +632,14 @@ void GateFx::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
     const float floorGain = dbToGain (param ("range"));
     const int n = buffer.getNumSamples(), nch = buffer.getNumChannels();
 
+    const auto* key = sidechainInput != nullptr && sidechainInput->getNumSamples() >= n ? sidechainInput : nullptr;
+    const auto& detect = key != nullptr ? *key : buffer;
+    const int dch = juce::jmin (2, detect.getNumChannels());
+
     for (int i = 0; i < n; ++i)
     {
         float a = 0.0f;
-        for (int ch = 0; ch < nch; ++ch) a = juce::jmax (a, std::abs (buffer.getSample (ch, i)));
+        for (int ch = 0; ch < dch; ++ch) a = juce::jmax (a, std::abs (detect.getSample (ch, i)));
         env = a > env ? a : env * envRel + a * (1.0f - envRel);
 
         if (env > thOpen)       { isOpen = true; holdCounter = holdSamples; }

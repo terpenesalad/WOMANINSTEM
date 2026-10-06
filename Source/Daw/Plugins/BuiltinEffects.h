@@ -46,6 +46,7 @@ public:
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     juce::StringArray getProgramNames() override;
     void loadProgram (int) override;
+    bool wantsSidechain() const override { return true; }
     std::atomic<float> gainReductionDb { 0.0f };
 
 private:
@@ -154,6 +155,7 @@ class GateFx : public BuiltinProcessor
 {
 public:
     GateFx();
+    bool wantsSidechain() const override { return true; }
     void prepareToPlay (double sr, int block) override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 private:

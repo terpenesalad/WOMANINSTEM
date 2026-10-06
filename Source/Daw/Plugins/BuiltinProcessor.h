@@ -76,6 +76,9 @@ public:
     static juce::String makeFileRef (const juce::File& f) { return fileToRef ? fileToRef (f) : f.getFullPathName(); }
     static juce::File resolveFileRef (const juce::String& r) { return refToFile ? refToFile (r) : juce::File (r); }
 
+    /** The song's key (0 = C) and scale (0 major, 1 minor), kept current by the Studio (Scale Lock, Auto-Tune). */
+    static std::atomic<int> songKey, songScale;
+
     /** Lets a plugin put audio it made (e.g. a looper's loop) onto its own track in the arrangement. */
     static std::function<void (BuiltinProcessor&, const juce::File&)> onAudioToTrack;
 

@@ -10,6 +10,10 @@
 #include "Daw/Plugins/PluginHost.h"
 #include "Daw/Plugins/BuiltinEffects.h"
 #include "Daw/Plugins/TestEffects.h"
+#include "Daw/Plugins/Looper.h"
+#include "Daw/Instruments/Sampler.h"
+#include "Daw/Instruments/HomeKeys.h"
+#include "Daw/Instruments/VintageRhythms.h"
 #include <tuple>
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
@@ -579,6 +583,254 @@ int main (int argc, char** argv)
         check (right.isValid() && std::abs (c.lengthSeconds() - 1.0) < 1.0e-9 && std::abs (right.offsetSeconds() - 1.0) < 1.0e-9,
                "Splitting a stretched clip splits its source audio correctly");
         project.removeTrack (t);
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Instruments, MIDI effects, side-chain, Vocal Tune, Looper:" << std::endl;
+    {
+        project.setTempo (120.0);
+        while (project.numTracks() > 0) project.removeTrack (project.track (0));
+        project.masterInserts().removeAllChildren (nullptr);
+
+        // ---- Sampler: a C4 sine sample plays at the right pitch across the keyboard ----
+        auto t = project.addTrack (kindInstrument, "Sampler");
+        project.setInstrument (t, builtinRef ("sampler"));
+        auto c = project.addMidiClip (t, 0.0, 16.0);
+        project.addNote (c, 60, 0.0, 1.0, 100);
+        project.addNote (c, 69, 1.0, 1.0, 100);
+        engine.rebuildNow();
+        auto* sampler = dynamic_cast<Sampler*> (engine.getProcessor (t.instrument()[ids::id].toString()));
+        check (sampler != nullptr, "Sampler loads");
+        if (sampler != nullptr)
+        {
+            juce::AudioBuffer<float> sine (2, (int) (sr * 2.0));
+            for (int i = 0; i < sine.getNumSamples(); ++i)
+                sine.setSample (0, i, 0.5f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 261.6256 * i / sr));
+            sine.copyFrom (1, 0, sine, 0, 0, sine.getNumSamples());
+            sampler->loadBuffer (sine, sr, "C4 sine");
+            sampler->setParam ("release", 1.0f);
+            sampler->setParam ("velsens", 0.0f);
+            auto out = renderRange (engine, project, 0.0, 2.0);
+            const double h1 = zeroCrossingHz (out, (int) (0.05 * sr), (int) (0.45 * sr));
+            const double h2 = zeroCrossingHz (out, (int) (0.55 * sr), (int) (0.95 * sr));
+            check (std::abs (h1 - 261.63) < 1.5 && std::abs (h2 - 440.0) < 2.0,
+                   "Sampler plays C4 and A4 from a C4 sample (" + juce::String (h1, 1) + " / " + juce::String (h2, 1) + " Hz)");
+
+            sampler->setParam ("mode", 2.0f);
+            sampler->setParam ("slices", 2.0f);   // 8 equal slices
+            const auto slices = sampler->currentSlices();
+            check (slices.size() >= 8 && slices.size() <= 9, "Slice mode chops the sample into 8 (" + juce::String ((int) slices.size()) + " boundaries)");
+            sampler->setParam ("mode", 0.0f);
+
+            // ---- Arpeggiator in the track's MIDI FX slot: a held C major chord -> C, E, G, C... in 8ths ----
+            c.v.removeAllChildren (nullptr);
+            for (int n : { 60, 64, 67 }) project.addNote (c, n, 4.0, 4.0, 100);
+            project.setPlugin (t.midiFx(), -1, builtinRef ("arp"));
+            engine.rebuildNow();
+            if (auto* arp = engine.getProcessor (t.midiFx().getChild (0)[ids::id].toString()))
+            {
+                auto* bp = dynamic_cast<BuiltinProcessor*> (arp);
+                bp->setParam ("rate", 3.0f);   // 1/8 = 0.25 s at 120 bpm
+                bp->setParam ("gate", 0.5f);
+            }
+            auto arp = renderRange (engine, project, 0.0, 8.0);
+            const double expect[] = { 261.63, 329.63, 392.0, 261.63 };
+            juce::String got; bool ok = true;
+            for (int k = 0; k < 4; ++k)
+            {
+                const double at = 2.0 + 0.25 * k;
+                const double hz = zeroCrossingHz (arp, (int) ((at + 0.02) * sr), (int) ((at + 0.11) * sr));
+                ok = ok && std::abs (hz - expect[k]) < 4.0;
+                got << juce::String (hz, 0) << " ";
+            }
+            check (ok, "Arpeggiator plays the chord as 1/8 notes, in time (" + got.trim() + " Hz)");
+            check (rms (arp, (int) (2.16 * sr), (int) (2.24 * sr)) < 0.01f, "...with gaps from the gate length");
+            check (rms (arp, (int) (4.3 * sr), (int) (7.9 * sr)) < 1.0e-4f, "...and stops when the chord is released");
+        }
+        project.removeTrack (t);
+
+        // ---- Rhythm Box + the vintage rhythms ----
+        int totalNotes = 0, rhythmsWithNotes = 0;
+        auto rt = project.addTrack (kindInstrument, "Rhythm");
+        project.setInstrument (rt, builtinRef ("rhythmbox"));
+        for (int i = 0; i < (int) vintageRhythms().size(); ++i)
+        {
+            auto clip = insertVintageRhythm (project, rt, i, 64.0 + i * 32.0, 4);
+            totalNotes += clip.v.getNumChildren();
+            if (clip.v.getNumChildren() > 8) ++rhythmsWithNotes;
+        }
+        check (vintageRhythms().size() == 20 && rhythmsWithNotes == 20, "All 20 vintage rhythms write drum clips (" + juce::String (totalNotes) + " hits)");
+        auto drums = renderRange (engine, project, 64.0, 72.0);
+        check (allFinite (drums) && rms (drums, 0, drums.getNumSamples()) > 0.01f, "Rhythm Box plays the Slow Rock pattern (rms "
+               + juce::String (rms (drums, 0, drums.getNumSamples()), 3) + ")");
+        project.removeTrack (rt);
+
+        // ---- Drum Pads: synth kit by default ----
+        auto dp = project.addTrack (kindInstrument, "Pads");
+        project.setInstrument (dp, builtinRef ("drumpads"));
+        auto dc = project.addMidiClip (dp, 0.0, 4.0);
+        for (int k = 0; k < 16; ++k) project.addNote (dc, 36 + k, k * 0.25, 0.2, 110);
+        auto pads = renderRange (engine, project, 0.0, 4.0);
+        check (allFinite (pads) && rms (pads, 0, pads.getNumSamples()) > 0.01f, "Drum Pads play all 16 pads");
+        project.removeTrack (dp);
+
+        // ---- HomeKeys 20: plays a voice, and its rhythm section runs with the song ----
+        auto hk = project.addTrack (kindInstrument, "HomeKeys");
+        project.setInstrument (hk, builtinRef ("homekeys"));
+        engine.rebuildNow();
+        auto* keys = dynamic_cast<HomeKeys*> (engine.getProcessor (hk.instrument()[ids::id].toString()));
+        check (keys != nullptr, "HomeKeys 20 loads");
+        if (keys != nullptr)
+        {
+            keys->setParam ("rhythmOn", 0.0f);
+            auto hc = project.addMidiClip (hk, 0.0, 8.0);
+            project.addNote (hc, 69, 0.0, 2.0, 100);
+            auto voice = renderRange (engine, project, 0.0, 2.0);
+            check (allFinite (voice) && rms (voice, (int) (0.1 * sr), (int) (0.9 * sr)) > 0.01f, "HomeKeys plays a note");
+            hc.v.removeAllChildren (nullptr);
+            keys->setParam ("rhythmOn", 1.0f);
+            keys->setParam ("abc", 1.0f);   // single finger
+            project.addNote (hc, 43, 0.0, 8.0, 100);   // G below the split point
+            auto rhythm = renderRange (engine, project, 0.0, 8.0);
+            check (allFinite (rhythm) && rms (rhythm, 0, rhythm.getNumSamples()) > 0.01f && keys->currentStep.load() >= 0, "Rhythm section runs with the song");
+            check (keys->chordRoot.load() == 7, "Auto Bass Chord recognises the single-finger chord (" + HomeKeys::chordName (keys->chordRoot.load(), keys->chordType.load()) + ")");
+        }
+        project.removeTrack (hk);
+
+        // ---- side-chain: a gate on a pad opens only when a (muted) key track plays ----
+        auto padFile = writeClickWav (tmpRoot.getChildFile ("pad.wav"), 4.0, -1.0, 440.0, 0.0);
+        auto keyFile = writeClickWav (tmpRoot.getChildFile ("key.wav"), 4.0, -1.0, 200.0, 2.0);
+        auto padT = project.addTrack (kindAudio, "Pad");
+        project.addAudioClip (padT, padFile, 0.0, 0.0, 4.0);
+        auto keyT = project.addTrack (kindAudio, "Key");
+        project.addAudioClip (keyT, keyFile, 0.0, 0.0, 4.0);
+        keyT.v.setProperty (ids::mute, true, nullptr);
+        project.setPlugin (padT.inserts(), -1, builtinRef ("gate"));
+        padT.inserts().getChild (0).setProperty (ids::sidechain, keyT.id(), nullptr);
+        engine.preloadAudio();
+        auto gated = renderRange (engine, project, 0.0, 8.0);
+        check (rms (gated, (int) (0.3 * sr), (int) (1.9 * sr)) < 0.001f && rms (gated, (int) (2.3 * sr), (int) (3.8 * sr)) > 0.2f,
+               "Side-chained gate opens only when the key track plays (" + juce::String (rms (gated, (int) (0.3 * sr), (int) (1.9 * sr)), 4)
+               + " / " + juce::String (rms (gated, (int) (2.3 * sr), (int) (3.8 * sr)), 3) + ")");
+        project.removeTrack (padT);
+        project.removeTrack (keyT);
+
+        // ---- Vocal Tune: a flat A (430 Hz) is pulled up to 440 Hz ----
+        auto flatFile = writeClickWav (tmpRoot.getChildFile ("flat.wav"), 4.0, -1.0, 430.0, 0.0);
+        auto vt = project.addTrack (kindAudio, "Vocal");
+        project.addAudioClip (vt, flatFile, 0.0, 0.0, 4.0);
+        project.setPlugin (vt.inserts(), -1, builtinRef ("autotune"));
+        engine.preloadAudio();
+        engine.rebuildNow();
+        if (auto* tune = dynamic_cast<BuiltinProcessor*> (engine.getProcessor (vt.inserts().getChild (0)[ids::id].toString())))
+        {
+            tune->setParam ("key", 1.0f);      // C
+            tune->setParam ("scale", 13.0f);   // chromatic
+            tune->setParam ("speed", 0.0f);
+            tune->setParam ("range", 3.0f);    // instrument
+        }
+        auto tuned = renderRange (engine, project, 0.0, 8.0);
+        const double tunedHz = zeroCrossingHz (tuned, (int) (1.0 * sr), (int) (3.0 * sr));
+        check (std::abs (tunedHz - 440.0) < 2.0, "Vocal Tune corrects 430 Hz to " + juce::String (tunedHz, 1) + " Hz");
+        check (engine.getTrackLatency (vt.id()) > 0, "...and reports its latency (" + juce::String (engine.getTrackLatency (vt.id())) + " samples, compensated)");
+        project.removeTrack (vt);
+        engine.rebuildNow();
+
+        // ---- Loop Station (driven directly) ----
+        Looper looper;
+        looper.prepareToPlay (sr, block);
+        juce::AudioBuffer<float> io (2, block);
+        juce::MidiBuffer none;
+        double ph = 0.0;
+        auto feed = [&] (double seconds, bool tone)
+        {
+            juce::AudioBuffer<float> all (2, (int) (seconds * sr));
+            for (int done = 0; done < all.getNumSamples(); done += block)
+            {
+                const int n = juce::jmin (block, all.getNumSamples() - done);
+                io.setSize (2, n, false, false, true);
+                for (int i = 0; i < n; ++i)
+                {
+                    const float v = tone ? 0.4f * (float) std::sin (ph) : 0.0f;
+                    ph += 2.0 * juce::MathConstants<double>::pi * 440.0 / sr;
+                    io.setSample (0, i, v); io.setSample (1, i, v);
+                }
+                looper.processBlock (io, none);
+                all.copyFrom (0, done, io, 0, 0, n); all.copyFrom (1, done, io, 1, 0, n);
+            }
+            return all;
+        };
+        looper.pressMain(); feed (0.5, true);
+        looper.pressMain();
+        auto played = feed (1.0, false);
+        check (std::abs (looper.getLoopSeconds() - 0.5) < 0.01 && looper.getState() == Looper::playing, "Looper records a 0.5 s loop (" + juce::String (looper.getLoopSeconds(), 3) + " s)");
+        check (std::abs (zeroCrossingHz (played, (int) (0.05 * sr), (int) (0.95 * sr)) - 440.0) < 3.0 && rms (played, 0, played.getNumSamples()) > 0.2f, "...and plays it back on repeat");
+        looper.pressMain(); feed (0.5, true); looper.pressMain(); feed (0.01, false);
+        check (looper.getLayers() == 2, "Overdub adds a layer");
+        looper.pressUndo(); feed (0.01, false);
+        check (looper.getLayers() == 1 && looper.canRedo(), "Undo removes it (redo available)");
+        auto loopFile = tmpRoot.getChildFile ("loop.wav");
+        check (looper.exportLoop (loopFile).isEmpty() && loopFile.getSize() > 1000, "Loop exports to a WAV file");
+        looper.pressClear(); feed (0.01, false);
+        check (looper.getState() == Looper::empty, "Clear empties it");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Every built-in plugin and preset (smoke test):" << std::endl;
+    {
+        struct Head : juce::AudioPlayHead
+        {
+            double ppq = 0.0;
+            juce::Optional<PositionInfo> getPosition() const override
+            {
+                PositionInfo p;
+                p.setIsPlaying (true); p.setBpm (120.0); p.setPpqPosition (ppq);
+                p.setTimeSignature (juce::AudioPlayHead::TimeSignature { 4, 4 });
+                return p;
+            }
+        } head;
+        juce::Random rng (1);
+        int ok = 0, bad = 0;
+        juce::StringArray problems;
+        for (auto& info : builtinPlugins())
+        {
+            if (info.category == "Hidden") continue;
+            auto p = info.create();
+            p->setPlayHead (&head);
+            if (! info.midiFx) p->enableAllBuses();
+            p->setRateAndBufferSizeDetails (sr, block);
+            const int programs = juce::jmax (1, p->getProgramNames().size());
+            bool good = true; float peak = 0.0f;
+            for (int prog = 0; prog < programs && good; ++prog)
+            {
+                if (p->getProgramNames().size() > 0) p->setCurrentProgram (prog);
+                p->prepareToPlay (sr, block);
+                head.ppq = 0.0;
+                juce::AudioBuffer<float> buf (info.midiFx ? 0 : 2, block);
+                for (int b = 0; b < (int) (2.0 * sr / block); ++b)
+                {
+                    juce::MidiBuffer midi;
+                    if (b % 40 == 0) { midi.addEvent (juce::MidiMessage::noteOn (1, 48 + (b / 40) * 5 % 24, (juce::uint8) 100), 3); }
+                    if (b % 40 == 30) { midi.addEvent (juce::MidiMessage::noteOff (1, 48 + (b / 40) * 5 % 24), 7); }
+                    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                        for (int i = 0; i < block; ++i)
+                            buf.setSample (ch, i, info.instrument ? 0.0f : 0.3f * (float) std::sin (0.05 * (b * block + i)) + 0.05f * (rng.nextFloat() - 0.5f));
+                    if (info.midiFx) { juce::AudioBuffer<float> empty (nullptr, 0, block); p->processBlock (empty, midi); }
+                    else p->processBlock (buf, midi);
+                    head.ppq += block / sr * 2.0;
+                    if (! info.midiFx)
+                    {
+                        if (! allFinite (buf)) { good = false; break; }
+                        peak = juce::jmax (peak, buf.getMagnitude (0, block));
+                    }
+                }
+                if (peak > 8.0f) good = false;
+                if (! good) problems.add (info.name + " / " + (programs > 1 ? p->getProgramNames()[prog] : juce::String ("default")) + " (peak " + juce::String (peak, 2) + ")");
+            }
+            p->releaseResources();
+            (good ? ok : bad)++;
+        }
+        check (bad == 0, juce::String (ok) + " built-in plugins run every preset with finite, sane output" + (problems.isEmpty() ? juce::String() : ": " + problems.joinIntoString (", ")));
     }
 
     // -------------------------------------------------------------------------------------------

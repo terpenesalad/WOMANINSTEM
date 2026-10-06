@@ -172,8 +172,17 @@ set(WIS_ENGINE_SOURCES
     Source/Daw/Plugins/Vst2Format.cpp
     Source/Daw/Plugins/ClapFormat.cpp
     Source/Daw/Plugins/PluginHost.cpp
+    Source/Daw/Plugins/CreativeEffects.cpp
+    Source/Daw/Plugins/MidiEffects.cpp
+    Source/Daw/Plugins/VocalTune.cpp
+    Source/Daw/Plugins/Looper.cpp
     Source/Daw/Instruments/SoundFontInstrument.cpp
-    Source/Daw/Instruments/StudioSynth.cpp)
+    Source/Daw/Instruments/StudioSynth.cpp
+    Source/Daw/Instruments/DrumSynth.cpp
+    Source/Daw/Instruments/VintageRhythms.cpp
+    Source/Daw/Instruments/RhythmBox.cpp
+    Source/Daw/Instruments/HomeKeys.cpp
+    Source/Daw/Instruments/Sampler.cpp)
 
 set(WIS_JUCE_DEFS
     JUCE_WEB_BROWSER=0

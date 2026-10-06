@@ -7,6 +7,7 @@ std::function<juce::AudioProcessorEditor* (BuiltinProcessor&)> BuiltinProcessor:
 std::function<juce::String (const juce::File&)> BuiltinProcessor::fileToRef;
 std::function<juce::File (const juce::String&)> BuiltinProcessor::refToFile;
 std::function<void (BuiltinProcessor&, const juce::File&)> BuiltinProcessor::onAudioToTrack;
+std::atomic<int> BuiltinProcessor::songKey { 0 }, BuiltinProcessor::songScale { 0 };
 
 juce::AudioProcessor::BusesProperties BuiltinProcessor::busesFor (bool instrument, bool midiOnly)
 {
