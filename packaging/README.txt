@@ -8,8 +8,9 @@ Double-click WOMANINSTEM.exe. Keep the "models" and "sounds" folders next to it
 
 Two modes, switched with the tabs at the top (Ctrl+1 / Ctrl+2):
   PLAY ALONG - split a song into stems, mute your part, jam through the amp rig.
-  STUDIO     - a full multitrack recording studio: instruments, drummer, recording,
-               piano roll, mixer, effects, VST3 plugins.
+  STUDIO     - a full multitrack recording studio: instruments, drummer, 80s keyboard with
+               rhythm box, samplers, arpeggiator, looper, recording, piano roll, mixer with
+               buses / sends / side-chain, Vocal Tune, time-stretching, VST3 / VST / CLAP / LV2 plugins.
 No installation needed (or use the -setup.exe installer for Start Menu shortcuts).
 
 If Windows SmartScreen says "Windows protected your PC": click "More info" -> "Run anyway".
@@ -34,14 +35,24 @@ Studio quick start
 1. Click STUDIO. A piano track is ready: play it with a USB MIDI keyboard, or press
    Ctrl+K (Musical Typing) and use A S D F G H J K L (white keys) / W E T Y U O P (black keys).
 2. "+ Track": Drummer (a kit plus 8 bars of groove), Software Instrument (piano, keys,
-   strings, synths...), Audio: Guitar or Bass (records through Amp & Pedals), Microphone.
-3. Library (left): Sounds = 287 instruments and drum kits, Drums = 18 grooves,
-   Effects = EQ, compressor, reverb, delay and more, Songs = your split songs.
-   Double-click an item, or drag it onto a track.
+   strings, synths...), HomeKeys 20 (80s keyboard with a 20-rhythm rhythm box), Vintage Rhythm
+   Box, Sampler, Drum Pads, Loop Station, Audio: Guitar or Bass (records through Amp & Pedals),
+   Microphone, and Aux Buses (a shared reverb or delay your tracks send to).
+3. Library (left): Sounds = instruments and drum kits, Drums = 18 grooves + 20 vintage rhythms,
+   Loops = chords / bass lines / arpeggios in your song's key, FX = effects and MIDI effects,
+   Songs = your split songs. Double-click an item, or drag it onto a track.
 4. Arm a track (R button on the track), press R to record (1 bar count-in), Space to stop.
    Turn on Cycle (C) to record several takes over a section.
 5. Double-click a clip to edit it (piano roll for MIDI, gain / fades / takes for audio).
-6. Mixer (X): faders, pan, insert effects. Project > Export Mix or Export Stems when done.
+6. Mixer (X): faders, pan, insert effects, "+ MIDI FX" (arpeggiator...) above an instrument,
+   "+ Send" to a bus, "Out:" to route a track into a bus. Right-click a compressor / gate /
+   vocoder to pick its side-chain key track. Project > Export Mix or Export Stems when done.
+7. Song key: click KEY in the display. Scale Lock, Vocal Tune and the Loops follow it.
+
+Audio clips: Ctrl+drag a clip's right edge to time-stretch it. Right-click a clip for
+Time & Pitch (follow song tempo, speed, transpose), Reverse, Normalize, Convert to Sampler Track.
+Automation: track menu > Show Automation, then right-click the lane to automate volume, pan,
+sends or any plugin knob. Right-click the ruler to add markers (Verse, Chorus...).
 
 Studio shortcuts
 ----------------
@@ -50,8 +61,8 @@ Ctrl+Z / Ctrl+Y undo/redo | Ctrl+S save | Ctrl+E export | Ctrl+T split | Ctrl+D 
 Ctrl+C / Ctrl+V copy/paste | Del delete | M / S mute/solo track | E editor | X mixer | B library
 Ctrl+K Musical Typing (Z/X octave, C/V velocity)
 
-VST3 plugins: Project > Plugin Manager > Options > Scan. Plugins appear in the track menu,
-the mixer's slots and the Library.
+Plugins (VST3, VST, CLAP, LV2): Project > Plugin Manager > Options > Scan. Plugins appear in
+the track menu, the mixer's slots and the Library.
 
 Practice tools
 --------------

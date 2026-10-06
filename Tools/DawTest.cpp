@@ -14,6 +14,7 @@
 #include "Daw/Instruments/Sampler.h"
 #include "Daw/Instruments/HomeKeys.h"
 #include "Daw/Instruments/VintageRhythms.h"
+#include "Daw/Model/MidiLoops.h"
 #include <tuple>
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
@@ -150,6 +151,104 @@ int main (int argc, char** argv)
         std::cout << "bpm " << est.bpm << "  first beat " << est.firstBeatSeconds << " s  confidence " << est.confidence << std::endl;
         return 0;
     }
+    // dawtest --make-demo <file.wisproj>: builds a demo song (used for the README screenshots)
+    if (argc > 2 && juce::String (argv[1]) == "--make-demo")
+    {
+        const juce::File target { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        Project p;
+        p.createNew ("Dream Demo");
+        target.getParentDirectory().createDirectory();
+        p.saveAs (target);
+        p.setTempo (84.0);
+        p.setKey (2, 0);   // D major
+        const double bar = p.beatsPerBar();
+
+        auto keys = p.addTrack (kindInstrument, "HomeKeys 20");
+        {
+            auto ref = builtinPresetRef ("homekeys", 0);
+            if (auto proto = createBuiltin ("homekeys")) { proto->setCurrentProgram (0); proto->setParam ("rhythmOn", 0.0f); ref.state = encodeState (*proto); }
+            p.setInstrument (keys, ref);
+        }
+        insertMidiLoop (p, keys, 1, 3, 0.0);
+        insertMidiLoop (p, keys, 1, 3, 8 * bar);
+
+        auto drums = p.addTrack (kindInstrument, "Rhythm Box");
+        p.setInstrument (drums, builtinPresetRef ("rhythmbox", 0));
+        insertVintageRhythm (p, drums, 0, 4 * bar, 12);
+
+        auto bass = p.addTrack (kindInstrument, "Bass");
+        p.setInstrument (bass, soundFontRef (0, 33));
+        insertMidiLoop (p, bass, 1, 4, 4 * bar);
+        insertMidiLoop (p, bass, 1, 4, 12 * bar);
+
+        auto arp = p.addTrack (kindInstrument, "Glass Arp");
+        p.setInstrument (arp, synthRef (8));
+        p.setPlugin (arp.midiFx(), -1, builtinPresetRef ("arp", 2));
+        p.setPlugin (arp.inserts(), -1, builtinRef ("autofilter"));
+        p.setPlugin (arp.inserts(), -1, builtinPresetRef ("tape", 0));
+        insertMidiLoop (p, arp, 1, 0, 8 * bar);
+        {
+            auto slot = arp.inserts().getChild (0)[ids::id].toString();
+            if (auto proto = createBuiltin ("autofilter"))
+            {
+                int cutoffIndex = 0;
+                auto params = proto->getParameters();
+                for (int i = 0; i < params.size(); ++i)
+                    if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (params[i]); r != nullptr && r->paramID == "cutoff") cutoffIndex = i;
+                auto lane = p.getOrCreateLane (arp, "plug:" + slot + ":" + juce::String (cutoffIndex));
+                addPoint (lane, 8 * bar, 0.15); addPoint (lane, 12 * bar, 0.75); addPoint (lane, 14 * bar, 0.55); addPoint (lane, 16 * bar, 0.9);
+                arp.v.setProperty ("autoParam", lane[ids::param], nullptr);
+                arp.v.setProperty (ids::showAutomation, true, nullptr);
+            }
+        }
+
+        // a "vocal": a wobbly sine melody so there's a waveform to look at
+        auto vox = p.addTrack (kindAudio, "Vocals");
+        {
+            const double secs = 8 * bar * 60.0 / 84.0;
+            juce::AudioBuffer<float> b (1, (int) (sr * secs));
+            const int melody[] = { 66, 69, 71, 69, 66, 64, 62, 64 };
+            double ph = 0.0;
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const double t = i / sr;
+                const int note = melody[(int) (t / (secs / 8.0)) % 8];
+                const double hz = 440.0 * std::pow (2.0, (note - 69 + 0.3 * std::sin (t * 5.5)) / 12.0);
+                ph += 2.0 * juce::MathConstants<double>::pi * hz / sr;
+                const double phrase = std::fmod (t, secs / 8.0) / (secs / 8.0);
+                const double env = std::sin (juce::MathConstants<double>::pi * phrase) * (0.6 + 0.4 * std::sin (t * 1.7));
+                b.setSample (0, i, (float) (0.35 * env * (std::sin (ph) + 0.3 * std::sin (2 * ph) + 0.1 * std::sin (3 * ph))));
+            }
+            auto f = p.audioFolder().getChildFile ("Vocals take 1.wav");
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+            auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (1).withBitsPerSample (24);
+            if (auto w = juce::WavAudioFormat().createWriterFor (os, opts)) w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            p.addAudioClip (vox, f, 8 * bar, 0.0, secs, "Vocals take 1");
+        }
+        for (auto id : { "autotune", "deesser", "compressor" }) p.setPlugin (vox.inserts(), -1, builtinRef (id));
+
+        auto bus = p.addBus ("Shimmer Bus");
+        {
+            auto ref = builtinRef ("shimmer");
+            if (auto proto = createBuiltin ("shimmer")) { proto->setParam ("mix", 1.0f); ref.state = encodeState (*proto); }
+            p.setPlugin (bus.inserts(), -1, ref);
+        }
+        p.setSend (keys, bus.id(), -8.0f);
+        p.setSend (arp, bus.id(), -4.0f);
+        p.setSend (vox, bus.id(), -6.0f);
+        bus.v.setProperty (ids::volume, -3.0, nullptr);
+
+        p.addMarker (0.0, "Intro");
+        p.addMarker (4 * bar, "Verse");
+        p.addMarker (8 * bar, "Chorus");
+        p.addMarker (12 * bar, "Verse 2");
+        p.setPlugin (p.masterInserts(), -1, builtinRef ("limiter"));
+        auto err = p.save();
+        std::cout << (err.isEmpty() ? "Demo written to " + target.getFullPathName() : err) << std::endl;
+        return err.isEmpty() ? 0 : 1;
+    }
+
     auto tmpRoot = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wis_dawtest");
     tmpRoot.deleteRecursively();
     tmpRoot.createDirectory();
@@ -616,6 +715,19 @@ int main (int argc, char** argv)
             check (std::abs (h1 - 261.63) < 1.5 && std::abs (h2 - 440.0) < 2.0,
                    "Sampler plays C4 and A4 from a C4 sample (" + juce::String (h1, 1) + " / " + juce::String (h2, 1) + " Hz)");
 
+            // a sample loaded from a file is saved with the song and comes back when it's reopened
+            auto sampleFile = writeClickWav (tmpRoot.getChildFile ("sample.wav"), 1.0, 0.1, 330.0, 0.2);
+            check (sampler->loadFile (sampleFile).isEmpty() && sampler->getSample() != nullptr, "Sampler loads a WAV file");
+            engine.flushPluginStates();
+            {
+                juce::String err;
+                auto fresh = host.create (t.instrument(), sr, block, true, err);
+                auto* restored = dynamic_cast<Sampler*> (fresh.get());
+                check (restored != nullptr && restored->getSample() != nullptr && restored->getSample()->length() == (int) sr,
+                       "...and gets it back from the saved song");
+            }
+            sampler->loadBuffer (sine, sr, "C4 sine");
+
             sampler->setParam ("mode", 2.0f);
             sampler->setParam ("slices", 2.0f);   // 8 equal slices
             const auto slices = sampler->currentSlices();
@@ -693,7 +805,7 @@ int main (int argc, char** argv)
             project.addNote (hc, 43, 0.0, 8.0, 100);   // G below the split point
             auto rhythm = renderRange (engine, project, 0.0, 8.0);
             check (allFinite (rhythm) && rms (rhythm, 0, rhythm.getNumSamples()) > 0.01f && keys->currentStep.load() >= 0, "Rhythm section runs with the song");
-            check (keys->chordRoot.load() == 7, "Auto Bass Chord recognises the single-finger chord (" + HomeKeys::chordName (keys->chordRoot.load(), keys->chordType.load()) + ")");
+            check (keys->chordRoot.load() == 7, "Auto accompaniment recognises the single-finger chord (" + HomeKeys::chordName (keys->chordRoot.load(), keys->chordType.load()) + ")");
         }
         project.removeTrack (hk);
 

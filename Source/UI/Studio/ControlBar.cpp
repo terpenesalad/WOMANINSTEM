@@ -93,6 +93,7 @@ Lcd::Lcd (StudioContext& c) : ctx (c)
     startTimerHz (20);
 }
 
+juce::Rectangle<int> Lcd::keyArea() const   { return { getWidth() - 264, 0, 62, getHeight() }; }
 juce::Rectangle<int> Lcd::tempoArea() const { return { getWidth() - 200, 0, 90, getHeight() }; }
 juce::Rectangle<int> Lcd::sigArea() const   { return { getWidth() - 106, 0, 50, getHeight() }; }
 
@@ -108,7 +109,7 @@ void Lcd::paint (juce::Graphics& g)
     const double beats = ctx.engine.getPositionBeats();
     const bool rec = ctx.engine.isRecording(), counting = ctx.engine.isCountingIn();
 
-    auto pos = getLocalBounds().withWidth (getWidth() - 206).reduced (12, 3);
+    auto pos = getLocalBounds().withWidth (getWidth() - 268).reduced (12, 3);
     g.setColour (rec ? theme::bad : counting ? theme::warn : theme::text);
     g.setFont (juce::Font (juce::FontOptions (24.0f, juce::Font::bold)).withExtraKerningFactor (0.04f));
     g.drawText (formatBarsBeats (beats, p.beatsPerBar(), p.tsDen()), pos.removeFromLeft (pos.getWidth() / 2 + 20), juce::Justification::centredLeft);
@@ -133,8 +134,16 @@ void Lcd::paint (juce::Graphics& g)
     g.setColour (theme::textFaint);
     g.drawText ("TIME", s.withTrimmedTop (getHeight() - 16), juce::Justification::centredTop);
 
+    auto k = keyArea();
+    g.setColour (theme::text);
+    g.setFont (uiFont (18.0f, true));
+    g.drawText (Project::keyName (p.key(), p.scale()).replace (" major", "").replace (" minor", "m"), k.withTrimmedBottom (14), juce::Justification::centredBottom);
+    g.setFont (uiFont (9.5f, true));
+    g.setColour (theme::textFaint);
+    g.drawText ("KEY", k.withTrimmedTop (getHeight() - 16), juce::Justification::centredTop);
+
     g.setColour (theme::outline);
-    g.drawVerticalLine (getWidth() - 206, 6.0f, (float) getHeight() - 6.0f);
+    g.drawVerticalLine (getWidth() - 268, 6.0f, (float) getHeight() - 6.0f);
 }
 
 void Lcd::resized()
@@ -146,6 +155,23 @@ void Lcd::mouseDown (const juce::MouseEvent& e)
 {
     draggingTempo = tempoArea().contains (e.getPosition());
     if (draggingTempo) { dragStartTempo = ctx.project.tempo(); ctx.beginEdit ("Tempo"); }
+    if (keyArea().contains (e.getPosition()))
+    {
+        juce::PopupMenu m, major, minor;
+        for (int k = 0; k < 12; ++k)
+        {
+            major.addItem (1 + k, Project::keyName (k, 0), true, ctx.project.key() == k && ctx.project.scale() == 0);
+            minor.addItem (13 + k, Project::keyName (k, 1), true, ctx.project.key() == k && ctx.project.scale() == 1);
+        }
+        m.addSectionHeader ("Song key (Scale Lock, Vocal Tune and Loops follow it)");
+        m.addSubMenu ("Major", major);
+        m.addSubMenu ("Minor", minor);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this] (int r)
+        {
+            if (r > 0) { ctx.beginEdit ("Key"); ctx.project.setKey ((r - 1) % 12, r > 12 ? 1 : 0); }
+        });
+        return;
+    }
     if (sigArea().contains (e.getPosition()))
     {
         juce::PopupMenu m;
@@ -301,7 +327,7 @@ void ControlBar::resized()
         r.removeFromLeft (3);
     }
     r.removeFromLeft (10);
-    auto lcdArea = r.removeFromLeft (juce::jmin (470, r.getWidth() - 4 * (bw + 3) - 10));
+    auto lcdArea = r.removeFromLeft (juce::jmin (540, r.getWidth() - 4 * (bw + 3) - 10));
     lcd.setBounds (lcdArea);
     r.removeFromLeft (10);
     for (auto* b : { &cycleB, &metroB, &countB, &typingB })

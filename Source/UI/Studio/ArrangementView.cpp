@@ -1,4 +1,6 @@
 #include "ArrangementView.h"
+#include "Daw/Model/TempoDetect.h"
+#include "Daw/Instruments/Sampler.h"
 
 namespace wis::daw
 {
@@ -7,18 +9,22 @@ static constexpr int rulerHeight = 36;
 static constexpr int bottomBar = 18;
 static constexpr int laneExtra = 72;
 
-// automation value <-> 0..1
+// automation value <-> 0..1  (lanes: "volume", "pan", "send:<bus id>" in dB, "plug:<slot>:<param index>" 0..1)
 static float autoNorm (const juce::String& param, float v)
 {
     if (param == "pan") return (v + 1.0f) * 0.5f;
+    if (param.startsWith ("plug:")) return juce::jlimit (0.0f, 1.0f, v);
     return juce::jlimit (0.0f, 1.0f, std::pow ((juce::jlimit (-60.0f, 6.0f, v) + 60.0f) / 66.0f, 2.0f));
 }
 static float autoValue (const juce::String& param, float n)
 {
     n = juce::jlimit (0.0f, 1.0f, n);
     if (param == "pan") return n * 2.0f - 1.0f;
+    if (param.startsWith ("plug:")) return n;
     return std::sqrt (n) * 66.0f - 60.0f;
 }
+static juce::String plugSlot (const juce::String& param)  { return param.fromFirstOccurrenceOf (":", false, false).upToFirstOccurrenceOf (":", false, false); }
+static int plugIndex (const juce::String& param)          { return param.fromLastOccurrenceOf (":", false, false).getIntValue(); }
 
 // =====================================================================================================
 //  Ruler: bar numbers, playhead positioning, cycle region (top strip)
@@ -68,6 +74,21 @@ public:
                 }
         }
 
+        // song markers (Verse, Chorus...)
+        g.setFont (uiFont (10.5f, true));
+        for (auto m : p.markers())
+        {
+            const float mx = owner.beatToX ((double) m[ids::b]);
+            if (mx < -120 || mx > getWidth()) continue;
+            const auto name = m[ids::name].toString();
+            const float w = juce::jmin (140.0f, (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 12.0f);
+            juce::Rectangle<float> tag (mx, 15.0f, w, 14.0f);
+            g.setColour (juce::Colour (0xff3b82f6));
+            g.fillRoundedRectangle (tag, 3.0f);
+            g.setColour (juce::Colours::white);
+            g.drawText (name, tag.reduced (5, 0), juce::Justification::centredLeft, true);
+        }
+
         // playhead marker
         const float px = owner.beatToX (ctx.engine.getPositionBeats());
         juce::Path tri;
@@ -80,9 +101,80 @@ public:
         g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
     }
 
+    juce::ValueTree markerAt (juce::Point<int> pos) const
+    {
+        if (pos.y < 14 || pos.y > 30) return {};
+        juce::ValueTree best;
+        for (auto m : owner.ctx.project.markers())
+        {
+            const float mx = owner.beatToX ((double) m[ids::b]);
+            if (pos.x >= mx - 2 && pos.x <= mx + 90) best = m;   // later markers win (drawn on top)
+        }
+        return best;
+    }
+
+    void renameMarker (juce::ValueTree m)
+    {
+        auto* w = new juce::AlertWindow ("Marker", "Name:", juce::MessageBoxIconType::NoIcon, this);
+        w->addTextEditor ("name", m[ids::name].toString());
+        w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        auto& ctx = owner.ctx;
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([&ctx, w, m] (int r) mutable
+        {
+            if (r == 1 && w->getTextEditorContents ("name").trim().isNotEmpty())
+            { ctx.beginEdit ("Rename marker"); m.setProperty (ids::name, w->getTextEditorContents ("name").trim(), ctx.project.um()); }
+        }), true);
+    }
+
+    void markerMenu (const juce::MouseEvent& e)
+    {
+        auto& ctx = owner.ctx;
+        auto m = markerAt (e.getPosition());
+        const double beat = ctx.snap (owner.xToBeat ((float) e.x), ctx.pixelsPerBeat);
+        juce::PopupMenu menu;
+        juce::PopupMenu names;
+        int id = 10;
+        static const juce::StringArray presets { "Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Breakdown", "Drop", "Outro" };
+        for (auto& n : presets) names.addItem (id++, n);
+        menu.addSubMenu ("Add Marker Here", names);
+        menu.addItem (2, "Add Marker at Playhead");
+        if (m.isValid())
+        {
+            menu.addSeparator();
+            menu.addItem (3, "Rename \"" + m[ids::name].toString() + "\"...");
+            menu.addItem (4, "Delete Marker");
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options(), [this, m, beat] (int r) mutable
+        {
+            auto& c = owner.ctx;
+            auto& p = c.project;
+            if (r >= 10) { c.beginEdit ("Add marker"); p.addMarker (beat, presets[r - 10]); }
+            else if (r == 2) { c.beginEdit ("Add marker"); renameMarker (p.addMarker (c.engine.getPositionBeats(), "Marker " + juce::String (p.markers().getNumChildren() + 1))); }
+            else if (r == 3) renameMarker (m);
+            else if (r == 4) { c.beginEdit ("Delete marker"); p.markers().removeChild (m, p.um()); }
+            owner.repaintAll();
+        });
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (auto m = markerAt (e.getPosition()); m.isValid()) renameMarker (m);
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         auto& p = owner.ctx.project;
+        if (e.mods.isPopupMenu() && e.y >= 14) { cycleDrag = false; markerMenu (e); ignoreDrag = true; return; }
+        ignoreDrag = false;
+        if (auto m = markerAt (e.getPosition()); m.isValid())
+        {
+            owner.ctx.engine.setPositionBeats ((double) m[ids::b]);
+            cycleDrag = false;
+            ignoreDrag = true;
+            owner.repaintAll();
+            return;
+        }
         dragStartBeat = owner.ctx.snap (owner.xToBeat ((float) e.x), owner.ctx.pixelsPerBeat, e.mods.isShiftDown());
         cycleDrag = e.y < 14;
         movedCycle = false;
@@ -101,6 +193,7 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (ignoreDrag) return;
         auto& ctx = owner.ctx;
         auto& tree = ctx.project.tree();
         const double b = ctx.snap (owner.xToBeat ((float) e.x), ctx.pixelsPerBeat, e.mods.isShiftDown());
@@ -130,6 +223,7 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        if (ignoreDrag) return;
         if (cycleDrag && ! movedCycle)
         {
             auto& tree = owner.ctx.project.tree();
@@ -140,7 +234,7 @@ public:
 
     ArrangementView& owner;
     double dragStartBeat = 0, grabOffset = -1, cycleLen = 0;
-    bool cycleDrag = false, movedCycle = false;
+    bool cycleDrag = false, movedCycle = false, ignoreDrag = false;
 };
 
 // =====================================================================================================
@@ -331,7 +425,9 @@ public:
         }
 
         const double tempo = ctx.project.tempo();
-        const double secsPerPixel = 60.0 / tempo / ctx.pixelsPerBeat;
+        const double ratio = c.stretchRatio (tempo);
+        const double secsPerPixel = 60.0 / tempo / ctx.pixelsPerBeat / ratio;   // source seconds per pixel
+        const bool rev = c.reversed();
         const double gain = juce::Decibels::decibelsToGain (c.gainDb());
         const float mid = body.getCentreY(), half = body.getHeight() * 0.48f;
         const float x0 = juce::jmax (body.getX(), 0.0f), x1 = juce::jmin (body.getRight(), (float) getWidth());
@@ -342,7 +438,8 @@ public:
         std::vector<float> vals;
         for (float x = x0; x < x1; x += 1.0f)
         {
-            const double tA = c.offsetSeconds() + (x - body.getX()) * secsPerPixel;
+            const double u = (x - body.getX()) * secsPerPixel;
+            const double tA = rev ? c.offsetSeconds() + c.lengthSeconds() - u - secsPerPixel : c.offsetSeconds() + u;
             const double tB = tA + secsPerPixel;
             const int pA = juce::jmax (0, (int) (tA * peaksPerSecond));
             const int pB = juce::jmin ((int) peaks.size(), juce::jmax (pA + 1, (int) (tB * peaksPerSecond)));
@@ -357,6 +454,19 @@ public:
         path.closeSubPath();
         g.setColour (col.brighter (0.4f).withAlpha (0.9f));
         g.fillPath (path);
+
+        // time & pitch badge
+        juce::StringArray tags;
+        if (c.follows()) tags.add ("follows tempo");
+        else if (std::abs (ratio - 1.0) > 1.0e-3) tags.add (juce::String (100.0 / ratio, 0) + "% speed");
+        if (std::abs (c.pitch()) > 0.01) tags.add ((c.pitch() > 0 ? "+" : "") + juce::String (c.pitch(), 0) + " st");
+        if (rev) tags.add ("reversed");
+        if (! tags.isEmpty() && body.getWidth() > 60)
+        {
+            g.setFont (uiFont (9.5f, true));
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawText (tags.joinIntoString ("  "), body.reduced (4, 2).toNearestInt(), juce::Justification::bottomRight, true);
+        }
     }
 
     void paintNotes (juce::Graphics& g, const Clip& c, juce::Rectangle<float> body, juce::Colour col)
@@ -418,6 +528,38 @@ public:
         }
     }
 
+    juce::String laneName (const Track& t, const juce::String& param) const
+    {
+        if (param == "pan") return "PAN";
+        if (param == "volume") return "VOLUME";
+        if (param.startsWith ("send:"))
+        {
+            auto bus = ctx.project.trackById (param.fromFirstOccurrenceOf (":", false, false).getIntValue());
+            return "SEND TO " + (bus.isValid() ? bus.name().toUpperCase() : juce::String ("?"));
+        }
+        if (param.startsWith ("plug:"))
+            if (auto* proc = ctx.engine.getProcessor (plugSlot (param)))
+                if (auto* prm = proc->getParameters()[plugIndex (param)])
+                    return (proc->getName() + ": " + prm->getName (40)).toUpperCase();
+        juce::ignoreUnused (t);
+        return "PLUGIN PARAMETER";
+    }
+
+    float laneFallback (const Track& t, const juce::String& param) const
+    {
+        if (param == "pan") return (float) (double) t.v[ids::pan];
+        if (param.startsWith ("send:"))
+            return (float) (double) t.sends().getChildWithProperty (ids::bus, param.fromFirstOccurrenceOf (":", false, false).getIntValue()).getProperty (ids::level, 0.0);
+        if (param.startsWith ("plug:"))
+        {
+            if (auto* proc = ctx.engine.getProcessor (plugSlot (param)))
+                if (auto* prm = proc->getParameters()[plugIndex (param)])
+                    return prm->getValue();
+            return 0.5f;
+        }
+        return (float) (double) t.v[ids::volume];
+    }
+
     void paintAutomation (juce::Graphics& g, const Track& t, int y, int h)
     {
         const auto param = t.v.getProperty ("autoParam", "volume").toString();
@@ -426,10 +568,10 @@ public:
         g.fillRect (area);
         g.setColour (theme::textFaint);
         g.setFont (uiFont (10.5f, true));
-        g.drawText (param == "pan" ? "PAN" : "VOLUME", area.reduced (6, 2).toNearestInt(), juce::Justification::topLeft);
+        g.drawText (laneName (t, param) + "   (right-click to choose what to automate)", area.reduced (6, 2).toNearestInt(), juce::Justification::topLeft);
 
         auto lane = t.lane (param);
-        const float fallback = param == "pan" ? (float) (double) t.v[ids::pan] : (float) (double) t.v[ids::volume];
+        const float fallback = laneFallback (t, param);
         auto toY = [&] (float v) { return area.getBottom() - 6.0f - autoNorm (param, v) * (area.getHeight() - 12.0f); };
 
         juce::Path path;
@@ -505,7 +647,9 @@ public:
         auto hit = hitTest2 (e.getPosition());
         switch (hit.zone)
         {
-            case Zone::trimStart: case Zone::trimEnd: setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
+            case Zone::trimStart: setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
+            case Zone::trimEnd:   setMouseCursor (e.mods.isCommandDown() && Clip (hit.clip).isAudio() ? juce::MouseCursor::UpDownLeftRightResizeCursor
+                                                                                                    : juce::MouseCursor::LeftRightResizeCursor); break;
             case Zone::fadeIn: case Zone::fadeOut:   setMouseCursor (juce::MouseCursor::CrosshairCursor); break;
             case Zone::body:                         setMouseCursor (juce::MouseCursor::DraggingHandCursor); break;
             case Zone::none: default:                setMouseCursor (juce::MouseCursor::NormalCursor); break;
@@ -565,7 +709,7 @@ public:
         switch (hit.zone)
         {
             case Zone::trimStart: dragMode = DragMode::trimStart; break;
-            case Zone::trimEnd:   dragMode = DragMode::trimEnd; break;
+            case Zone::trimEnd:   dragMode = e.mods.isCommandDown() && clip.isAudio() ? DragMode::stretch : DragMode::trimEnd; break;
             case Zone::fadeIn:    dragMode = DragMode::fadeIn; break;
             case Zone::fadeOut:   dragMode = DragMode::fadeOut; break;
             default:              dragMode = DragMode::move; break;
@@ -628,7 +772,7 @@ public:
                 if (trackDelta != 0 && juce::isPositiveAndBelow (ti, p.numTracks()))
                 {
                     auto cand = p.track (ti);
-                    if (cand.isInstrument() == c.isMidi()) dest = cand;
+                    if (cand.isInstrument() == c.isMidi() && ! cand.isBus()) dest = cand;
                 }
                 p.moveClip (c, dest.isValid() ? dest : p.trackForClip (c.v), juce::jmax (0.0, s0 + delta));
             }
@@ -646,6 +790,18 @@ public:
                 else
                     p.trimClipEnd (c, ctx.snap (orig.endBeats (tempo) + delta, ctx.pixelsPerBeat, noSnap));
             }
+        }
+        else if (dragMode == DragMode::stretch)
+        {
+            for (int i = 0; i < dragClips.size(); ++i)
+            {
+                Clip c (dragClips.getReference (i));
+                if (! c.isAudio()) continue;
+                restore (c.v, startStates.getReference (i));
+                Clip orig (startStates.getReference (i));
+                p.stretchClipEnd (c, juce::jmax (orig.start() + 0.05, ctx.snap (orig.endBeats (tempo) + (beatNow - mouseDownBeat), ctx.pixelsPerBeat, noSnap)));
+            }
+            ctx.setStatus ("Time-stretching: " + juce::String (100.0 / anchor.stretchRatio (tempo), 0) + "% speed (the pitch stays the same).");
         }
         else if (dragMode == DragMode::fadeIn || dragMode == DragMode::fadeOut)
         {
@@ -722,26 +878,57 @@ public:
         }
         if (e.mods.isPopupMenu())
         {
+            auto hasPoints = [&t] (const juce::String& prm) { auto l = t.lane (prm); return l.isValid() && l.getNumChildren() > 0; };
             juce::PopupMenu m;
-            m.addItem (1, "Show Volume", true, param == "volume");
-            m.addItem (2, "Show Pan", true, param == "pan");
+            juce::StringArray choices;
+            auto addChoice = [&] (juce::PopupMenu& menu, const juce::String& prm, const juce::String& label)
+            {
+                choices.add (prm);
+                menu.addItem (1000 + choices.size() - 1, label + (hasPoints (prm) ? "  *" : ""), true, param == prm);
+            };
+            addChoice (m, "volume", "Volume");
+            addChoice (m, "pan", "Pan");
+            if (t.sends().getNumChildren() > 0)
+            {
+                juce::PopupMenu sends;
+                for (auto s : t.sends())
+                {
+                    auto bus = p.trackById ((int) s[ids::bus]);
+                    addChoice (sends, "send:" + juce::String ((int) s[ids::bus]), "Send to " + (bus.isValid() ? bus.name() : juce::String ("?")));
+                }
+                m.addSubMenu ("Sends", sends);
+            }
+            juce::Array<juce::ValueTree> plugins;
+            for (auto n : t.midiFx()) plugins.add (n);
+            if (t.instrument().isValid()) plugins.add (t.instrument());
+            for (auto n : t.inserts()) plugins.add (n);
+            for (auto& n : plugins)
+            {
+                auto* proc = ctx.engine.getProcessor (n[ids::id].toString());
+                if (proc == nullptr) continue;
+                juce::PopupMenu pm;
+                auto params = proc->getParameters();
+                for (int i = 0; i < juce::jmin (128, params.size()); ++i)
+                    if (params[i]->isAutomatable())
+                        addChoice (pm, "plug:" + n[ids::id].toString() + ":" + juce::String (i), params[i]->getName (40));
+                if (pm.getNumItems() > 0) m.addSubMenu (n[ids::name].toString(), pm);
+            }
             m.addSeparator();
             m.addItem (3, "Clear this automation");
-            m.showMenuAsync (juce::PopupMenu::Options(), [this, t, param] (int r)
+            m.showMenuAsync (juce::PopupMenu::Options(), [this, t, param, choices] (int r)
             {
-                if (r == 1) t.v.setProperty ("autoParam", "volume", nullptr);
-                if (r == 2) t.v.setProperty ("autoParam", "pan", nullptr);
+                if (r >= 1000 && r - 1000 < choices.size()) t.v.setProperty ("autoParam", choices[r - 1000], nullptr);
                 if (r == 3) { ctx.beginEdit ("Clear automation"); auto l = t.lane (param); if (l.isValid()) l.removeAllChildren (ctx.project.um()); }
                 owner.repaintAll();
             });
             return;
         }
-        // new point: the first point also pins the current fader value at the start of the song
+        // new point: the first point also pins the current value at the start of the song
         if (lane.getNumChildren() == 0)
         {
             juce::ValueTree first (ids::POINT);
             first.setProperty (ids::b, 0.0, nullptr);
-            first.setProperty (ids::v, param == "pan" ? (double) t.v[ids::pan] : (double) t.v[ids::volume], nullptr);
+            first.setProperty (ids::v, (double) laneFallback (t, param), nullptr);
             lane.appendChild (first, p.um());
         }
         juce::ValueTree pt (ids::POINT);
@@ -794,7 +981,38 @@ public:
         {
             juce::PopupMenu q;
             q.addItem (20, "1/4");  q.addItem (21, "1/8");  q.addItem (22, "1/16"); q.addItem (23, "1/8 triplet"); q.addItem (24, "1/32");
+            q.addSeparator();
+            q.addItem (25, "1/16 with light swing");
+            q.addItem (26, "1/16 with heavy swing");
+            q.addItem (27, "1/8 with swing (shuffle)");
             m.addSubMenu ("Quantize", q);
+            int midiSelected = 0;
+            for (int sid : ctx.selectedClips) if (auto sc = ctx.project.clipById (sid); sc.isValid() && sc.isMidi()) ++midiSelected;
+            m.addItem (33, "Join Selected Clips", midiSelected > 1);
+        }
+        if (clip.isAudio())
+        {
+            const double tempo = ctx.project.tempo();
+            juce::PopupMenu tp;
+            tp.addItem (43, "Follow Song Tempo (detects the clip's tempo)", true, clip.follows());
+            tp.addSeparator();
+            tp.addItem (40, "Half Speed");
+            tp.addItem (44, "75% Speed");
+            tp.addItem (45, "150% Speed");
+            tp.addItem (41, "Double Speed");
+            tp.addItem (42, "Original Speed", std::abs (clip.stretchRatio (tempo) - 1.0) > 1.0e-3 || clip.follows());
+            tp.addSeparator();
+            juce::PopupMenu pitch;
+            for (int st = 12; st >= -12; --st)
+                if (st % 12 == 0 || std::abs (st) <= 7)
+                    pitch.addItem (62 + st, (st > 0 ? "+" : "") + juce::String (st) + (std::abs (st) == 12 ? " (octave)" : " semitones"), true, std::abs (clip.pitch() - st) < 0.01);
+            tp.addSubMenu ("Transpose (keeps the speed)", pitch);
+            m.addSubMenu ("Time & Pitch", tp);
+            m.addItem (30, "Reverse", true, clip.reversed());
+            m.addItem (31, "Normalize");
+            m.addItem (32, "Convert to Sampler Track (slices)");
+            m.addSeparator();
+            m.addItem (-1, "Tip: Ctrl+drag a clip's right edge to time-stretch it", false);
         }
         int takes = 0;
         for (auto t : clip.v) takes += t.hasType (ids::TAKE) ? 1 : 0;
@@ -858,12 +1076,105 @@ public:
                 p.quantize (c, grids[r - 20]);
                 break;
             }
+            case 25: ctx.beginEdit ("Swing quantize"); p.quantize (c, 0.25, 1.0f, false, {}, 0.25f); break;
+            case 26: ctx.beginEdit ("Swing quantize"); p.quantize (c, 0.25, 1.0f, false, {}, 0.5f); break;
+            case 27: ctx.beginEdit ("Swing quantize"); p.quantize (c, 0.5, 1.0f, false, {}, 0.5f); break;
+            case 33:
+            {
+                juce::Array<Clip> list;
+                for (int sid : ctx.selectedClips) if (auto sc = p.clipById (sid); sc.isValid() && sc.isMidi()) list.add (sc);
+                ctx.beginEdit ("Join clips");
+                auto joined = p.joinMidiClips (list);
+                if (joined.isValid()) ctx.selectClip (joined.id(), false);
+                break;
+            }
+            case 30: ctx.beginEdit ("Reverse"); c.v.setProperty (ids::reverse, ! c.reversed(), p.um()); break;
+            case 31: normalizeClip (c); break;
+            case 32: convertToSampler (c); break;
+            case 40: case 41: case 42: case 44: case 45:
+            {
+                ctx.beginEdit ("Time stretch");
+                const double factor = r == 40 ? 2.0 : r == 41 ? 0.5 : r == 44 ? 4.0 / 3.0 : r == 45 ? 2.0 / 3.0 : 0.0;
+                if (r == 42) { c.v.setProperty (ids::follow, false, p.um()); c.v.setProperty (ids::stretch, 1.0, p.um()); }
+                else c.v.setProperty (ids::stretch, c.stretch() * factor, p.um());
+                break;
+            }
+            case 43:
+            {
+                if (c.follows()) { ctx.beginEdit ("Follow tempo"); p.setClipFollowTempo (c, c.srcTempo(), false); break; }
+                double bpm = c.srcTempo();
+                if (bpm <= 0.0)
+                {
+                    auto data = ctx.engine.getCache().getBlocking (p.resolve (c.file()), ctx.engine.getSampleRate());
+                    if (data == nullptr) { ctx.setStatus ("Can't read the clip's audio."); break; }
+                    bpm = estimateTempo (data->buffer, data->sampleRate).bpm;
+                }
+                if (bpm <= 0.0) { ctx.setStatus ("Couldn't find a steady tempo in this clip."); break; }
+                ctx.beginEdit ("Follow tempo");
+                p.setClipFollowTempo (c, bpm, true);
+                ctx.setStatus ("The clip was played at " + juce::String (bpm, 1) + " BPM; it now follows the song's tempo.");
+                break;
+            }
             default:
                 if (r >= 100 && r < 200) { ctx.beginEdit ("Choose take"); p.setTake (c, r - 100); }
                 else if (r >= 200 && r < 260) { ctx.beginEdit ("Clip gain"); c.v.setProperty (ids::gain, (double) (r - 220), p.um()); }
+                else if (r >= 50 && r <= 74) { ctx.beginEdit ("Transpose audio"); c.v.setProperty (ids::pitch, (double) (r - 62), p.um()); }
                 break;
         }
         owner.repaintAll();
+    }
+
+    void normalizeClip (const Clip& c)
+    {
+        auto data = ctx.engine.getCache().getBlocking (ctx.project.resolve (c.file()), ctx.engine.getSampleRate());
+        if (data == nullptr) return;
+        const int a = juce::jlimit (0, data->buffer.getNumSamples(), (int) (c.offsetSeconds() * data->sampleRate));
+        const int b = juce::jlimit (a, data->buffer.getNumSamples(), (int) ((c.offsetSeconds() + c.lengthSeconds()) * data->sampleRate));
+        float peak = 0.0f;
+        for (int ch = 0; ch < data->buffer.getNumChannels(); ++ch) peak = juce::jmax (peak, data->buffer.getMagnitude (ch, a, b - a));
+        if (peak <= 1.0e-6f) { ctx.setStatus ("The clip is silent."); return; }
+        ctx.beginEdit ("Normalize");
+        const double gain = -0.3 - juce::Decibels::gainToDecibels (peak);
+        c.v.setProperty (ids::gain, gain, ctx.project.um());
+        ctx.setStatus ("Clip gain set to " + juce::String (gain, 1) + " dB (peak -0.3 dB).");
+    }
+
+    void convertToSampler (const Clip& c)
+    {
+        auto& p = ctx.project;
+        Sampler proto;
+        const auto file = p.resolve (c.file());
+        auto err = proto.loadFile (file);
+        auto* sample = proto.getSample();
+        if (err.isNotEmpty() || sample == nullptr) { ctx.setStatus (err.isNotEmpty() ? err : juce::String ("Can't read the clip's audio.")); return; }
+        const double len = sample->length() / sample->sampleRate;
+        proto.setParam ("start", (float) juce::jlimit (0.0, 1.0, c.offsetSeconds() / len));
+        proto.setParam ("end", (float) juce::jlimit (0.0, 1.0, (c.offsetSeconds() + c.lengthSeconds()) / len));
+        proto.setParam ("mode", (float) Sampler::slice);
+        proto.setParam ("slices", 0.0f);
+        proto.setParam ("release", 30.0f);
+        const auto slices = proto.currentSlices();
+        if (slices.size() < 2) return;
+
+        ctx.beginEdit ("Convert to Sampler");
+        auto src = p.trackForClip (c.v);
+        auto t = p.addTrack (kindInstrument, c.name() + " Sampler", p.tracks().indexOf (src.v) + 1);
+        auto ref = builtinRef ("sampler");
+        ref.name = "Sampler: " + c.name();
+        ref.state = encodeState (proto);
+        p.setInstrument (t, ref);
+        const double tempo = p.tempo();
+        auto mc = p.addMidiClip (t, c.start(), c.lengthBeats (tempo), c.name() + " (slices)");
+        const double startSample = slices.front();
+        for (size_t i = 0; i + 1 < slices.size() && Sampler::firstSliceNote + (int) i < 128; ++i)
+        {
+            const double s0 = (slices[i] - startSample) / sample->sampleRate, s1 = (slices[i + 1] - startSample) / sample->sampleRate;
+            p.addNote (mc, Sampler::firstSliceNote + (int) i, p.secondsToBeats (s0), juce::jmax (0.05, p.secondsToBeats (s1 - s0)), 100);
+        }
+        c.v.setProperty (ids::mute, true, p.um());
+        ctx.selectTrack (t.id());
+        ctx.setStatus ("Sliced into " + juce::String ((int) slices.size() - 1) + " pieces on a Sampler track: each slice is a key from C2 up. "
+                       "Rearrange the notes to remix it. (The original clip is muted.)");
     }
 
     void emptyMenu (const juce::MouseEvent& e, const ArrangementView::Row* row)
@@ -943,7 +1254,7 @@ public:
     std::function<void()> paste;
 
 private:
-    enum class DragMode { none, move, trimStart, trimEnd, fadeIn, fadeOut, marquee, automation };
+    enum class DragMode { none, move, trimStart, trimEnd, stretch, fadeIn, fadeOut, marquee, automation };
     ArrangementView& owner;
     StudioContext& ctx;
     DragMode dragMode = DragMode::none;

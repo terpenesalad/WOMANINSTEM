@@ -26,7 +26,8 @@ private:
     void populate();
 
     StudioContext& ctx;
-    juce::TextButton tabs[4] { juce::TextButton ("Sounds"), juce::TextButton ("Drums"), juce::TextButton ("Effects"), juce::TextButton ("Songs") };
+    static constexpr int numTabs = 5;
+    juce::TextButton tabs[numTabs] { juce::TextButton ("Sounds"), juce::TextButton ("Drums"), juce::TextButton ("Loops"), juce::TextButton ("FX"), juce::TextButton ("Songs") };
     juce::TextEditor search;
     juce::TreeView tree;
     std::unique_ptr<juce::TreeViewItem> root;

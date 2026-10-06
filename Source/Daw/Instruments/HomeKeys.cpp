@@ -335,7 +335,7 @@ static prm::Layout homeKeysLayout()
     prm::addFloat (l, "tempo", "Tempo", 40.0f, 220.0f, 96.0f, "bpm", 0.0f, 0);
     prm::addDb (l, "rhythmVol", "Rhythm Volume", -30.0f, 6.0f, -6.0f);
     prm::addChoice (l, "kit", "Rhythm Sound", DrumSynth::kitNames(), 0);
-    prm::addChoice (l, "abc", "Auto Bass Chord", { "Off", "Single Finger", "Fingered" }, 0);
+    prm::addChoice (l, "abc", "Auto Accompaniment", { "Off", "Single Finger", "Fingered" }, 0);
     prm::addFloat (l, "split", "Split", 36.0f, 72.0f, 54.0f, "", 0.0f, 0);
     prm::addChoice (l, "chordTone", "Chord Voice", HomeKeys::toneNames(), 3);
     prm::addDb (l, "chordVol", "Chord Volume", -30.0f, 6.0f, -10.0f);

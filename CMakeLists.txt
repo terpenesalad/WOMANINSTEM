@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # ------------------------------------------------------------------------------
 #  WOMANINSTEM - stem separation + play-along amp rig
 # ------------------------------------------------------------------------------
-project(WOMANINSTEM VERSION 2.0.0 LANGUAGES C CXX)
+project(WOMANINSTEM VERSION 3.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -162,6 +162,7 @@ set(WIS_ENGINE_SOURCES
     Source/Daw/Model/Project.cpp
     Source/Daw/Model/DrumPatterns.cpp
     Source/Daw/Model/TempoDetect.cpp
+    Source/Daw/Model/MidiLoops.cpp
     Source/Daw/Engine/AudioCache.cpp
     Source/Daw/Engine/DawEngine.cpp
     Source/Daw/Plugins/BuiltinProcessor.cpp
@@ -267,6 +268,7 @@ if(WIS_BUILD_APP)
         Source/UI/Studio/BrowserPanel.cpp
         Source/UI/Studio/ControlBar.cpp
         Source/UI/Studio/PluginEditors.cpp
+        Source/UI/Studio/InstrumentEditors.cpp
         Source/UI/Studio/StudioPage.cpp
         ${WIS_ENGINE_SOURCES})
     wis_configure_target(WOMANINSTEM)

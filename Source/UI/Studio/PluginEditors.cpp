@@ -1,4 +1,6 @@
 #include "PluginEditors.h"
+#include "EditorParts.h"
+#include "Daw/Plugins/CreativeEffects.h"
 #include "Daw/Plugins/BuiltinEffects.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Instruments/InstrumentRefs.h"
@@ -86,118 +88,179 @@ private:
 };
 
 // =====================================================================================================
-//  Generic editor: presets + a knob for every parameter
+//  Parameter panel + header (shared by the generic and the custom editors)
+// =====================================================================================================
+ParamPanel::ParamPanel (BuiltinProcessor& p, const juce::StringArray& onlyIds, juce::Colour accent, const juce::StringArray& excludeIds)
+{
+    auto add = [&] (juce::RangedAudioParameter* ranged)
+    {
+        const auto id = ranged->paramID;
+        const auto name = ranged->getName (24);
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (ranged))
+        {
+            auto* cb = combos.add (new juce::ComboBox());
+            cb->addItemList (choice->choices, 1);
+            comboAttachments.add (new juce::AudioProcessorValueTreeState::ComboBoxAttachment (p.state, id, *cb));
+            auto* l = labels.add (new juce::Label ({}, name));
+            l->setFont (uiFont (11.0f, true));
+            l->setColour (juce::Label::textColourId, theme::textDim);
+            addAndMakeVisible (cb);
+            addAndMakeVisible (l);
+            switches.add (cb);
+        }
+        else if (dynamic_cast<juce::AudioParameterBool*> (ranged) != nullptr)
+        {
+            auto* tb = toggles.add (new juce::ToggleButton (name));
+            buttonAttachments.add (new juce::AudioProcessorValueTreeState::ButtonAttachment (p.state, id, *tb));
+            addAndMakeVisible (tb);
+            switches.add (tb);
+        }
+        else
+        {
+            auto* k = knobs.add (new wis::Knob (p.state, id, name));
+            k->slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
+            addAndMakeVisible (k);
+        }
+    };
+
+    if (onlyIds.isEmpty())
+    {
+        for (auto* param : p.getParameters())
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+                if (! excludeIds.contains (ranged->paramID)) add (ranged);
+    }
+    else
+    {
+        for (auto& id : onlyIds)
+            if (auto* ranged = p.state.getParameter (id)) add (ranged);
+    }
+}
+
+int ParamPanel::layout (int width, bool apply)
+{
+    int x = 0, y = 0, rowH = 0;
+    for (auto* c : switches)
+    {
+        const bool isCombo = dynamic_cast<juce::ComboBox*> (c) != nullptr;
+        const int w = isCombo ? comboW : toggleW;
+        if (x > 0 && x + w > width) { x = 0; y += rowH + 4; rowH = 0; }
+        if (apply)
+        {
+            if (isCombo)
+            {
+                const int idx = combos.indexOf (static_cast<juce::ComboBox*> (c));
+                labels[idx]->setBounds (x, y, w - 10, 16);
+                c->setBounds (x, y + 16, w - 10, 24);
+            }
+            else c->setBounds (x, y + 16, w - 6, 24);
+        }
+        x += w;
+        rowH = switchH;
+    }
+    if (rowH > 0) y += rowH + 6;
+    const int cols = juce::jmax (1, width / knobW);
+    for (int i = 0; i < knobs.size(); ++i)
+        if (apply) knobs[i]->setBounds ((i % cols) * knobW, y + (i / cols) * knobH, knobW - 4, knobH - 4);
+    if (! knobs.isEmpty()) y += ((knobs.size() + cols - 1) / cols) * knobH;
+    return y;
+}
+
+int ParamPanel::heightFor (int width) const { return const_cast<ParamPanel*> (this)->layout (width, false); }
+void ParamPanel::resized() { layout (getWidth(), true); }
+
+EditorHeader::EditorHeader (BuiltinProcessor& p, const juce::String& titleText) : proc (p)
+{
+    title.setText (titleText.isNotEmpty() ? titleText : p.displayName, juce::dontSendNotification);
+    title.setFont (uiFont (16.0f, true));
+    addAndMakeVisible (title);
+    const auto programs = p.getProgramNames();
+    if (! programs.isEmpty())
+    {
+        presets.addItemList (programs, 1);
+        presets.setSelectedItemIndex (p.getCurrentProgram(), juce::dontSendNotification);
+        presets.setTextWhenNothingSelected ("Presets");
+        presets.onChange = [this]
+        {
+            proc.setCurrentProgram (presets.getSelectedItemIndex());
+            if (proc.instrument && proc.onDisplayNameChanged) proc.onDisplayNameChanged (presets.getText());
+            if (onPresetChanged) onPresetChanged();
+        };
+        addAndMakeVisible (presets);
+    }
+}
+
+void EditorHeader::resized()
+{
+    auto r = getLocalBounds();
+    if (presets.isVisible()) presets.setBounds (r.removeFromRight (230).reduced (0, 4));
+    for (int i = extras.size(); --i >= 0;)
+    {
+        r.removeFromRight (6);
+        extras[i].first->setBounds (r.removeFromRight (extras[i].second).reduced (0, 4));
+    }
+    title.setBounds (r);
+}
+
+/** De-esser reduction meter. */
+class DeEssMeter : public juce::Component, private juce::Timer
+{
+public:
+    explicit DeEssMeter (DeEsser& d) : fx (d) { startTimerHz (30); }
+    void timerCallback() override { const float v = fx.reductionDb.load(); shown = v > shown ? v : shown * 0.85f + v * 0.15f; repaint(); }
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat().reduced (2.0f);
+        g.setColour (theme::bg); g.fillRoundedRectangle (r, 4.0f);
+        const float w = juce::jlimit (0.0f, 1.0f, shown / 24.0f) * r.getWidth();
+        g.setColour (theme::warn); g.fillRoundedRectangle (r.withX (r.getRight() - w).withWidth (w), 4.0f);
+        g.setColour (theme::text); g.setFont (uiFont (11.0f, true));
+        g.drawText ("Ess reduction  " + juce::String (shown, 1) + " dB", r.reduced (8, 0), juce::Justification::centredLeft);
+    }
+private:
+    DeEsser& fx; float shown = 0.0f;
+};
+
+// =====================================================================================================
+//  Generic editor: presets + a control for every parameter
 // =====================================================================================================
 class BuiltinEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit BuiltinEditor (BuiltinProcessor& p) : AudioProcessorEditor (p), proc (p)
+    explicit BuiltinEditor (BuiltinProcessor& p)
+        : AudioProcessorEditor (p), proc (p), header (p), params (p, {}, p.instrument ? theme::accent2 : p.isMidiFx() ? theme::warn : theme::accent)
     {
-        title.setText (p.displayName, juce::dontSendNotification);
-        title.setFont (uiFont (16.0f, true));
-        addAndMakeVisible (title);
-
-        const auto programs = p.getProgramNames();
-        if (! programs.isEmpty())
-        {
-            presets.addItemList (programs, 1);
-            presets.setSelectedItemIndex (p.getCurrentProgram(), juce::dontSendNotification);
-            presets.setTextWhenNothingSelected ("Presets");
-            presets.onChange = [this]
-            {
-                proc.setCurrentProgram (presets.getSelectedItemIndex());
-                if (proc.instrument && proc.onDisplayNameChanged) proc.onDisplayNameChanged (presets.getText());
-            };
-            addAndMakeVisible (presets);
-        }
-
+        addAndMakeVisible (header);
         if (auto* eq = dynamic_cast<ChannelEq*> (&p))     visual = std::make_unique<EqCurve> (*eq);
         if (auto* c = dynamic_cast<Compressor*> (&p))     visual = std::make_unique<GainReductionMeter> (*c);
+        if (auto* d = dynamic_cast<DeEsser*> (&p))        { visual = std::make_unique<DeEssMeter> (*d); visualH = 28; }
         if (visual != nullptr) addAndMakeVisible (*visual);
+        addAndMakeVisible (params);
 
-        for (auto* param : p.getParameters())
-        {
-            auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param);
-            if (ranged == nullptr) continue;
-            const auto id = ranged->paramID;
-            const auto name = ranged->getName (24);
-
-            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (ranged))
-            {
-                auto* cb = combos.add (new juce::ComboBox());
-                cb->addItemList (choice->choices, 1);
-                comboAttachments.add (new juce::AudioProcessorValueTreeState::ComboBoxAttachment (p.state, id, *cb));
-                auto* l = labels.add (new juce::Label ({}, name));
-                l->setFont (uiFont (11.0f, true));
-                l->setColour (juce::Label::textColourId, theme::textDim);
-                addAndMakeVisible (cb);
-                addAndMakeVisible (l);
-            }
-            else if (dynamic_cast<juce::AudioParameterBool*> (ranged) != nullptr)
-            {
-                auto* tb = toggles.add (new juce::ToggleButton (name));
-                buttonAttachments.add (new juce::AudioProcessorValueTreeState::ButtonAttachment (p.state, id, *tb));
-                addAndMakeVisible (tb);
-            }
-            else
-            {
-                auto* k = knobs.add (new wis::Knob (p.state, id, name));
-                k->slider.setColour (juce::Slider::rotarySliderFillColourId, p.instrument ? theme::accent2 : theme::accent);
-                addAndMakeVisible (k);
-            }
-        }
-
-        const int cols = juce::jlimit (3, 9, (int) std::ceil (std::sqrt ((double) knobs.size() * 2.2)));
-        const int knobRows = (knobs.size() + cols - 1) / cols;
-        const int switchRows = combos.size() + toggles.size() > 0 ? 1 : 0;
-        setSize (juce::jmax (420, cols * 86 + 24), 52 + (visual != nullptr ? 130 : 0) + switchRows * 50 + knobRows * 92 + 12);
+        int width = 460;
+        while (params.heightFor (width - 24) > 330 && width < 900) width += ParamPanel::knobW;
+        setSize (width, 52 + (visual != nullptr ? visualH + 10 : 0) + params.heightFor (width - 24) + 12);
     }
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (theme::panel);
-        g.setColour (proc.instrument ? theme::accent2 : theme::accent);
-        g.fillRect (0, 0, getWidth(), 3);
+        paintEditorBackground (g, getLocalBounds(), proc.instrument ? theme::accent2 : proc.isMidiFx() ? theme::warn : theme::accent);
     }
 
     void resized() override
     {
         auto r = getLocalBounds().reduced (12, 8);
-        auto top = r.removeFromTop (34);
-        if (presets.isVisible()) presets.setBounds (top.removeFromRight (220).reduced (0, 4));
-        title.setBounds (top);
-        if (visual != nullptr) { visual->setBounds (r.removeFromTop (120)); r.removeFromTop (10); }
-
-        if (combos.size() + toggles.size() > 0)
-        {
-            auto row = r.removeFromTop (44);
-            for (int i = 0; i < combos.size(); ++i)
-            {
-                auto cell = row.removeFromLeft (170);
-                labels[i]->setBounds (cell.removeFromTop (16));
-                combos[i]->setBounds (cell.removeFromTop (24).withTrimmedRight (10));
-            }
-            for (auto* t : toggles)
-                t->setBounds (row.removeFromLeft (150).withTrimmedTop (16).withHeight (24));
-            r.removeFromTop (6);
-        }
-
-        const int cols = juce::jmax (1, r.getWidth() / 86);
-        for (int i = 0; i < knobs.size(); ++i)
-            knobs[i]->setBounds (r.getX() + (i % cols) * 86, r.getY() + (i / cols) * 92, 82, 88);
+        header.setBounds (r.removeFromTop (34));
+        r.removeFromTop (6);
+        if (visual != nullptr) { visual->setBounds (r.removeFromTop (visualH)); r.removeFromTop (10); }
+        params.setBounds (r);
     }
 
 private:
     BuiltinProcessor& proc;
-    juce::Label title;
-    juce::ComboBox presets;
+    EditorHeader header;
+    ParamPanel params;
     std::unique_ptr<juce::Component> visual;
-    juce::OwnedArray<wis::Knob> knobs;
-    juce::OwnedArray<juce::ComboBox> combos;
-    juce::OwnedArray<juce::Label> labels;
-    juce::OwnedArray<juce::ToggleButton> toggles;
-    juce::OwnedArray<juce::AudioProcessorValueTreeState::ComboBoxAttachment> comboAttachments;
-    juce::OwnedArray<juce::AudioProcessorValueTreeState::ButtonAttachment> buttonAttachments;
+    int visualH = 120;
 };
 
 // =====================================================================================================
@@ -390,6 +453,7 @@ void installBuiltinEditors()
     BuiltinProcessor::genericEditorFactory = [] (BuiltinProcessor& p) -> juce::AudioProcessorEditor* { return new BuiltinEditor (p); };
     SoundFontInstrument::editorFactory = [] (SoundFontInstrument& p) -> juce::AudioProcessorEditor* { return new SoundFontEditor (p); };
     AmpRigFx::editorFactory = [] (AmpRigFx& p) -> juce::AudioProcessorEditor* { return new AmpRigEditor (p); };
+    installInstrumentEditors();
 }
 
 // =====================================================================================================

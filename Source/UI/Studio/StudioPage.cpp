@@ -1,3 +1,6 @@
+#include "Daw/Model/MidiLoops.h"
+#include "Daw/Instruments/VintageRhythms.h"
+#include "Daw/Instruments/HomeKeys.h"
 #include "StudioPage.h"
 #include "PluginMenus.h"
 #include "Daw/Model/DrumPatterns.h"
@@ -8,6 +11,35 @@
 
 namespace wis::daw
 {
+
+namespace
+{
+    class ExportJob : public juce::ThreadWithProgressWindow
+    {
+    public:
+        ExportJob (DawEngine& e, std::vector<DawEngine::ExportOptions> j)
+            : ThreadWithProgressWindow ("Exporting...", true, true), engine (e), jobs (std::move (j)) {}
+
+        void run() override
+        {
+            for (size_t i = 0; i < jobs.size() && ! threadShouldExit(); ++i)
+            {
+                setStatusMessage ("Exporting " + jobs[i].file.getFileName() + "  (" + juce::String ((int) i + 1) + "/" + juce::String ((int) jobs.size()) + ")");
+                error = engine.renderExport (jobs[i], [this, i] (float p)
+                {
+                    setProgress ((i + p) / (double) jobs.size());
+                    return ! threadShouldExit();
+                });
+                if (error.isNotEmpty()) break;
+            }
+        }
+
+        DawEngine& engine;
+        std::vector<DawEngine::ExportOptions> jobs;
+        juce::String error;
+    };
+}
+
 
 static constexpr int controlBarHeight = 54;
 static constexpr int statusHeight = 22;
@@ -28,6 +60,11 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     ctx.showTrackMenu = [this] (int id, juce::Point<int> pos) { trackMenu (id, pos); };
 
     engine.onSlotRemoved = [this] (const juce::String& id) { closePluginWindow (id); };
+
+    // samples used by the samplers are copied into the song folder, so songs stay self-contained
+    BuiltinProcessor::fileToRef = [this] (const juce::File& f) { return project.makeRef (project.importIntoProject (f)); };
+    BuiltinProcessor::refToFile = [this] (const juce::String& r) { return project.resolve (r); };
+    BuiltinProcessor::onAudioToTrack = [this] (BuiltinProcessor& p, const juce::File& f) { audioFromPlugin (p, f); };
     engine.onError = [this] (const juce::String& m) { setStatus (m); };
     engine.onRecordingFinished = [this] { setStatus ("Recorded. Press R to record another take, or Cmd/Ctrl+Z to undo it."); };
 
@@ -123,6 +160,7 @@ StudioPage::~StudioPage()
     pluginWindows.clear();
     pluginManagerWindow.reset();
     engine.onSlotRemoved = nullptr;
+    BuiltinProcessor::onAudioToTrack = nullptr;
     engine.onError = nullptr;
     engine.onRecordingFinished = nullptr;
     project.onLoaded = nullptr;
@@ -169,6 +207,13 @@ void StudioPage::updateTitle()
 
 void StudioPage::timerCallback()
 {
+    // Scale Lock / Vocal Tune follow the song's key
+    if (BuiltinProcessor::songKey.load() != project.key() || BuiltinProcessor::songScale.load() != project.scale())
+    {
+        BuiltinProcessor::songKey = project.key();
+        BuiltinProcessor::songScale = project.scale();
+        browser.refresh();
+    }
     // autosave a backup every ~2 minutes while there are unsaved changes
     if (project.undo().canUndo()) project.markDirty();
     if (project.isDirty() && ++autosaveTicks > 4 * 120 && ! engine.isRecording())
@@ -320,6 +365,15 @@ void StudioPage::addTrackMenu()
     m.addItem (4, "Audio: Microphone / Vocals");
     m.addItem (5, "Audio: Line in / Other");
     m.addItem (6, "Studio Synth");
+    m.addItem (7, "HomeKeys 20  (80s keyboard with rhythm box + auto accompaniment)");
+    m.addItem (8, "Vintage Rhythm Box  (drum machine + 8 bars of Slow Rock)");
+    m.addItem (9, "Sampler  (play / slice any sound)");
+    m.addItem (10, "Drum Pads  (16 pads for your own samples)");
+    m.addItem (11, "Audio: Loop Station  (looper pedal on your input)");
+    m.addSeparator();
+    m.addItem (12, "Aux Bus: Reverb  (shared reverb you send tracks to)");
+    m.addItem (13, "Aux Bus: Delay");
+    m.addItem (14, "Aux Bus: Empty  (group / submix)");
     m.showMenuAsync (juce::PopupMenu::Options(), [this] (int r)
     {
         if (r == 0) return;
@@ -353,10 +407,48 @@ void StudioPage::addTrackMenu()
                 break;
             case 5: t = project.addTrack (kindAudio, "Audio", insertAt); t.v.setProperty (ids::arm, true, nullptr); break;
             case 6: t = project.addTrack (kindInstrument, "Synth", insertAt); project.setInstrument (t, synthRef (1)); break;
+            case 7: t = project.addTrack (kindInstrument, "HomeKeys 20", insertAt); project.setInstrument (t, builtinPresetRef ("homekeys", 0)); break;
+            case 8:
+            {
+                t = project.addTrack (kindInstrument, "Rhythm Box", insertAt);
+                project.setInstrument (t, builtinPresetRef ("rhythmbox", 0));
+                const double bpb = project.beatsPerBar();
+                insertVintageRhythm (project, t, 0, std::floor (engine.getPositionBeats() / bpb) * bpb, 8);
+                break;
+            }
+            case 9: t = project.addTrack (kindInstrument, "Sampler", insertAt); project.setInstrument (t, builtinRef ("sampler")); break;
+            case 10: t = project.addTrack (kindInstrument, "Drum Pads", insertAt); project.setInstrument (t, builtinPresetRef ("drumpads", 0)); break;
+            case 11:
+                t = project.addTrack (kindAudio, "Loop Station", insertAt);
+                project.setPlugin (t.inserts(), -1, builtinRef ("looper"));
+                t.v.setProperty (ids::monitor, true, nullptr);
+                break;
+            case 12: case 13: case 14:
+            {
+                t = project.addBus (r == 12 ? "Reverb Bus" : r == 13 ? "Delay Bus" : "Aux Bus", insertAt);
+                if (r != 14)
+                {
+                    const char* fxId = r == 12 ? "reverb" : "delay";
+                    auto ref = builtinRef (fxId);
+                    if (auto proto = createBuiltin (fxId)) { proto->setParam ("mix", 1.0f); ref.state = encodeState (*proto); }
+                    project.setPlugin (t.inserts(), -1, ref);
+                }
+                break;
+            }
             default: return;
         }
         ctx.selectTrack (t.id());
-        if (r >= 3 && r <= 5)
+        if (r >= 12)
+            setStatus ("Bus added. Send tracks to it from the mixer (+ Send) or route a track's output into it.");
+        else if (r == 11)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.inserts().getChild (0));
+            setStatus ("Loop Station: choose the input in the track menu, then hit the big button to record a loop.");
+        }
+        else if (r == 7 || r == 8)
+            setStatus ("Press play: the rhythm runs with the song. Pick rhythms and tones on the HomeKeys panel (double-click the instrument) or Library > Drums.");
+        else if (r >= 3 && r <= 5)
             setStatus ("Choose the input for \"" + t.name() + "\" in its track menu (right-click the track), then press R to record.");
         else if (r == 2)
             setStatus ("Drummer added. Swap the groove from Library > Drums, or double-click the clip to edit the beat.");
@@ -378,7 +470,7 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
     for (int i = 0; i < 12; ++i) colours.addColouredItem (100 + i, "Colour " + juce::String (i + 1), trackColourForIndex (i));
     m.addSubMenu ("Colour", colours);
     m.addItem (2, "Duplicate Track");
-    m.addItem (3, (bool) t.v[ids::showAutomation] ? "Hide Automation" : "Show Automation (volume / pan)");
+    m.addItem (3, (bool) t.v[ids::showAutomation] ? "Hide Automation" : "Show Automation (volume, pan, sends, plugin knobs)");
     juce::PopupMenu heights;
     heights.addItem (10, "Small", true, (int) t.v[ids::height] <= 48);
     heights.addItem (11, "Medium", true, (int) t.v[ids::height] > 48 && (int) t.v[ids::height] <= 80);
@@ -388,12 +480,16 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
     PluginMenu fx = PluginMenu::effects (host);
     m.addSubMenu ("Add Effect", fx.menu);
     PluginMenu inst = PluginMenu::instruments (host);
+    PluginMenu mfx = PluginMenu::midiEffects (host);
     if (t.isInstrument())
     {
+        m.addSubMenu ("Add MIDI Effect (arpeggiator...)", mfx.menu);
         m.addSubMenu ("Instrument", inst.menu);
         m.addItem (4, "Open Instrument");
     }
-    else
+    if (! t.isBus())
+        m.addItem (6, "Bounce in Place (render to a new audio track)");
+    if (t.isAudio())
     {
         juce::PopupMenu inputs;
         juce::StringArray names;
@@ -417,8 +513,9 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
 
     auto fxRefs = fx.refs;
     auto instRefs = inst.refs;
+    auto mfxRefs = mfx.refs;
     m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 }),
-                     [this, trackId, fxRefs, instRefs] (int r)
+                     [this, trackId, fxRefs, instRefs, mfxRefs] (int r)
     {
         auto tr = project.trackById (trackId);
         if (! tr.isValid() || r == 0) return;
@@ -439,6 +536,7 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
         else if (r == 3) tr.v.setProperty (ids::showAutomation, ! (bool) tr.v[ids::showAutomation], nullptr);
         else if (r == 4) { if (tr.instrument().isValid()) openPluginWindow (tr.instrument()); }
         else if (r == 5) tr.v.setProperty (ids::monitor, ! (bool) tr.v[ids::monitor], nullptr);
+        else if (r == 6) bounceInPlace (trackId);
         else if (r == 9) { engine.flushPluginStates(); ctx.beginEdit ("Delete track"); project.removeTrack (tr); setStatus ("Track deleted (Ctrl+Z to undo)."); }
         else if (r >= 10 && r <= 12) { ctx.beginEdit ("Track height"); tr.v.setProperty (ids::height, r == 10 ? 44 : r == 11 ? 72 : 120, project.um()); }
         else if (r >= 100 && r < 112) { ctx.beginEdit ("Colour"); tr.v.setProperty (ids::colour, (juce::int64) trackColourForIndex (r - 100).getARGB(), project.um()); }
@@ -454,9 +552,76 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
         else if (auto it2 = instRefs.find (r); it2 != instRefs.end())
         {
             ctx.beginEdit ("Change instrument");
-            project.setInstrument (tr, it2->second);
+            project.setInstrument (tr, PluginMenu::resolve (it2->second));
+        }
+        else if (auto it3 = mfxRefs.find (r); it3 != mfxRefs.end() && tr.midiFx().isValid())
+        {
+            ctx.beginEdit ("Add MIDI effect");
+            project.setPlugin (tr.midiFx(), -1, PluginMenu::resolve (it3->second));
+            engine.rebuildNow();
+            openPluginWindow (tr.midiFx().getChild (tr.midiFx().getNumChildren() - 1));
         }
     });
+}
+
+void StudioPage::bounceInPlace (int trackId)
+{
+    auto t = project.trackById (trackId);
+    if (! t.isValid() || t.isBus()) return;
+    double end = 0.0;
+    for (auto c : t.clips()) end = juce::jmax (end, Clip (c).endBeats (project.tempo()));
+    if (end <= 0.0) { setStatus ("Nothing to bounce on \"" + t.name() + "\"."); return; }
+    const double bpb = project.beatsPerBar();
+    end = std::ceil (end / bpb) * bpb;
+
+    engine.flushPluginStates();
+    DawEngine::ExportOptions o;
+    o.file = project.audioFolder().getNonexistentChildFile (juce::File::createLegalFileName (t.name() + " (bounce)"), ".wav");
+    o.format = 0;
+    o.bitDepth = 24;
+    o.startBeat = 0.0;
+    o.endBeat = end;
+    o.tailSeconds = 2.0;
+    o.onlyTracks.add (trackId);
+    o.bounce = true;
+
+    engine.beginExport();
+    ExportJob job (engine, { o });
+    const bool finished = job.runThread();
+    engine.endExport();
+    if (! finished || job.error.isNotEmpty()) { setStatus (job.error.isNotEmpty() ? job.error : juce::String ("Bounce cancelled.")); return; }
+
+    ctx.beginEdit ("Bounce in place");
+    auto b = project.addTrack (kindAudio, t.name() + " (bounced)", project.tracks().indexOf (t.v) + 1);
+    b.v.setProperty (ids::colour, t.v[ids::colour], project.um());
+    b.v.setProperty (ids::volume, t.v[ids::volume], project.um());
+    b.v.setProperty (ids::pan, t.v[ids::pan], project.um());
+    b.v.setProperty (ids::output, t.output(), project.um());
+    for (auto s : t.sends()) project.setSend (b, (int) s[ids::bus], (float) (double) s[ids::level], (bool) s[ids::pre]);
+    project.addAudioClip (b, o.file, 0.0, 0.0, AudioCache::fileLengthSeconds (o.file), t.name());
+    t.v.setProperty (ids::mute, true, project.um());
+    ctx.selectTrack (b.id());
+    setStatus ("Bounced \"" + t.name() + "\" to audio (the original is muted, not deleted - Ctrl+Z undoes it).");
+}
+
+void StudioPage::audioFromPlugin (BuiltinProcessor& p, const juce::File& f)
+{
+    Track owner;
+    for (auto tv : project.tracks())
+    {
+        Track t (tv);
+        for (auto n : t.inserts()) if (engine.getProcessor (n[ids::id].toString()) == &p) owner = t;
+    }
+    ctx.beginEdit ("Add loop");
+    auto copy = project.importIntoProject (f);
+    if (copy != f) f.deleteFile();
+    auto target = owner.isValid() && owner.isAudio() ? owner : project.addTrack (kindAudio, "Loop", owner.isValid() ? project.tracks().indexOf (owner.v) + 1 : -1);
+    const double bpb = project.beatsPerBar();
+    const double at = std::floor (engine.getPositionBeats() / bpb) * bpb;
+    auto c = project.addAudioClip (target, copy, at, 0.0, AudioCache::fileLengthSeconds (copy), "Loop");
+    ctx.selectTrack (target.id());
+    ctx.selectClip (c.id(), false);
+    setStatus ("The loop is on \"" + target.name() + "\" at bar " + juce::String ((int) (at / bpb) + 1) + ". Clear the Loop Station if you don't want to hear it twice.");
 }
 
 Track StudioPage::trackForInstrument (int trackId, const juce::String& name)
@@ -498,6 +663,77 @@ void StudioPage::applyBrowserItem (const juce::String& item, int trackId, double
         ctx.selectTrack (t.id());
         setStatus (ref.name + " is ready - play it with your keyboard or Musical Typing.");
     }
+    else if (kind == "inst")
+    {
+        const auto id = rest.upToFirstOccurrenceOf (":", false, false);
+        const int preset = rest.fromFirstOccurrenceOf (":", false, false).getIntValue();
+        auto ref = preset >= 0 ? builtinPresetRef (id, preset) : builtinRef (id);
+        ctx.beginEdit ("Choose instrument");
+        const auto trackName = id == "homekeys" ? juce::String ("HomeKeys 20") : ref.name;
+        auto t = trackForInstrument (trackId, trackName);
+        project.setInstrument (t, ref);
+        if (t.clips().getNumChildren() == 0) t.v.setProperty (ids::name, trackName, project.um());
+        ctx.selectTrack (t.id());
+        engine.rebuildNow();
+        if (id == "sampler" || id == "drumpads" || id == "homekeys") openPluginWindow (t.instrument());
+        setStatus (id == "sampler" ? juce::String ("Sampler ready: drop an audio file onto it, then play it from your keyboard.")
+                 : id == "homekeys" ? juce::String ("HomeKeys 20 ready: play along with its rhythm box (press play), or turn on Auto Accompaniment.")
+                 : ref.name + " is ready.");
+    }
+    else if (kind == "rhythm")
+    {
+        const int index = rest.getIntValue();
+        const auto& rh = vintageRhythms()[(size_t) juce::jlimit (0, (int) vintageRhythms().size() - 1, index)];
+        auto sel = project.trackById (trackId);
+        // on a HomeKeys track, just switch its built-in rhythm
+        if (sel.isValid() && sel.instrument()[ids::uid].toString() == "homekeys")
+        {
+            if (auto* hk = dynamic_cast<BuiltinProcessor*> (engine.getProcessor (sel.instrument()[ids::id].toString())))
+            {
+                hk->setParam ("rhythm", (float) index);
+                setStatus ("HomeKeys rhythm: " + rh.name + " (it plays while the song plays).");
+                return;
+            }
+        }
+        ctx.beginEdit ("Add rhythm");
+        auto t = sel;
+        if (! t.isValid() || t.instrument()[ids::uid].toString() != "rhythmbox")
+        {
+            t = Track();
+            for (auto tv : project.tracks()) if (Track (tv).instrument()[ids::uid].toString() == "rhythmbox") { t = Track (tv); break; }
+        }
+        if (! t.isValid())
+        {
+            t = project.addTrack (kindInstrument, "Rhythm Box");
+            project.setInstrument (t, builtinPresetRef ("rhythmbox", 0));
+        }
+        const double bpb = project.beatsPerBar();
+        auto c = insertVintageRhythm (project, t, index, std::floor (beat / bpb) * bpb, 8);
+        ctx.selectTrack (t.id());
+        ctx.selectClip (c.id(), false);
+        setStatus ("Added 8 bars of " + rh.name + ". It sounds right at about " + juce::String ((int) rh.tempo) + " BPM"
+                   + (rh.beats == 3 ? " in 3/4." : "."));
+    }
+    else if (kind == "loop")
+    {
+        const int prog = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
+        const int style = rest.fromFirstOccurrenceOf (":", false, false).getIntValue();
+        const auto& st = loopStyles()[(size_t) juce::jlimit (0, (int) loopStyles().size() - 1, style)];
+        ctx.beginEdit ("Add MIDI loop");
+        auto t = project.trackById (trackId);
+        if (! t.isValid() || ! t.isInstrument())
+        {
+            const int insertAt = t.isValid() ? project.tracks().indexOf (t.v) + 1 : -1;
+            auto ref = st.instrument();
+            t = project.addTrack (kindInstrument, st.category == "Bass" ? juce::String ("Bass") : ref.name, insertAt);
+            project.setInstrument (t, ref);
+        }
+        const double bpb = project.beatsPerBar();
+        auto c = insertMidiLoop (project, t, prog, style, std::floor (beat / bpb) * bpb);
+        ctx.selectTrack (t.id());
+        ctx.selectClip (c.id(), false);
+        setStatus ("Added " + describeProgression (project, prog) + " (" + st.name + "). Double-click the clip to edit the notes.");
+    }
     else if (kind == "pattern")
     {
         ctx.beginEdit ("Add drum groove");
@@ -534,6 +770,20 @@ void StudioPage::applyBrowserItem (const juce::String& item, int trackId, double
         if (kind == "fx") ref = builtinRef (rest);
         else if (auto d = host.known.getTypeForIdentifierString (rest)) ref = PluginHost::refFor (*d);
         else return;
+        if (auto* info = findBuiltin (rest); kind == "fx" && info != nullptr && info->midiFx)
+        {
+            if (! t.isValid() || ! t.isInstrument() || ! t.midiFx().isValid())
+            {
+                setStatus (ref.name + " is a MIDI effect: put it on an instrument track.");
+                return;
+            }
+            ctx.beginEdit ("Add MIDI effect");
+            project.setPlugin (t.midiFx(), -1, ref);
+            engine.rebuildNow();
+            openPluginWindow (t.midiFx().getChild (t.midiFx().getNumChildren() - 1));
+            setStatus (ref.name + " added before " + t.name() + "'s instrument.");
+            return;
+        }
         ctx.beginEdit ("Add effect");
         auto parent = t.isValid() ? t.inserts() : project.masterInserts();
         project.setPlugin (parent, -1, ref);
@@ -582,7 +832,7 @@ void StudioPage::importFiles (const juce::StringArray& files, int trackId, doubl
         if (len <= 0) { setStatus ("Can't read " + f.getFileName()); continue; }
         auto copy = project.importIntoProject (f);
         auto t = project.trackById (trackId);
-        if (! t.isValid() || t.isInstrument() || imported > 0)
+        if (! t.isValid() || ! t.isAudio() || imported > 0)
             t = project.addTrack (kindAudio, f.getFileNameWithoutExtension());
         project.addAudioClip (t, copy, beat, 0.0, len);
         ++imported;
@@ -657,8 +907,8 @@ void StudioPage::paste()
     {
         const int ti = base + ((int) c["srcTrack"] - topTrack);
         auto t = juce::isPositiveAndBelow (ti, project.numTracks()) ? project.track (ti) : Track();
-        if (! t.isValid() || t.isInstrument() != Clip (c).isMidi()) t = project.track (juce::jlimit (0, project.numTracks() - 1, (int) c["srcTrack"]));
-        if (! t.isValid() || t.isInstrument() != Clip (c).isMidi()) continue;
+        if (! t.isValid() || t.isBus() || t.isInstrument() != Clip (c).isMidi()) t = project.track (juce::jlimit (0, project.numTracks() - 1, (int) c["srcTrack"]));
+        if (! t.isValid() || t.isBus() || t.isInstrument() != Clip (c).isMidi()) continue;
         auto copy = c.createCopy();
         copy.removeProperty ("srcTrack", nullptr);
         copy.setProperty (ids::id, project.allocateId(), nullptr);
@@ -955,7 +1205,7 @@ void StudioPage::projectMenu()
     addMenuItem (m, 10, "Undo " + project.undo().getUndoDescription() + "\tCtrl+Z", project.undo().canUndo());
     addMenuItem (m, 11, "Redo " + project.undo().getRedoDescription() + "\tCtrl+Y", project.undo().canRedo());
     m.addSeparator();
-    m.addItem (12, "Plugin Manager (scan VST3)...");
+    m.addItem (12, "Plugin Manager (scan VST3 / VST / CLAP / LV2)...");
     m.addItem (13, "Studio Shortcuts...");
 
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlBar.projectButton), [this, recent] (int r)
@@ -1003,7 +1253,12 @@ void StudioPage::showShortcuts()
                     "E  editor          X  mixer          B  library          Z  zoom to fit\n\n"
                     "Arrangement: drag clips to move (Alt = copy, Shift = no snap), drag edges to trim, top corners of audio clips for fades. "
                     "Double-click a clip to edit it, or double-click empty space on an instrument track for a new MIDI clip. "
-                    "Drag in the ruler's top strip to set the cycle. Ctrl + mouse wheel zooms.\n\n"
+                    "Drag in the ruler's top strip to set the cycle. Ctrl + mouse wheel zooms.\n"
+                    "Ctrl+drag an audio clip's right edge to time-stretch it. Right-click a clip for Time & Pitch, Reverse, Normalize, "
+                    "Convert to Sampler. Right-click the ruler for markers (Verse, Chorus...). Right-click an automation lane to automate "
+                    "sends or any plugin knob.\n\n"
+                    "Mixer: + MIDI FX (arpeggiator...) before the instrument, + Send to a bus, Out: to route into a bus, "
+                    "right-click a compressor / gate / vocoder for its side-chain input.\n\n"
                     "Piano roll: double-click (or Draw mode) to add notes, drag to move, drag the right edge to resize, "
                     "arrows to transpose / nudge, Q to quantize, the lane at the bottom sets velocity.");
 }
@@ -1011,34 +1266,6 @@ void StudioPage::showShortcuts()
 juce::String StudioPage::getProjectName() const { return project.tree()[ids::name].toString(); }
 
 // ---- export ------------------------------------------------------------------------------------------------
-
-namespace
-{
-    class ExportJob : public juce::ThreadWithProgressWindow
-    {
-    public:
-        ExportJob (DawEngine& e, std::vector<DawEngine::ExportOptions> j)
-            : ThreadWithProgressWindow ("Exporting...", true, true), engine (e), jobs (std::move (j)) {}
-
-        void run() override
-        {
-            for (size_t i = 0; i < jobs.size() && ! threadShouldExit(); ++i)
-            {
-                setStatusMessage ("Exporting " + jobs[i].file.getFileName() + "  (" + juce::String ((int) i + 1) + "/" + juce::String ((int) jobs.size()) + ")");
-                error = engine.renderExport (jobs[i], [this, i] (float p)
-                {
-                    setProgress ((i + p) / (double) jobs.size());
-                    return ! threadShouldExit();
-                });
-                if (error.isNotEmpty()) break;
-            }
-        }
-
-        DawEngine& engine;
-        std::vector<DawEngine::ExportOptions> jobs;
-        juce::String error;
-    };
-}
 
 void StudioPage::exportDialog (bool stems)
 {
@@ -1154,7 +1381,7 @@ void StudioPage::showPluginManager()
 
     struct Win : public juce::DocumentWindow
     {
-        Win (StudioPage& o) : DocumentWindow ("Plugin Manager  -  click Options... > Scan for new or updated VST3 plug-ins", theme::panel, closeButton), owner (o) {}
+        Win (StudioPage& o) : DocumentWindow ("Plugin Manager  -  click Options... > Scan for new or updated plug-ins (VST3, VST, CLAP, LV2)", theme::panel, closeButton), owner (o) {}
         void closeButtonPressed() override { owner.browser.refresh(); juce::MessageManager::callAsync ([&o = owner] { o.pluginManagerWindow.reset(); }); }
         StudioPage& owner;
     };
@@ -1165,7 +1392,7 @@ void StudioPage::showPluginManager()
     w->centreWithSize (760, 520);
     w->setVisible (true);
     pluginManagerWindow.reset (w);
-    setStatus ("Scan for VST3 plugins: Options > Scan. Each plugin is tested in a separate process, so a crashing plugin can't take the app down.");
+    setStatus ("Scan for plugins: Options > Scan for VST3, VST, CLAP or LV2 plugins. Each plugin is tested in a separate process, so a crashing plugin can't take the app down.");
 }
 
 // ---- Play Along -> Studio -----------------------------------------------------------------------------------
@@ -1202,7 +1429,9 @@ void StudioPage::openSongInStudio (const wis::SongInfo& song, const std::array<b
             auto t = project.addTrack (kindAudio, st.displayName);
             t.v.setProperty (ids::colour, (juce::int64) wis::stemColour (st.id).getARGB(), nullptr);
             t.v.setProperty (ids::mute, muted[(size_t) st.id], nullptr);
-            project.addAudioClip (t, f, startBeat, 0.0, AudioCache::fileLengthSeconds (f), st.displayName);
+            auto c = project.addAudioClip (t, f, startBeat, 0.0, AudioCache::fileLengthSeconds (f), st.displayName);
+            // stems follow the song tempo: slow the song down to practise, and they stretch along
+            if (est.confidence > 0.05f) project.setClipFollowTempo (c, est.bpm, true);
         }
 
         // a track for you

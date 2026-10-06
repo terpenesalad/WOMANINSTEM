@@ -536,7 +536,7 @@ void Project::moveClip (const Clip& c, const Track& toTrack, double newStart)
 {
     c.v.setProperty (ids::start, juce::jmax (0.0, newStart), um());
     auto from = trackForClip (c.v);
-    if (toTrack.isValid() && from.v != toTrack.v && toTrack.isInstrument() == c.isMidi())
+    if (toTrack.isValid() && from.v != toTrack.v && toTrack.isInstrument() == c.isMidi() && ! toTrack.isBus())
     {
         auto node = c.v;
         from.clips().removeChild (node, um());
@@ -549,7 +549,7 @@ Clip Project::duplicateClip (const Clip& c, double newStart, const Track& toTrac
     auto copy = c.v.createCopy();
     copy.setProperty (ids::id, allocateId(), nullptr);
     copy.setProperty (ids::start, juce::jmax (0.0, newStart), nullptr);
-    auto dest = toTrack.isValid() && toTrack.isInstrument() == c.isMidi() ? toTrack : trackForClip (c.v);
+    auto dest = toTrack.isValid() && toTrack.isInstrument() == c.isMidi() && ! toTrack.isBus() ? toTrack : trackForClip (c.v);
     dest.clips().appendChild (copy, um());
     return Clip (copy);
 }

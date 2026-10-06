@@ -84,7 +84,7 @@ void DrumSynth::setupVoice (Active& a)
 {
     const float tuneF = std::pow (2.0f, tune / 12.0f);
     const float bright = std::pow (2.0f, brightness);
-    const bool k808 = kit == eightOhEight, cr = kit == compuRhythm, home = kit == homeKeyboard, toy = kit == toyBox;
+    const bool k808 = kit == eightOhEight, cr = kit == rhythmUnit, home = kit == homeKeyboard, toy = kit == toyBox;
     a.gain = 1.0f;
     a.pan = 0.0f;
     switch (a.type)
@@ -211,7 +211,7 @@ float DrumSynth::renderVoice (Active& a)
     {
         case kick:
         {
-            const float bend = kit == eightOhEight ? 2.6f : kit == compuRhythm ? 1.3f : 1.0f;
+            const float bend = kit == eightOhEight ? 2.6f : kit == rhythmUnit ? 1.3f : 1.0f;
             const float f = a.pitch * (1.0f + bend * env (t, 0.012f));
             out = osc (0, f) * env (t, a.decay);
             out += noise() * env (t, 0.0018f) * 0.25f;                  // beater click
@@ -222,7 +222,7 @@ float DrumSynth::renderVoice (Active& a)
         {
             const float tone = (osc (0, a.pitch) + 0.55f * osc (1, a.pitch * 1.78f)) * env (t, 0.045f);
             a.f1.process (noise(), lp, bp, hp);
-            const float noiseAmt = kit == compuRhythm ? 1.1f : kit == homeKeyboard ? 0.9f : 0.8f;
+            const float noiseAmt = kit == rhythmUnit ? 1.1f : kit == homeKeyboard ? 0.9f : 0.8f;
             out = tone * (kit == eightOhEight ? 0.6f : 0.35f) + hp * noiseAmt * env (t, a.decay);
             break;
         }

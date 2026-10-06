@@ -7,7 +7,7 @@
 
 <p align="center">
   Drop in any MP3 or FLAC → AI splits it into stems → mute your part → plug in your bass, guitar or mic and play along through a real amp rig.<br>
-  Then take it into the <b>Studio</b>: a full multitrack recording studio with software instruments, a drummer, piano roll, mixer, effects and VST3 plugins.
+  Then take it into the <b>Studio</b>: a full multitrack recording studio with software instruments, an 80s home keyboard with a rhythm box, samplers, arpeggiators, a looper, vocal pitch correction, buses and sends, time-stretching, and VST3 / VST / CLAP / LV2 plugins.
 </p>
 
 <p align="center">
@@ -58,13 +58,35 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.0
+
+- **Every plugin format**: VST3, VST (2.x), CLAP and LV2 instruments and effects, with their own interfaces, crash-safe scanning and **automatic delay compensation**.
+- **Aux buses, sends and routing**: shared reverbs and delays (pre/post-fader sends), group buses, **side-chain** for the compressor, gate and vocoder.
+- **Time stretching**: `Ctrl`+drag an audio clip's edge, or let it **follow the song tempo** (tempo detected). Transpose audio, reverse, normalize.
+- **Vocal Tune** (automatic pitch correction, natural to robotic), **De-Esser**, **Vocoder**.
+- **HomeKeys 20**: an 80s home keyboard with 16 lo-fi tones, a **rhythm box with 20 rhythms**, fills and auto accompaniment. Plus a **Vintage Rhythm Box** and all 20 rhythms as drum loops.
+- **Arpeggiator** and MIDI effects (Chord Trigger, Scale Lock, Note Echo, Randomizer) before any instrument.
+- **Sampler** (keyboard / one-shot / slices), **Drum Pads**, **Convert to Sampler Track**, and a **Loop Station** looper pedal.
+- **Creative effects**: Shimmer Reverb, Tape Warble, Grain Cloud, Beat Repeat, Pitch Shifter, Auto Filter, Flanger, Ring Mod, Bitcrusher, Stereo Width.
+- **Automate any plugin knob**, send levels, volume and pan. **Markers**, a **song key**, a **Loops** library in your key, **Bounce in Place**, swing quantize.
+
+<p align="center"><img src="docs/homekeys.png" width="720" alt="HomeKeys 20"></p>
+
 **Tracks**
 - **Software Instrument** tracks, played from a **USB MIDI keyboard** (any class-compliant keyboard works, plug it in and go) or your computer keyboard (**Musical Typing**, `Ctrl+K`).
 - **Sound Library**: 287 built-in instruments and drum kits (GeneralUser GS): grand & electric pianos, organs, guitars, basses, strings, choirs, brass, woodwinds, synths, percussion and 13 drum kits. Load any other `.sf2` SoundFont too.
 - **Studio Synth**: a 16-voice analog-style synth (2 oscillators + sub + noise, resonant filter with envelope, LFO, glide / mono legato) with 16 presets.
+- **HomeKeys 20**: an 80s portable home keyboard. 16 tones (organs, electric piano, toy strings, vibes, glockenspiel, music box, choir, synth brass...), ensemble, vibrato, sustain and a *Vintage* knob (tape wobble, hiss, lo-fi). Its **rhythm box** has 20 rhythms (Slow Rock, Waltz, Bossa Nova, Rhumba, Beguine, Disco, Rock, 16 Beat, Soft Rock, Ballad, Swing, Shuffle, March, Tango, Samba, Reggae, Country, Polka, Cha-Cha, Mambo) on 4 drum-machine sounds, with fills, START / SYNC START, and **auto accompaniment**: hold a chord (or one key) in the left hand and it plays bass and chords in the rhythm. It follows the song's tempo while the song plays.
+- **Vintage Rhythm Box**: the same 20 rhythms and 4 kits as a drum machine. Drop any rhythm in as an editable 8-bar loop from *Library → Drums*.
+- **Sampler**: drop in any audio file. *Classic* plays it across the keys, *One Shot* plays it to the end, *Slice* chops it by transients (or 4/8/16/32 equal slices), one slice per key from C2. Start/end and loop markers (with crossfade), ADSR, filter with envelope, velocity, glide, mono/legato, reverse.
+- **Drum Pads**: 16 pads (the standard drum notes, so drum grooves play them) with your own samples or four synthesized kits. Per pad: tune, gain, pan, decay, filter, reverse, choke group.
 - **Drummer**: 18 grooves played by a real kit (rock, pop, four-on-the-floor, disco, funk, Motown, boom bap, trap, half-time, shuffle, jazz swing, reggae, bossa nova, metal...) with crash cymbals and tom fills. Drop 8 bars in and edit any hit.
 - **Audio** tracks for guitar, bass, vocals or anything else, mono or stereo inputs, with input monitoring.
 - **Your Play-Along rig as a plugin**: *Amp & Pedals* puts the whole rig (gate, comp, drive, amp/NAM, cab/IR, EQ, chorus, delay, reverb, tuner) on any track.
+
+**MIDI effects** (*+ MIDI FX* above the instrument in the mixer)
+- **Arpeggiator**: Up, Down, Up/Down, Down/Up, As Played, Random, Random Walk, Chord, Converge, Diverge, Thumb; rates from 1/1 to 1/32 including triplets and dotted; octaves, gate, swing, latch, accent / ramp / random velocity, rhythm patterns (including Euclidean), **probability** and **ratchets**. 8 presets.
+- **Chord Trigger** (one key plays a chord, with inversions, spread and strum), **Scale Lock** (snap or drop out-of-key notes, follows the song key), **Note Echo** (synced MIDI echoes with pitch steps), **Randomizer** (humanise or mangle).
 
 **Recording**
 - Record audio and MIDI on as many armed tracks as you like at once, with **1-bar count-in**, **metronome** and automatic **latency compensation**.
@@ -74,16 +96,29 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 **Editing**
 - Arrangement with snapping (bar / beat / 1/8 / 1/16 / auto), drag to move (`Alt` = copy), trim either edge non-destructively, fades, split at playhead, duplicate, repeat, copy/paste, marquee selection, rename, colour, clip gain, mute.
 - **Piano roll**: draw, move, resize, transpose, velocity lane, quantize (straight or triplet grids), drum names for drum tracks, octave shift, duplicate.
-- **Volume and pan automation** lanes.
+- **Automation** for volume, pan, send levels and **any plugin parameter** (right-click a lane to choose).
+- **Time & pitch for audio**: `Ctrl`+drag a clip's right edge to time-stretch it, *Follow Song Tempo* (detects the clip's tempo), speed presets, transpose ±12 semitones without changing speed, reverse, normalize. High-quality stretching by Signalsmith Stretch.
+- **Convert to Sampler Track**: slices an audio clip onto a Sampler with a MIDI clip that plays the slices back in order. Rearrange the notes to remix it.
+- **Markers** in the ruler (Intro, Verse, Chorus...), **swing quantize**, **join MIDI clips**, **Bounce in Place**.
 - **Unlimited undo / redo**.
 
 **Mixing**
-- Mixer with channel strips: instrument slot, unlimited **insert effects** (with bypass), pan, fader, peak meters, mute / solo / record-arm, plus master inserts and master fader.
-- 11 built-in effects with presets: **Channel EQ** (6 bands with a live curve), **Compressor** (with gain-reduction meter), **Limiter**, **Noise Gate**, **Reverb**, **Delay** (tempo-sync, ping-pong), **Chorus**, **Phaser**, **Tremolo / Auto-pan**, **Saturator**, **Amp & Pedals**.
-- **VST3 plugins**: scan your VST3 folder (Project → Plugin Manager). Each plugin is tested in a separate process, so a crashy plugin can't take the app down.
+- Mixer with channel strips: MIDI effects, instrument slot, unlimited **insert effects** (with bypass), **sends**, pan, fader, peak meters, mute / solo / record-arm, **output routing**, plus master inserts and master fader.
+- **Aux buses**: *+ Send* on a channel creates a Reverb / Delay / Shimmer bus in one click; sends are pre- or post-fader. Route tracks' outputs into a **group bus** to control them together. Feedback loops are refused.
+- **Side-chain**: right-click the Compressor, Noise Gate or Vocoder (or a plugin with a side-chain input) and pick the key track. Muted tracks still work as triggers.
+- **Plugin delay compensation**: every track, send and bus is lined up sample-accurately, whatever latency its plugins add.
+- 25 built-in effects with presets:
+  - *Dynamics & EQ*: **Channel EQ** (6 bands with a live curve), **Compressor**, **Limiter**, **Noise Gate**, **De-Esser**, **Auto Filter** (synced LFO wobbles, envelope wah, random steps).
+  - *Space*: **Reverb**, **Delay** (tempo-sync, ping-pong), **Shimmer Reverb** (octaves in the tail).
+  - *Modulation*: **Chorus**, **Phaser**, **Flanger**, **Tremolo / Auto-pan**, **Ring Modulator**, **Stereo Width**.
+  - *Vocal & pitch*: **Vocal Tune** (pitch correction to the song key, retune speed from natural to robotic, live pitch graph, latency compensated), **Vocoder**, **Pitch Shifter / Harmonizer**.
+  - *Lo-fi & experimental*: **Tape Warble** (wow, flutter, saturation, hiss, dropouts), **Bitcrusher**, **Saturator**, **Grain Cloud** (granular), **Beat Repeat** (synced stutters and rolls), **Loop Station** (looper pedal: record, overdub, undo/redo, half speed, reverse, start on the bar, put the loop on the track).
+  - *Amps*: **Amp & Pedals**, the whole Play-Along rig.
+- **Plugins**: VST3, VST (2.x), CLAP and LV2 instruments and effects (Project → Plugin Manager → Options → Scan). Plugins show their own interfaces. Each plugin is tested in a separate process first, so a crashy plugin can't take the app down.
 
 **Songs and files**
-- **Open in Studio** from Play Along: every stem on its own track, **tempo and downbeat detected** so the bar grid lines up, the stems you muted stay muted, and a track with your current rig, armed and ready.
+- **Open in Studio** from Play Along: every stem on its own track, **tempo and downbeat detected** so the bar grid lines up, the stems you muted stay muted, and a track with your current rig, armed and ready. The stems **follow the tempo**: lower it to practise a hard part slowly.
+- **Loops** library: chord progressions (pop, dream pop, fifties, jazz, minor epic, Andalusian...), bass lines and arpeggios, written in the **song key** you set in the control bar.
 - Drag in WAV / MP3 / FLAC / OGG / AIFF files or **MIDI files** (one track per channel, drums on channel 10 get a drum kit).
 - **Export** the mix or **stems (one file per track)** as WAV (16/24/32-bit float), FLAC or OGG, at any sample rate, whole song or cycle region, optionally normalised. **Export MIDI** too.
 - Songs live in `Documents\WOMANINSTEM Projects` (one folder per song with its audio files). Autosave every 2 minutes with crash recovery, and a `.backup` of the previous save.
@@ -102,7 +137,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 | `E` / `X` / `B` | editor / mixer / library | `Z` | zoom to fit |
 | `Ctrl+S` | save | `Ctrl+E` | export |
 
-Mouse: double-click empty space on an instrument track for a new MIDI clip, double-click a clip to edit it, drag in the ruler's top strip to set the cycle, `Ctrl` + mouse wheel to zoom.
+Mouse: double-click empty space on an instrument track for a new MIDI clip, double-click a clip to edit it, drag in the ruler's top strip to set the cycle, `Ctrl` + mouse wheel to zoom, `Ctrl`+drag an audio clip's right edge to time-stretch, right-click the ruler for markers, right-click an automation lane to pick what it controls.
 
 ## Quick start
 
@@ -120,7 +155,7 @@ Mouse: double-click empty space on an instrument track for a new MIDI clip, doub
 
 1. Click **STUDIO** at the top. A piano track is ready: play it with a MIDI keyboard or press `Ctrl+K` and use your computer keyboard.
 2. **+ Track** → *Drummer* for a beat, *Software Instrument* for keys / bass / strings / synths, *Audio: Guitar or Bass* to record your instrument through the amp rig.
-3. Pick sounds in the **Library** on the left (double-click, or drag onto a track). Grooves are under *Drums*, effects under *Effects*, your split songs under *Songs*.
+3. Pick sounds in the **Library** on the left (double-click, or drag onto a track). Grooves and vintage rhythms are under *Drums*, chord / bass / arp loops in your key under *Loops*, effects under *FX*, your split songs under *Songs*.
 4. Arm a track (**R** button), press **R** to record (one bar of count-in), **Space** to stop.
 5. **Mixer** to balance it, **Project → Export Mix** when it's done.
 
@@ -164,7 +199,7 @@ cmake --build build --config Release --parallel
 - **ASIO**: download the [Steinberg ASIO SDK](https://www.steinberg.net/developers/) and add `-DWIS_ASIO_SDK_DIR=path/to/ASIOSDK`.
 - **Model**: put `ggml-model-htdemucs-6s-f16.bin` in a `models/` folder next to the exe, or let the app download it on first use.
 - **Sound Library**: put `GeneralUser-GS.sf2` from [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) in a `sounds/` folder next to the exe (or point `WIS_SOUNDFONT` at it).
-- `rigtest` runs the DSP/engine test-suite, `dawtest` the Studio engine (timing, recording, instruments, effects, export, tempo detection), `WOMANINSTEM --selftest-ui` opens every plugin editor, and `stemsplit --selftest` checks separation end-to-end.
+- `rigtest` runs the DSP/engine test-suite, `dawtest` the Studio engine (timing, recording, instruments, effects, buses / sends / delay compensation, time-stretching, side-chain, pitch correction, looper, VST2 and CLAP hosting with test plugins, export, tempo detection), `WOMANINSTEM --selftest-ui` opens every plugin editor, and `stemsplit --selftest` checks separation end-to-end.
 
 Every push builds and tests on Windows and Linux via GitHub Actions. **To publish a new release**, bump `VERSION` in the `project(...)` line of `CMakeLists.txt` and push to `main`: the Windows job builds the installer and portable zip and creates the GitHub Release `vX.Y.Z` automatically.
 
@@ -177,13 +212,13 @@ Source/
   Engine/       real-time audio callback, stem player (loop, time-stretch), recorder
   Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
   Daw/
-    Model/      the song (tracks, clips, notes, automation; undo; save/load), drum grooves, MIDI files, tempo detection
-    Engine/     real-time multitrack engine (lock-free snapshots), recording, metronome, export, audio file cache
-    Plugins/    built-in effects, VST3 hosting with out-of-process scanning
-    Instruments/ Sound Library (SoundFont) and Studio Synth
+    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, MIDI files, tempo detection
+    Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
+    Plugins/    built-in effects, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
+    Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads
   UI/           app shell, look & feel, waveform lanes, mixer, pedalboard, overlays
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors
-Tools/          stemsplit (CLI), rigtest and dawtest (automated tests)
+Tools/          stemsplit (CLI), rigtest and dawtest (automated tests), tiny VST2 / CLAP test plugins
 packaging/      installer script, end-user readme, release notes
 ```
 
@@ -192,9 +227,11 @@ packaging/      installer script, end-user readme, release notes
 - **Strings and horns** don't get their own stems: no open model separates them reliably yet, so they live in *Other*.
 - **Backing vocals** are split from the lead by stereo position. This works well on most modern mixes, but not on mono recordings or songs where harmonies are panned centre.
 - Separation is CPU-only, which keeps the app small (a few MB plus a 55 MB model) and runs on any PC, but it's slower than GPU-based tools.
-- The Studio's tempo is constant per song (no tempo changes or time-stretching of audio clips yet), and it hosts VST3 only (no VST2, AU or CLAP).
+- The Studio's tempo is constant per song (no tempo changes during a song yet), there's no score view, and no track folders / stacks yet.
+- Vocal Tune works on one voice (or one note) at a time, like the classic hardware it imitates; it won't correct chords.
+- Plugins are Windows / Linux formats: VST3, VST, CLAP and LV2 (no Audio Units, which are Mac-only).
 - Tempo detection for **Open in Studio** assumes a steady 4/4 beat. If it's off, type the right tempo in the LCD: the stems stay where they are, only the grid moves.
 
 ## License
 
-AGPL-3.0, required by JUCE's open-source license and the GPL-licensed ASIO SDK. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the brilliant open-source projects this is built on: Demucs, demucs.cpp, Neural Amp Modeler, JUCE, Eigen, Signalsmith Stretch, r8brain and TinySoundFont, plus S. Christian Collins' GeneralUser GS sound library.
+AGPL-3.0, required by JUCE's open-source license and the GPL-licensed ASIO SDK. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the brilliant open-source projects this is built on: Demucs, demucs.cpp, Neural Amp Modeler, JUCE, Eigen, Signalsmith Stretch, r8brain, TinySoundFont, CLAP and the LV2 libraries, plus S. Christian Collins' GeneralUser GS sound library.

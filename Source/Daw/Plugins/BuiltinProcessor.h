@@ -102,6 +102,8 @@ const juce::Array<BuiltinInfo>& builtinPlugins();
 const BuiltinInfo* findBuiltin (const juce::String& id);
 std::unique_ptr<BuiltinProcessor> createBuiltin (const juce::String& id);
 PluginRef builtinRef (const juce::String& id);
+/** A built-in with one of its factory presets loaded (name = the preset's name). */
+PluginRef builtinPresetRef (const juce::String& id, int preset);
 /** Encodes a processor's current state for a PLUGIN node. */
 juce::String encodeState (juce::AudioProcessor& p);
 void decodeState (juce::AudioProcessor& p, const juce::String& base64);

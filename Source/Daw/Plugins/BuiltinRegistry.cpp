@@ -30,7 +30,7 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         };
         add ("soundfont", "Sound Library", "Instrument", "Pianos, keys, guitars, basses, strings, brass, winds, synths and drum kits (General MIDI SoundFont, or load your own .sf2)", true, make<SoundFontInstrument>());
         add ("synth", "Studio Synth", "Instrument", "Polyphonic analogue-style synth: 2 oscillators, sub, noise, resonant filter, envelopes, LFO, glide", true, make<StudioSynth>());
-        add ("homekeys", "HomeKeys 20", "Instrument", "80s home keyboard: cheesy organs, toy strings, vibes and flutes, a built-in rhythm box with 20 rhythms and auto bass-chord accompaniment", true, make<HomeKeys>());
+        add ("homekeys", "HomeKeys 20", "Instrument", "80s home keyboard: cheesy organs, toy strings, vibes and flutes, a built-in rhythm box with 20 rhythms and auto bass + chord accompaniment", true, make<HomeKeys>());
         add ("rhythmbox", "Rhythm Box", "Instrument", "Vintage drum machine kits (home keyboard, compact rhythm unit, 808-style, toy lo-fi) on the standard drum map", true, make<RhythmBox>());
         add ("sampler", "Sampler", "Instrument", "Play any sample across the keyboard, as a one-shot or chopped into slices; loops, envelopes, filter, glide", true, make<Sampler>());
         add ("drumpads", "Drum Pads", "Instrument", "16 pads of your own samples (or synth drums) with tune, decay, filter, reverse and choke groups", true, make<DrumPads>());

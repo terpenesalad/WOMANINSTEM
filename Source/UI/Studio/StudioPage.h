@@ -58,6 +58,8 @@ private:
     void applyBrowserItem (const juce::String& item, int trackId, double beat);
     void importFiles (const juce::StringArray& files, int trackId, double beat);
     Track trackForInstrument (int trackId, const juce::String& name);
+    void bounceInPlace (int trackId);
+    void audioFromPlugin (BuiltinProcessor& p, const juce::File& f);
 
     void newProject();
     void openProject();

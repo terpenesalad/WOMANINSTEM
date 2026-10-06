@@ -11,8 +11,8 @@ namespace wis::daw
 class DrumSynth
 {
 public:
-    enum Kit { homeKeyboard, compuRhythm, eightOhEight, toyBox, numKits };
-    static juce::StringArray kitNames() { return { "Home Keyboard '84", "Compu Rhythm", "Eight-Oh-Eight", "Toy Box Lo-Fi" }; }
+    enum Kit { homeKeyboard, rhythmUnit, eightOhEight, toyBox, numKits };
+    static juce::StringArray kitNames() { return { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" }; }
 
     enum Voice
     {

@@ -27,6 +27,7 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override;
 private:
     void timerCallback() override { repaint(); }
+    juce::Rectangle<int> keyArea() const;
     juce::Rectangle<int> tempoArea() const;
     juce::Rectangle<int> sigArea() const;
     StudioContext& ctx;

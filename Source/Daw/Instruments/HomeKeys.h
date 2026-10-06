@@ -8,7 +8,7 @@ namespace wis::daw
 {
 
 /** "HomeKeys 20": a 1980s-style portable home keyboard. Sixteen preset voices, preset rhythms on an analogue
-    rhythm section, Auto Bass Chord (single-finger or fingered chords in the left hand), ensemble, vibrato,
+    rhythm section, Auto accompaniment (single-finger or fingered chords in the left hand), ensemble, vibrato,
     sustain and a "Vintage" knob for the worn-cassette sound. Rhythm follows the song when it's playing,
     or runs on its own (START / SYNC START) when it isn't. */
 class HomeKeys : public BuiltinProcessor

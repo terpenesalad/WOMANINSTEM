@@ -32,8 +32,10 @@ TrackHeader::TrackHeader (StudioContext& c, juce::ValueTree t) : ctx (c), track 
     solo.onClick    = [this] { ctx.beginEdit ("Solo");  track.setProperty (ids::solo, solo.getToggleState(), ctx.project.um()); };
     arm.onClick     = [this] { track.setProperty (ids::arm, arm.getToggleState(), nullptr); };
     monitor.onClick = [this] { track.setProperty (ids::monitor, monitor.getToggleState(), nullptr); };
-    for (auto* b : { &mute, &solo, &arm }) addAndMakeVisible (b);
-    if (! inst) addAndMakeVisible (monitor);
+    const bool bus = Track (track).isBus();
+    for (auto* b : { &mute, &solo }) addAndMakeVisible (b);
+    if (! bus) addAndMakeVisible (arm);
+    if (! inst && ! bus) addAndMakeVisible (monitor);
 
     volume.setRange (-60.0, 6.0, 0.1);
     volume.setSkewFactorFromMidPoint (-12.0);
@@ -56,7 +58,7 @@ TrackHeader::TrackHeader (StudioContext& c, juce::ValueTree t) : ctx (c), track 
     addAndMakeVisible (meterL);
     addAndMakeVisible (meterR);
 
-    instrumentButton.setTooltip (inst ? "Open the instrument" : "Track effects");
+    instrumentButton.setTooltip (inst ? "Open the instrument" : bus ? "Bus: tracks send to it or output into it (see the Mixer)" : "Track effects");
     instrumentButton.onClick = [this]
     {
         Track tr (track);
@@ -97,6 +99,18 @@ void TrackHeader::sync()
         auto inst = t.instrument();
         label = inst.isValid() ? inst[ids::name].toString() : juce::String ("No instrument");
     }
+    else if (t.isBus())
+    {
+        int feeding = 0;
+        for (auto tv : ctx.project.tracks())
+        {
+            Track o (tv);
+            if (o.output() == t.id() || o.sends().getChildWithProperty (ids::bus, t.id()).isValid()) ++feeding;
+        }
+        label = "Bus  |  " + juce::String (feeding) + " track" + (feeding == 1 ? "" : "s") + " in";
+        const int fx = t.inserts().getNumChildren();
+        if (fx > 0) label << "  |  " << fx << " FX";
+    }
     else
     {
         label = "Input " + juce::String ((int) track[ids::input] + 1) + ((bool) track[ids::inputStereo] ? "+" + juce::String ((int) track[ids::input] + 2) : juce::String());
@@ -110,7 +124,7 @@ void TrackHeader::sync()
 void TrackHeader::refreshMeter()
 {
     auto [l, r] = ctx.engine.readTrackMeter (trackId());
-    if ((bool) track[ids::arm] && ! Track (track).isInstrument())
+    if ((bool) track[ids::arm] && Track (track).isAudio())
     {
         const float in = ctx.engine.readTrackInputMeter (trackId());
         l = juce::jmax (l, in);
@@ -138,7 +152,16 @@ void TrackHeader::paint (juce::Graphics& g)
     g.setColour (t.colour().withAlpha (0.25f));
     g.fillRoundedRectangle (icon, 4.0f);
     g.setColour (t.colour());
-    if (t.isInstrument())
+    if (t.isBus())
+    {
+        // bus glyph: arrows merging into one
+        juce::Path p;
+        p.startNewSubPath (icon.getX() + 3, icon.getY() + 4);  p.lineTo (icon.getCentreX(), icon.getCentreY());
+        p.startNewSubPath (icon.getX() + 3, icon.getBottom() - 4); p.lineTo (icon.getCentreX(), icon.getCentreY());
+        p.lineTo (icon.getRight() - 3, icon.getCentreY());
+        g.strokePath (p, juce::PathStrokeType (1.8f));
+    }
+    else if (t.isInstrument())
     {
         // piano keys glyph
         for (int k = 0; k < 4; ++k) g.fillRect (icon.getX() + 2 + k * 3.7f, icon.getY() + 3, 2.6f, 12.0f);
@@ -168,12 +191,12 @@ void TrackHeader::resized()
 {
     auto r = getLocalBounds().reduced (8, 6).withTrimmedLeft (4);
     auto top = r.removeFromTop (22);
-    const bool inst = Track (track).isInstrument();
-    auto buttons = top.removeFromRight (inst ? 3 * 24 : 4 * 24);
-    if (! inst) { monitor.setBounds (buttons.removeFromLeft (24).reduced (1)); }
+    const bool inst = Track (track).isInstrument(), bus = Track (track).isBus();
+    auto buttons = top.removeFromRight (bus ? 2 * 24 : inst ? 3 * 24 : 4 * 24);
+    if (! inst && ! bus) { monitor.setBounds (buttons.removeFromLeft (24).reduced (1)); }
     mute.setBounds (buttons.removeFromLeft (24).reduced (1));
     solo.setBounds (buttons.removeFromLeft (24).reduced (1));
-    arm.setBounds (buttons.removeFromLeft (24).reduced (1));
+    if (! bus) arm.setBounds (buttons.removeFromLeft (24).reduced (1));
 
     r.removeFromTop (4);
     if (r.getHeight() >= 40)

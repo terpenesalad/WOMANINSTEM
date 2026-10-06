@@ -93,10 +93,11 @@ private:
     StudioContext& ctx;
     juce::ValueTree clip;
     juce::Label title, info;
-    juce::Slider gain, fadeIn, fadeOut;
-    juce::Label gainL, fadeInL, fadeOutL;
+    juce::Slider gain, fadeIn, fadeOut, speed, pitch;
+    juce::Label gainL, fadeInL, fadeOutL, speedL, pitchL;
     juce::ComboBox takeBox;
-    juce::TextButton reverseHint;
+    juce::ToggleButton follow { "Follow song tempo" }, reverse { "Reverse" };
+    juce::TextButton normalize { "Normalize" };
 };
 
 } // namespace wis::daw

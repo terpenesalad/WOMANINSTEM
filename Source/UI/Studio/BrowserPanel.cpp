@@ -2,10 +2,18 @@
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Model/DrumPatterns.h"
+#include "Daw/Model/MidiLoops.h"
+#include "Daw/Instruments/VintageRhythms.h"
 #include "Library/SongLibrary.h"
 
 namespace wis::daw
 {
+
+static const juce::StringArray& homeKeysPresets()
+{
+    static const juce::StringArray names = [] { auto p = createBuiltin ("homekeys"); return p != nullptr ? p->getProgramNames() : juce::StringArray(); }();
+    return names;
+}
 
 class BrowserPanel::Item : public juce::TreeViewItem
 {
@@ -60,7 +68,7 @@ public:
 
 BrowserPanel::BrowserPanel (StudioContext& c) : ctx (c)
 {
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < numTabs; ++i)
     {
         tabs[i].setClickingTogglesState (true);
         tabs[i].setRadioGroupId (771);
@@ -128,6 +136,16 @@ void BrowserPanel::populate()
         auto presets = sf.existsAsFile() ? SoundFontCache::get().presetsFor (sf) : juce::Array<SoundFontCache::PresetInfo>();
         const auto families = gmFamilies();
 
+        auto* homeKeys = addGroup ("HomeKeys 20 (80s Keyboard)");
+        for (int i = 0; i < homeKeysPresets().size(); ++i)
+            addLeaf (homeKeys, homeKeysPresets()[i], "inst:homekeys:" + juce::String (i), "with a built-in rhythm box and auto accompaniment");
+        auto* machines = addGroup ("Vintage Drum Machines");
+        const juce::StringArray kitNames { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" };
+        for (int i = 0; i < kitNames.size(); ++i) addLeaf (machines, kitNames[i], "inst:rhythmbox:" + juce::String (i), "Rhythm Box");
+        auto* samplers = addGroup ("Samplers");
+        addLeaf (samplers, "Sampler", "inst:sampler:-1", "load any sound: play it, one-shot it, or slice a loop");
+        for (int i = 0; i < kitNames.size(); ++i) addLeaf (samplers, "Drum Pads - " + kitNames[i], "inst:drumpads:" + juce::String (i), "16 pads, drop your own samples");
+
         std::map<juce::String, juce::TreeViewItem*> groups;
         for (auto& f : families) groups[f] = addGroup (f);
         auto* kits = addGroup ("Drum Kits");
@@ -156,13 +174,17 @@ void BrowserPanel::populate()
         auto ext = ctx.host.externalInstruments();
         if (! ext.isEmpty())
         {
-            auto* vst = addGroup ("VST3 Instruments");
-            for (auto& d : ext) addLeaf (vst, d.name, "vsti:" + d.createIdentifierString(), d.manufacturerName);
+            auto* vst = addGroup ("Plugin Instruments");
+            for (auto& d : ext) addLeaf (vst, d.name, "vsti:" + d.createIdentifierString(), d.manufacturerName + "  [" + d.pluginFormatName + "]");
         }
     }
     else if (currentTab == 1)
     {
         hint.setText ("Double-click a groove to drop 8 bars (with fills) at the playhead on a drum track. Drag to place it anywhere.", juce::dontSendNotification);
+        auto* vintage = addGroup ("Vintage Rhythm Box (80s keyboard)");
+        const auto& rhythms = vintageRhythms();
+        for (int i = 0; i < (int) rhythms.size(); ++i)
+            addLeaf (vintage, rhythms[(size_t) i].name, "rhythm:" + juce::String (i), juce::String ((int) rhythms[(size_t) i].tempo) + " bpm feel" + (rhythms[(size_t) i].beats == 3 ? ", 3/4" : ""));
         std::map<juce::String, juce::TreeViewItem*> groups;
         auto& pats = drumPatterns();
         for (int i = 0; i < pats.size(); ++i)
@@ -174,20 +196,34 @@ void BrowserPanel::populate()
     }
     else if (currentTab == 2)
     {
-        hint.setText ("Double-click an effect to add it to the selected track. Drag onto any track.", juce::dontSendNotification);
+        hint.setText ("MIDI loops in your song's key (" + Project::keyName (ctx.project.key(), ctx.project.scale()) + ", set in the control bar). "
+                      "Double-click to drop 8 bars on the selected instrument track; edit the notes in the piano roll.", juce::dontSendNotification);
+        std::map<juce::String, juce::TreeViewItem*> groups;
+        const auto& styles = loopStyles();
+        for (int st = 0; st < (int) styles.size(); ++st)
+        {
+            auto* g = addGroup (styles[(size_t) st].category + ": " + styles[(size_t) st].name);
+            for (int pr = 0; pr < (int) loopProgressions().size(); ++pr)
+                addLeaf (g, loopProgressions()[(size_t) pr].name, "loop:" + juce::String (pr) + ":" + juce::String (st), describeProgression (ctx.project, pr));
+        }
+    }
+    else if (currentTab == 3)
+    {
+        hint.setText ("Double-click an effect to add it to the selected track (MIDI effects go before the instrument). Drag onto any track.", juce::dontSendNotification);
         std::map<juce::String, juce::TreeViewItem*> groups;
         for (auto& b : builtinPlugins())
         {
             if (b.category == "Hidden") continue;
             if (b.instrument) continue;
-            if (groups.count (b.category) == 0) groups[b.category] = addGroup (b.category);
-            addLeaf (groups[b.category], b.name, "fx:" + b.id, b.description);
+            const auto cat = b.midiFx ? juce::String ("MIDI Effects (arpeggiator...)") : b.category;
+            if (groups.count (cat) == 0) groups[cat] = addGroup (cat);
+            addLeaf (groups[cat], b.name, "fx:" + b.id, b.description);
         }
         auto ext = ctx.host.externalEffects();
         if (! ext.isEmpty())
         {
-            auto* vst = addGroup ("VST3 Effects");
-            for (auto& d : ext) addLeaf (vst, d.name, "vstfx:" + d.createIdentifierString(), d.manufacturerName);
+            auto* vst = addGroup ("Plugins (VST3 / VST / CLAP / LV2)");
+            for (auto& d : ext) addLeaf (vst, d.name, "vstfx:" + d.createIdentifierString(), d.manufacturerName + "  [" + d.pluginFormatName + "]");
         }
     }
     else
@@ -227,9 +263,9 @@ void BrowserPanel::resized()
 {
     auto r = getLocalBounds().reduced (8, 8).withTrimmedRight (1);
     auto tabRow = r.removeFromTop (28);
-    const int w = tabRow.getWidth() / 4;
-    for (int i = 0; i < 4; ++i)
-        tabs[i].setBounds (tabRow.removeFromLeft (i == 3 ? tabRow.getWidth() : w).reduced (1, 0));
+    const int w = tabRow.getWidth() / numTabs;
+    for (int i = 0; i < numTabs; ++i)
+        tabs[i].setBounds (tabRow.removeFromLeft (i == numTabs - 1 ? tabRow.getWidth() : w).reduced (1, 0));
     r.removeFromTop (6);
     search.setBounds (r.removeFromTop (26));
     r.removeFromTop (6);

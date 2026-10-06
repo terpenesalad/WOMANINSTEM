@@ -138,6 +138,21 @@ PluginRef builtinRef (const juce::String& id)
     return r;
 }
 
+PluginRef builtinPresetRef (const juce::String& id, int preset)
+{
+    auto r = builtinRef (id);
+    if (auto p = createBuiltin (id))
+    {
+        if (juce::isPositiveAndBelow (preset, p->getProgramNames().size()))
+        {
+            p->setCurrentProgram (preset);
+            r.name = p->getProgramName (preset);
+        }
+        r.state = encodeState (*p);
+    }
+    return r;
+}
+
 namespace prm
 {
     static juce::AudioParameterFloatAttributes attrs (const juce::String& unit, int decimals)

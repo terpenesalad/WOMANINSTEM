@@ -33,6 +33,7 @@ jobs:
         with:
           path: build/_deps
           key: deps-win-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-win-
 
       - name: Cache stem model
         id: model-cache
@@ -245,6 +246,7 @@ jobs:
         with:
           path: build/_deps
           key: deps-linux-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-linux-
 
       - name: Configure & build
         run: |

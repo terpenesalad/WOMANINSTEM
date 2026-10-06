@@ -1,4 +1,5 @@
 #include "PianoRoll.h"
+#include "Daw/Model/TempoDetect.h"
 #include "Daw/Instruments/InstrumentRefs.h"
 
 namespace wis::daw
@@ -807,6 +808,52 @@ AudioClipEditor::AudioClipEditor (StudioContext& c) : ctx (c)
     setup (gain, gainL, "CLIP GAIN", -24.0, 18.0, " dB");
     setup (fadeIn, fadeInL, "FADE IN", 0.0, 10.0, " s");
     setup (fadeOut, fadeOutL, "FADE OUT", 0.0, 10.0, " s");
+    setup (speed, speedL, "SPEED", 25.0, 400.0, " %");
+    setup (pitch, pitchL, "PITCH", -12.0, 12.0, " st");
+    speed.setSkewFactorFromMidPoint (100.0);
+    speed.setDoubleClickReturnValue (true, 100.0);
+    pitch.setDoubleClickReturnValue (true, 0.0);
+    speed.setTooltip ("Time-stretch: change the speed without changing the pitch");
+    pitch.setTooltip ("Transpose the audio without changing its speed");
+    speed.onValueChange = [this]
+    {
+        if (! clip.isValid()) return;
+        Clip c (clip);
+        // keep tempo-following: the speed knob scales on top of it
+        clip.setProperty (ids::stretch, 100.0 / juce::jmax (1.0, speed.getValue()) / (c.follows() ? c.srcTempo() / ctx.project.tempo() : 1.0), ctx.project.um());
+    };
+    pitch.onValueChange = [this] { if (clip.isValid()) clip.setProperty (ids::pitch, std::round (pitch.getValue() * 10.0) / 10.0, ctx.project.um()); };
+    follow.onClick = [this]
+    {
+        if (! clip.isValid()) return;
+        Clip c (clip);
+        double bpm = c.srcTempo();
+        if (follow.getToggleState() && bpm <= 0.0)
+        {
+            auto data = ctx.engine.getCache().getBlocking (ctx.project.resolve (c.file()), ctx.engine.getSampleRate());
+            if (data != nullptr) bpm = estimateTempo (data->buffer, data->sampleRate).bpm;
+            if (bpm <= 0.0) { ctx.setStatus ("Couldn't find a steady tempo in this clip."); follow.setToggleState (false, juce::dontSendNotification); return; }
+            ctx.setStatus ("Detected " + juce::String (bpm, 1) + " BPM: the clip now follows the song's tempo.");
+        }
+        ctx.beginEdit ("Follow tempo");
+        ctx.project.setClipFollowTempo (c, bpm, follow.getToggleState());
+    };
+    reverse.onClick = [this] { if (clip.isValid()) { ctx.beginEdit ("Reverse"); clip.setProperty (ids::reverse, reverse.getToggleState(), ctx.project.um()); } };
+    normalize.onClick = [this]
+    {
+        if (! clip.isValid()) return;
+        Clip c (clip);
+        auto data = ctx.engine.getCache().getBlocking (ctx.project.resolve (c.file()), ctx.engine.getSampleRate());
+        if (data == nullptr) return;
+        const int a = juce::jlimit (0, data->buffer.getNumSamples(), (int) (c.offsetSeconds() * data->sampleRate));
+        const int b = juce::jlimit (a, data->buffer.getNumSamples(), (int) ((c.offsetSeconds() + c.lengthSeconds()) * data->sampleRate));
+        float peak = 0.0f;
+        for (int ch = 0; ch < data->buffer.getNumChannels(); ++ch) peak = juce::jmax (peak, data->buffer.getMagnitude (ch, a, b - a));
+        if (peak <= 1.0e-6f) return;
+        ctx.beginEdit ("Normalize");
+        clip.setProperty (ids::gain, -0.3 - juce::Decibels::gainToDecibels (peak), ctx.project.um());
+    };
+    for (auto* b : std::initializer_list<juce::Component*> { &follow, &reverse, &normalize }) addAndMakeVisible (b);
     fadeIn.setSkewFactorFromMidPoint (1.0);
     fadeOut.setSkewFactorFromMidPoint (1.0);
     gain.setDoubleClickReturnValue (true, 0.0);
@@ -849,6 +896,12 @@ void AudioClipEditor::sync()
     fadeOut.setValue (c.fadeOut(), juce::dontSendNotification);
     fadeIn.setRange (0.0, juce::jmax (0.1, c.lengthSeconds() * 0.9), 0.01);
     fadeOut.setRange (0.0, juce::jmax (0.1, c.lengthSeconds() * 0.9), 0.01);
+    speed.setValue (100.0 / c.stretchRatio (ctx.project.tempo()), juce::dontSendNotification);
+    pitch.setValue (c.pitch(), juce::dontSendNotification);
+    follow.setToggleState (c.follows(), juce::dontSendNotification);
+    reverse.setToggleState (c.reversed(), juce::dontSendNotification);
+    if (c.follows()) follow.setButtonText ("Follow song tempo (" + juce::String (c.srcTempo(), 1) + " BPM)");
+    else follow.setButtonText ("Follow song tempo");
 
     takeBox.clear (juce::dontSendNotification);
     int n = 0;
@@ -862,7 +915,7 @@ void AudioClipEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::panel);
     if (! clip.isValid()) return;
-    auto r = getLocalBounds().reduced (16).withTrimmedTop (50).withTrimmedRight (330);
+    auto r = getLocalBounds().reduced (16).withTrimmedTop (50).withTrimmedRight (530);
     Clip c (clip);
     auto data = ctx.engine.getCache().get (ctx.project.resolve (c.file()), ctx.engine.getSampleRate());
     g.setColour (theme::bg);
@@ -890,15 +943,20 @@ void AudioClipEditor::resized()
     auto top = r.removeFromTop (40);
     title.setBounds (top.removeFromTop (20));
     info.setBounds (top);
-    auto right = r.removeFromRight (320);
+    auto right = r.removeFromRight (520);
     auto knobs = right.removeFromTop (110);
-    for (auto [s, l] : { std::pair<juce::Slider*, juce::Label*> { &gain, &gainL }, { &fadeIn, &fadeInL }, { &fadeOut, &fadeOutL } })
+    for (auto [s, l] : { std::pair<juce::Slider*, juce::Label*> { &gain, &gainL }, { &fadeIn, &fadeInL }, { &fadeOut, &fadeOutL }, { &speed, &speedL }, { &pitch, &pitchL } })
     {
         auto col = knobs.removeFromLeft (100);
         l->setBounds (col.removeFromTop (16));
         s->setBounds (col);
     }
-    takeBox.setBounds (right.removeFromTop (28).reduced (10, 2));
+    auto row = right.removeFromTop (28);
+    follow.setBounds (row.removeFromLeft (230));
+    reverse.setBounds (row.removeFromLeft (100));
+    normalize.setBounds (row.removeFromLeft (100).reduced (2, 1));
+    right.removeFromTop (4);
+    takeBox.setBounds (right.removeFromTop (28).withWidth (200).reduced (0, 2));
 }
 
 } // namespace wis::daw
