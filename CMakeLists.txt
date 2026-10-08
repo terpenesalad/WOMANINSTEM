@@ -152,6 +152,7 @@ set(WIS_ENGINE_SOURCES
     Source/Library/SongLibrary.cpp
     Source/Rig/AmpModels.cpp
     Source/Rig/CabSim.cpp
+    Source/Rig/Convolver.cpp
     Source/Rig/NamAmp.cpp
     Source/Rig/RigProcessor.cpp
     Source/Rig/Tuner.cpp

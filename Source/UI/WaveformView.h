@@ -59,6 +59,8 @@ private:
 
     double lastPos = -1.0;
     bool dragging = false, draggingLoop = false;
+    int loopEdge = -1;   // 0 = start, 1 = end being dragged
+    int loopEdgeAt (float x) const;
     float dragStartX = 0.0f;
     float hoverX = -1.0f;
     bool dragHover = false;

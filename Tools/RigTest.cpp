@@ -11,6 +11,7 @@
 #include "Engine/AudioEngine.h"
 #include "Engine/Recorder.h"
 #include <iostream>
+#include <juce_audio_formats/juce_audio_formats.h>
 
 using namespace wis;
 
@@ -49,8 +50,103 @@ static std::vector<float> pluck (double sr, int n, float freq, float levelDb)
     return v;
 }
 
-int main()
+/** Loudness with the K-weighting curve of ITU BS.1770 (what streaming services use), in dB. */
+static float loudnessDb (const float* d, int n, double sr)
 {
+    using AC = juce::dsp::IIR::Coefficients<float>;
+    juce::dsp::IIR::Filter<float> shelf (AC::makeHighShelf (sr, 1681.0, 0.71f, juce::Decibels::decibelsToGain (4.0f)));
+    juce::dsp::IIR::Filter<float> hp (AC::makeHighPass (sr, 38.0, 0.5f));
+    double s = 0;
+    for (int i = 0; i < n; ++i) { const float x = hp.processSample (shelf.processSample (d[i])); s += (double) x * x; }
+    return (float) juce::Decibels::gainToDecibels (std::sqrt (s / juce::jmax (1, n)), -150.0);
+}
+
+/** Spectral centroid (Hz) of a signal: a single number for "how bright is it". */
+static float centroidHz (const float* d, int n, double sr)
+{
+    constexpr int order = 14, N = 1 << order;
+    juce::dsp::FFT fft (order);
+    std::vector<float> buf ((size_t) N * 2, 0.0f);
+    double num = 0, den = 0;
+    for (int start = 0; start + N <= n; start += N)
+    {
+        std::fill (buf.begin(), buf.end(), 0.0f);
+        for (int i = 0; i < N; ++i) buf[(size_t) i] = d[start + i] * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * i / N));
+        fft.performFrequencyOnlyForwardTransform (buf.data());
+        for (int k = 1; k < N / 2; ++k) { const double f = k * sr / N; num += f * buf[(size_t) k]; den += buf[(size_t) k]; }
+    }
+    return den > 0 ? (float) (num / den) : 0.0f;
+}
+
+/** A plucked bass DI (Karplus-Strong string, roundwound brightness) playing a simple line. */
+static std::vector<float> bassLine (double sr, int n, bool guitar)
+{
+    std::vector<float> out ((size_t) n, 0.0f);
+    const float notes[] = { 41.2f, 41.2f, 55.0f, 61.74f, 73.42f, 55.0f, 49.0f, 61.74f };
+    juce::Random rng (7);
+    const int noteLen = (int) (sr * 0.5);
+    for (int k = 0; k * noteLen < n; ++k)
+    {
+        const float f = notes[k % 8] * (guitar ? 4.0f : 1.0f);
+        const int L = juce::jmax (2, (int) (sr / f));
+        std::vector<float> line ((size_t) L);
+        float lp = 0;
+        for (auto& v : line) { const float w = rng.nextFloat() * 2 - 1; lp += (w - lp) * 0.6f; v = lp * 0.5f; }   // pick attack
+        int idx = 0;
+        for (int i = 0; i < noteLen && k * noteLen + i < n; ++i)
+        {
+            const int nx = (idx + 1) % L;
+            const float y = line[(size_t) idx];
+            line[(size_t) idx] = 0.996f * (0.7f * line[(size_t) idx] + 0.3f * line[(size_t) nx]);   // bright, long sustain
+            out[(size_t) (k * noteLen + i)] += y * (i > noteLen - 400 ? (noteLen - i) / 400.0f : 1.0f);
+            idx = nx;
+        }
+    }
+    return out;
+}
+
+static void writeWav (const juce::File& f, const float* d, int n, double sr)
+{
+    f.deleteFile();
+    std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+    auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (1).withBitsPerSample (24);
+    if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
+    {
+        const float* chans[] = { d };
+        w->writeFromFloatArrays (chans, 1, n);
+    }
+}
+
+int main (int argc, char** argv)
+{
+    const bool calibrate = argc > 1 && juce::String (argv[1]) == "--calibrate";
+    if (argc > 2 && juce::String (argv[1]) == "--render")
+    {
+        // rigtest --render <folder>: every factory preset playing a plucked line, for listening / spectrum checks
+        const double sr = 48000.0;
+        const int n = (int) (sr * 6);
+        juce::File dir { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        dir.createDirectory();
+        auto names = RigProcessor::factoryPresetNames();
+        for (bool guitar : { false, true })
+            writeWav (dir.getChildFile (guitar ? "_input_guitar.wav" : "_input_bass.wav"), bassLine (sr, n, guitar).data(), n, sr);
+        for (int pi = 0; pi < names.size(); ++pi)
+        {
+            RigProcessor rig;
+            rig.loadFactoryPreset (pi);
+            // WIS_RENDER_OFF=amp_on,cab_on,... switches blocks off (to see what each contributes)
+            for (auto& id : juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("WIS_RENDER_OFF", {}), ",", ""))
+                if (id.isNotEmpty()) rig.setParam (id, id == "char_type" ? 0.0f : 0.0f);
+            rig.prepareToPlay (sr, 256);
+            auto in = bassLine (sr, n, ! names[pi].startsWith ("Bass"));
+            std::vector<float> L ((size_t) n), R ((size_t) n);
+            for (int pos = 0; pos < n; pos += 256)
+                rig.processMonoToStereo (in.data() + pos, L.data() + pos, R.data() + pos, juce::jmin (256, n - pos));
+            writeWav (dir.getChildFile (juce::String (pi).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (names[pi]) + ".wav"), L.data(), n, sr);
+        }
+        std::cout << "Rendered " << names.size() << " presets to " << dir.getFullPathName() << std::endl;
+        return 0;
+    }
     const double sr = 48000.0;
     const int block = 128;
     const int seconds = 3;
@@ -61,8 +157,42 @@ int main()
     auto input = pluck (sr, n, 82.41f, -12.0f);
     std::cout << "  input RMS " << rmsDb (input.data(), n) << " dB" << std::endl;
 
+    std::cout << "Tone stack:" << std::endl;
+    {
+        bool passive = true, scoop = true;
+        juce::Random rng (3);
+        for (auto comps : { ToneStack::tweed(), ToneStack::blackface(), ToneStack::british(), ToneStack::chime(), ToneStack::modern() })
+        {
+            for (int trial = 0; trial < 30; ++trial)
+            {
+                ToneStack ts;
+                ts.design (192000.0, comps, rng.nextDouble(), rng.nextDouble(), rng.nextDouble());
+                for (double f = 20; f < 20000; f *= 1.1) passive = passive && ts.magnitudeAt (f, 192000.0) < 1.02;
+            }
+            ToneStack noon;
+            noon.design (192000.0, comps, 0.5, 0.5, 0.5);
+            scoop = scoop && noon.magnitudeAt (600, 192000.0) < noon.magnitudeAt (80, 192000.0) && noon.magnitudeAt (600, 192000.0) < noon.magnitudeAt (5000, 192000.0);
+        }
+        check (passive, "The passive tone stack never boosts (any knob settings)");
+        check (scoop, "...and has the classic mid scoop at noon");
+        ToneStack lo, hi;
+        lo.design (192000.0, ToneStack::british(), 0.5, 0.5, 0.0);
+        hi.design (192000.0, ToneStack::british(), 0.5, 0.5, 1.0);
+        check (hi.magnitudeAt (80, 192000.0) > lo.magnitudeAt (80, 192000.0) * 1.5, "Bass knob works (" + juce::String (juce::Decibels::gainToDecibels (hi.magnitudeAt (80, 192000.0) / lo.magnitudeAt (80, 192000.0)), 1) + " dB at 80 Hz)");
+    }
+
     for (int m = 0; m < (int) AmpType::namCapture; ++m)
     {
+        if (calibrate)
+        {
+            BuiltInAmp amp;
+            amp.prepare (sr, block);
+            const bool bassModel = ampTypeIsBass ((AmpType) m);
+            auto in = pluck (sr, n, bassModel ? 41.2f : 82.41f, -12.0f);
+            amp.setParameters ((AmpType) m, 5, 5, 5, 5, 5, 7);
+            for (int pos = 0; pos < n; pos += block) amp.process (in.data() + pos, juce::jmin (block, n - pos));
+            std::cout << "  CAL " << ampTypeNames()[m] << " " << rmsDb (in.data() + n / 3, n - n / 3) << std::endl;
+        }
         BuiltInAmp amp;
         amp.prepare (sr, block);
         auto buf = input;
@@ -99,14 +229,33 @@ int main()
     {
         CabSim cab;
         cab.prepare (sr, block);
-        cab.setParameters ((CabType) c, 60, 10000);
+        cab.setParameters ((CabType) c, 20, 20000);
+        cab.prepare (sr, block);
         std::vector<float> buf ((size_t) n);
         juce::Random rng (1);
         for (auto& s : buf) s = (rng.nextFloat() * 2 - 1) * 0.25f;
         for (int pos = 0; pos < n; pos += block)
             cab.process (buf.data() + pos, juce::jmin (block, n - pos));
         const float lvl = rmsDb (buf.data(), n);
-        check (allFinite (buf.data(), n) && lvl > -40 && lvl < 0, cabTypeNames()[c] + ": " + juce::String (lvl, 1) + " dB RMS (white noise in)");
+        check (allFinite (buf.data(), n) && lvl > -40 && lvl < 0, cabTypeNames()[c] + ": " + juce::String (lvl, 1) + " dB RMS, centroid "
+               + juce::String ((int) centroidHz (buf.data(), n, sr)) + " Hz (white noise in)");
+    }
+    {
+        auto irC = CabSim::designImpulseResponse (CabType::brit4x12, MicType::dynamic, 0.0f, 0.0f, sr);
+        auto irE = CabSim::designImpulseResponse (CabType::brit4x12, MicType::dynamic, 1.0f, 0.0f, sr);
+        auto irB = CabSim::designImpulseResponse (CabType::bass1x15Vintage, MicType::dynamic, 0.3f, 0.0f, sr);
+        auto irR = CabSim::designImpulseResponse (CabType::brit4x12, MicType::dynamic, 0.3f, 1.0f, sr);
+        auto cen = [&] (const juce::AudioBuffer<float>& ir)
+        {
+            std::vector<float> v ((size_t) 32768, 0.0f);
+            for (int i = 0; i < ir.getNumSamples(); ++i) v[(size_t) i] = ir.getSample (0, i);
+            return centroidHz (v.data(), 32768, sr);
+        };
+        bool finite = true;
+        for (auto* b : { &irC, &irE, &irB, &irR }) finite = finite && allFinite (b->getReadPointer (0), b->getNumSamples());
+        check (finite && cen (irE) < cen (irC) * 0.8f, "Mic at the cone edge is darker than at the centre (" + juce::String ((int) cen (irC)) + " -> " + juce::String ((int) cen (irE)) + " Hz)");
+        check (cen (irB) < cen (irC) * 0.6f, "A vintage 1x15 bass cab is much darker than a 4x12 (" + juce::String ((int) cen (irB)) + " Hz)");
+        check (irR.getNumSamples() > irC.getNumSamples(), "Room adds early reflections (" + juce::String (irR.getNumSamples()) + " samples)");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -120,6 +269,7 @@ int main()
         for (int pi = 0; pi < names.size(); ++pi)
         {
             rig.loadFactoryPreset (pi);
+            rig.prepareToPlay (sr, block);   // builds the preset's cabinet right away
             const bool bass = names[pi].startsWith ("Bass");
             auto in = pluck (sr, n, bass ? 41.2f : 164.8f, -14.0f);
 
@@ -132,6 +282,11 @@ int main()
             const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
             const float lvl = rmsDb (L.data() + n / 3, n - n / 3);
             const double cpu = 100.0 * ms / (1000.0 * seconds);
+            const float loud = loudnessDb (L.data() + n / 3, n - n / 3, sr);
+            if (calibrate) std::cout << "  CALP " << pi << " " << names[pi] << " loudness " << loud
+                                     << " outLevel " << rig.getState().getRawParameterValue (pid::outLevel)->load() << std::endl;
+            if (! names[pi].contains ("DI") && ! names[pi].startsWith ("Vocal"))
+                check (std::abs (loud - (-14.0f)) < 1.5f, names[pi] + " is loudness-matched (" + juce::String (loud, 1) + " LU)");
             check (allFinite (L.data(), n) && allFinite (R.data(), n) && lvl > -40 && lvl < 0,
                    names[pi] + ": " + juce::String (lvl, 1) + " dB RMS, CPU " + juce::String (cpu, 2) + "% of one core");
         }
@@ -141,7 +296,53 @@ int main()
         auto saved = rig.createPresetState();
         rig.loadFactoryPreset (0);
         rig.restorePresetState (saved);
-        check ((int) rig.getState().getRawParameterValue (pid::ampModel)->load() == (int) AmpType::hotLead, "Preset state round trip");
+        check ((int) rig.getState().getRawParameterValue (pid::ampModel)->load() == (int) AmpType::tweedBreakup, "Preset state round trip");
+
+        // a rig saved by an older version (amp "Hot Lead" = 2, cab "4x10 Bass" = 3) comes back as the same sounds
+        auto old = rig.getState().copyState();
+        for (auto child : old)
+        {
+            if (child.getProperty ("id").toString() == pid::ampModel) child.setProperty ("value", 2, nullptr);
+            if (child.getProperty ("id").toString() == pid::cabType) child.setProperty ("value", 3, nullptr);
+        }
+        old.removeProperty ("rigVersion", nullptr);
+        rig.restorePresetState (old);
+        check ((int) rig.getState().getRawParameterValue (pid::ampModel)->load() == (int) AmpType::modernHighGain
+               && (int) rig.getState().getRawParameterValue (pid::cabType)->load() == (int) CabType::bass4x10Horn,
+               "Presets and songs from older versions keep their amp and cabinet");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    std::cout << "Tone character (centroid = brightness):" << std::endl;
+    {
+        auto bassIn = pluck (sr, n, 55.0f, -14.0f);
+        // brighten the test pluck so the string models have something to remove
+        {
+            auto orig = bassIn;
+            for (int i = 1; i < n; ++i) bassIn[(size_t) i] = orig[(size_t) i] + 2.4f * (orig[(size_t) i] - orig[(size_t) i - 1]);
+        }
+        auto run = [&] (int preset)
+        {
+            RigProcessor rig;
+            rig.loadFactoryPreset (preset);
+            rig.prepareToPlay (sr, block);
+            std::vector<float> L ((size_t) n), R ((size_t) n);
+            for (int pos = 0; pos < n; pos += block)
+                rig.processMonoToStereo (bassIn.data() + pos, L.data() + pos, R.data() + pos, juce::jmin (block, n - pos));
+            return centroidHz (L.data(), n, sr);
+        };
+        const float sixties = run (10), motown = run (12), hifi = run (15), growl = run (14);
+        check (sixties < hifi * 0.7f && motown < hifi * 0.7f, "60s / Motown bass is much rounder than modern hi-fi (centroid "
+               + juce::String ((int) sixties) + " / " + juce::String ((int) motown) + " vs " + juce::String ((int) hifi) + " Hz)");
+        check (growl > sixties, "Modern growl is brighter than the 60s bass (" + juce::String ((int) growl) + " Hz)");
+
+        InstrumentCharacter c;
+        c.prepare (sr);
+        c.setParameters (CharacterType::violinBass, 10);
+        auto v = bassIn;
+        for (int pos = 0; pos < n; pos += block) c.process (v.data() + pos, juce::jmin (block, n - pos));
+        check (allFinite (v.data(), n) && centroidHz (v.data(), n, sr) < centroidHz (bassIn.data(), n, sr) * 0.8f,
+               "Violin-bass strings darken the tone (" + juce::String ((int) centroidHz (bassIn.data(), n, sr)) + " -> " + juce::String ((int) centroidHz (v.data(), n, sr)) + " Hz)");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -305,7 +506,7 @@ int main()
         };
 
         RigProcessor rig;
-        rig.loadFactoryPreset (6);   // bass vintage tube
+        rig.loadFactoryPreset (13);  // classic rock 8x10 bass
         StemPlayer player;
         Recorder recorder;
         AudioEngine engine (rig, player, recorder);

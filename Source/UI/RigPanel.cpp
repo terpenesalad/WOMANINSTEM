@@ -199,6 +199,12 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     tunerModule->addExtra (tunerMute, 0);
     tunerModule->addSide (tunerView, 0);
 
+    // ---- strings & pickups ----
+    charM = std::make_unique<EffectModule> (state, "Strings & Pickups", nullptr, juce::Colour (0xffeab308));
+    charM->addChoice (pid::charType).setTooltip ("Make your instrument sound like another: flatwounds, a 60s violin bass, a foam mute, "
+                                                  "fresh roundwounds, a split-coil bass pickup, single coils or humbuckers");
+    charM->addKnob (pid::charAmount, "Amount");
+
     // ---- pedals ----
     gateM = std::make_unique<EffectModule> (state, "Gate", pid::gateOn, juce::Colour (0xff64748b));
     gateM->addKnob (pid::gateThresh, "Thresh");
@@ -237,18 +243,28 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     loadIr.setTooltip ("Load a speaker cabinet impulse response (.wav)");
     loadIr.onClick = [this] { chooseIrFile(); };
     cabM->addExtra (loadIr, 76);
+    if (auto* mp = dynamic_cast<juce::AudioParameterChoice*> (state.getParameter (pid::cabMic)))
+        micBox.addItemList (mp->choices, 1);
+    micAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, pid::cabMic, micBox);
+    micBox.setTooltip ("Microphone on the speaker: dynamic (punchy), ribbon (warm, smooth), condenser (detailed) or a dynamic + ribbon blend");
+    cabM->addExtra (micBox, 128);
+    cabM->addKnob (pid::cabMicPos, "Mic Pos").slider.setTooltip ("Where the mic points: 0 = centre of the cone (bright), 10 = edge (dark, round)");
+    cabM->addKnob (pid::cabRoom, "Room").slider.setTooltip ("Distance from the cab: close and punchy, or a bit of studio room");
+    cabM->addKnob (pid::cabDiBlend, "DI Blend").slider.setTooltip ("Blend in a clean DI under the miked amp (time-aligned), the studio way to record bass");
     cabM->addKnob (pid::cabLowCut, "Low Cut");
     cabM->addKnob (pid::cabHighCut, "High Cut");
     irName.setFont (uiFont (11.0f));
     irName.setColour (juce::Label::textColourId, theme::textDim);
     irName.setJustificationType (juce::Justification::centredLeft);
-    cabM->addSide (irName, 0);
 
     eqM = std::make_unique<EffectModule> (state, "Studio EQ", pid::eqOn, juce::Colour (0xffa3e635));
     eqM->addKnob (pid::eqLow, "Low");
     eqM->addKnob (pid::eqLowMid, "Lo Mid");
     eqM->addKnob (pid::eqHighMid, "Hi Mid");
     eqM->addKnob (pid::eqHigh, "High");
+
+    tapeM = std::make_unique<EffectModule> (state, "Tape", pid::tapeOn, juce::Colour (0xffd97706));
+    tapeM->addKnob (pid::tapeDrive, "Drive").slider.setTooltip ("A 60s studio console and tape machine: warmth, gentle compression, low-end bump, soft top");
 
     chorusM = std::make_unique<EffectModule> (state, "Chorus", pid::chorusOn, juce::Colour (0xff60a5fa));
     chorusM->addKnob (pid::chorusRate, "Rate");
@@ -273,8 +289,8 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     outputM->addKnob (pid::outLevel, "Level");
     outputM->addSide (outputMeter, 10);
 
-    for (auto* m : { inputModule.get(), tunerModule.get(), gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(),
-                     eqM.get(), chorusM.get(), delayM.get(), reverbM.get(), outputM.get() })
+    for (auto* m : { inputModule.get(), tunerModule.get(), charM.get(), gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(),
+                     eqM.get(), tapeM.get(), chorusM.get(), delayM.get(), reverbM.get(), outputM.get() })
         addAndMakeVisible (m);
 
     refreshPresetList();
@@ -470,6 +486,8 @@ void RigPanel::updateFileLabels()
     auto ir = rig.getImpulseResponseFile();
     irName.setText (ir.existsAsFile() ? ir.getFileNameWithoutExtension() : juce::String(), juce::dontSendNotification);
     irName.setTooltip (ir.getFullPathName());
+    loadIr.setTooltip (ir.existsAsFile() ? "Loaded impulse response: " + ir.getFileNameWithoutExtension() + " (click to load another)"
+                                         : juce::String ("Load a speaker cabinet impulse response (.wav)"));
 }
 
 void RigPanel::timerCallback()
@@ -486,7 +504,7 @@ void RigPanel::timerCallback()
         tunerView.setReading (rig.getTuner().analyse());
 
     // keep module highlight in sync with power switches
-    for (auto* m : { gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(), eqM.get(), chorusM.get(), delayM.get(), reverbM.get() })
+    for (auto* m : { gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(), eqM.get(), tapeM.get(), chorusM.get(), delayM.get(), reverbM.get() })
         m->repaint (0, 0, m->getWidth(), 30);
 }
 
@@ -522,9 +540,9 @@ void RigPanel::resized()
             m.first->setBounds (row.removeFromLeft ((int) std::round (m.second * unit)));
     };
 
-    layoutRow (row1, { { inputModule.get(), 2.6f }, { gateM.get(), 2.1f }, { compM.get(), 4.8f }, { driveM.get(), 3.2f }, { ampM.get(), 6.4f } });
-    layoutRow (row2, { { tunerModule.get(), 3.0f }, { cabM.get(), 3.6f }, { eqM.get(), 4.0f }, { chorusM.get(), 3.0f },
-                       { delayM.get(), 4.0f }, { reverbM.get(), 4.0f }, { outputM.get(), 1.5f } });
+    layoutRow (row1, { { inputModule.get(), 2.6f }, { charM.get(), 2.6f }, { gateM.get(), 2.1f }, { compM.get(), 4.6f }, { driveM.get(), 3.2f }, { ampM.get(), 6.2f } });
+    layoutRow (row2, { { tunerModule.get(), 2.6f }, { cabM.get(), 5.6f }, { eqM.get(), 3.6f }, { tapeM.get(), 1.5f }, { chorusM.get(), 2.7f },
+                       { delayM.get(), 3.6f }, { reverbM.get(), 3.6f }, { outputM.get(), 1.4f } });
 }
 
 } // namespace wis

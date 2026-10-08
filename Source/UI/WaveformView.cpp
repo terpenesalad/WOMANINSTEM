@@ -239,6 +239,8 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     dragging = true;
     draggingLoop = false;
     dragStartX = (float) e.x;
+    loopEdge = loopEdgeAt ((float) e.x);
+    if (loopEdge >= 0) return;   // dragging an edge of the loop
 
     if (e.mods.isShiftDown() && player.getLoopEndSeconds() > 0)
     {
@@ -255,6 +257,17 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
 {
     if (! dragging || song == nullptr) return;
 
+    if (loopEdge >= 0 && onLoopChanged)
+    {
+        double a = player.getLoopStartSeconds(), b = player.getLoopEndSeconds();
+        const double t = juce::jlimit (0.0, song->length / juce::jmax (1.0, song->sampleRate), xToSeconds ((float) e.x));
+        if (loopEdge == 0) a = juce::jmin (t, b - 0.1); else b = juce::jmax (t, a + 0.1);
+        onLoopChanged (true, a, b);
+        hoverX = (float) e.x;
+        repaint();
+        return;
+    }
+
     if (std::abs ((float) e.x - dragStartX) > 5.0f)
         draggingLoop = true;
 
@@ -269,11 +282,21 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
 
 void WaveformView::mouseUp (const juce::MouseEvent& e)
 {
+    if (loopEdge >= 0) { loopEdge = -1; dragging = false; return; }
     if (dragging && ! draggingLoop && song != nullptr && onSeek)
         onSeek (xToSeconds ((float) e.x));
     if (draggingLoop && onSeek)
         onSeek (juce::jmin (xToSeconds (dragStartX), xToSeconds ((float) e.x)));   // start playing from the loop start
     dragging = draggingLoop = false;
+}
+
+int WaveformView::loopEdgeAt (float x) const
+{
+    if (song == nullptr || player.getLoopEndSeconds() <= player.getLoopStartSeconds()) return -1;
+    const float x0 = secondsToX (player.getLoopStartSeconds()), x1 = secondsToX (player.getLoopEndSeconds());
+    if (std::abs (x - x0) <= 7.0f) return 0;
+    if (std::abs (x - x1) <= 7.0f) return 1;
+    return -1;
 }
 
 void WaveformView::mouseDoubleClick (const juce::MouseEvent&)
@@ -285,7 +308,8 @@ void WaveformView::mouseDoubleClick (const juce::MouseEvent&)
 void WaveformView::mouseMove (const juce::MouseEvent& e)
 {
     hoverX = song != nullptr ? (float) e.x : -1.0f;
-    setMouseCursor (song != nullptr ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::PointingHandCursor);
+    setMouseCursor (song == nullptr ? juce::MouseCursor::PointingHandCursor
+                  : loopEdgeAt ((float) e.x) >= 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::IBeamCursor);
     repaint();
 }
 

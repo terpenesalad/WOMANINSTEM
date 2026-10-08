@@ -64,10 +64,20 @@ namespace pid
     inline constexpr const char* reverbMix   = "reverb_mix";
     inline constexpr const char* reverbWidth = "reverb_width";
     inline constexpr const char* outLevel    = "out_level";
+    // 3.1
+    inline constexpr const char* charType    = "char_type";
+    inline constexpr const char* charAmount  = "char_amount";
+    inline constexpr const char* cabMic      = "cab_mic";
+    inline constexpr const char* cabMicPos   = "cab_micpos";
+    inline constexpr const char* cabRoom     = "cab_room";
+    inline constexpr const char* cabDiBlend  = "cab_di";
+    inline constexpr const char* tapeOn      = "tape_on";
+    inline constexpr const char* tapeDrive   = "tape_drive";
 }
 
 /** The play-along rig: mono instrument/mic in -> stereo out.
-    Gate -> Compressor -> Drive -> Amp (built-in or NAM) -> Cab (built-in or IR) -> EQ -> Chorus -> Delay -> Reverb.
+    Strings & Pickups -> Gate -> Compressor -> Drive -> Amp (built-in or NAM) -> Cab (built-in or IR, + DI blend) -> EQ
+    -> Console & Tape -> Chorus -> Delay -> Reverb.
     It's an AudioProcessor so we get a parameter tree with undo-free automation/smoothing, and presets for free. */
 class RigProcessor : public juce::AudioProcessor
 {
@@ -139,6 +149,10 @@ private:
     int maxBlock = 512;
     juce::String presetName;
 
+    InstrumentCharacter character;
+    ConsoleTape tape;
+    std::vector<float> diCopy, diLine;
+    int diWrite = 0;
     NoiseGate gate;
     juce::dsp::Compressor<float> compressor;
     DrivePedal drive;

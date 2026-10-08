@@ -115,7 +115,9 @@ private:
     VStack inputSide;
     int clipHold = 0;
 
-    std::unique_ptr<EffectModule> inputModule, tunerModule, gateM, compM, driveM, ampM, cabM, eqM, chorusM, delayM, reverbM, outputM;
+    std::unique_ptr<EffectModule> inputModule, tunerModule, charM, gateM, compM, driveM, ampM, cabM, eqM, tapeM, chorusM, delayM, reverbM, outputM;
+    juce::ComboBox micBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> micAttachment;
     juce::TextButton loadNam { "Load NAM..." }, loadIr { "Load IR..." };
     juce::Label namName, irName;
     juce::ToggleButton pingPong { "Ping-pong" };

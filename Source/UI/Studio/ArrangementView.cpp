@@ -5,7 +5,9 @@
 namespace wis::daw
 {
 
-static constexpr int rulerHeight = 36;
+static constexpr int rulerHeight = 42;
+static constexpr int cycleStripH = 18;   // the yellow cycle (repeat) strip at the top of the ruler
+static constexpr int rulerTextY = cycleStripH + 2;
 static constexpr int bottomBar = 18;
 static constexpr int laneExtra = 72;
 
@@ -45,9 +47,33 @@ public:
         const float cx0 = owner.beatToX ((double) p.tree()[ids::cycleStart]);
         const float cx1 = owner.beatToX ((double) p.tree()[ids::cycleEnd]);
         g.setColour (theme::bg);
-        g.fillRect (0, 0, getWidth(), 13);
-        g.setColour (cycleOn ? juce::Colour (0xfff2b84b) : theme::textFaint.withAlpha (0.5f));
-        g.fillRoundedRectangle (cx0, 2.0f, juce::jmax (2.0f, cx1 - cx0), 10.0f, 3.0f);
+        g.fillRect (0, 0, getWidth(), cycleStripH);
+        {
+            const auto col = cycleOn ? juce::Colour (0xfff2b84b) : theme::textFaint.withAlpha (0.45f);
+            juce::Rectangle<float> region (cx0, 2.0f, juce::jmax (4.0f, cx1 - cx0), (float) cycleStripH - 4.0f);
+            g.setColour (col.withAlpha (cycleOn ? (hoverPart == 3 ? 1.0f : 0.85f) : 0.5f));
+            g.fillRoundedRectangle (region, 3.0f);
+            // edge grips: drag them to change where the repeat starts / ends
+            for (int edge = 0; edge < 2; ++edge)
+            {
+                const float ex = edge == 0 ? region.getX() : region.getRight() - 7.0f;
+                g.setColour (juce::Colours::black.withAlpha (hoverPart == edge + 1 ? 0.55f : 0.3f));
+                g.fillRoundedRectangle (ex, region.getY(), 7.0f, region.getHeight(), 3.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.7f));
+                g.drawVerticalLine ((int) ex + 2, region.getY() + 4, region.getBottom() - 4);
+                g.drawVerticalLine ((int) ex + 4, region.getY() + 4, region.getBottom() - 4);
+            }
+            if (region.getWidth() > 90)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.75f));
+                g.setFont (uiFont (10.0f, true));
+                auto& pr = owner.ctx.project;
+                g.drawText (juce::String (cycleOn ? "REPEAT  " : "REPEAT OFF  ")
+                            + formatBarsBeats ((double) pr.tree()[ids::cycleStart], pr.beatsPerBar(), pr.tsDen(), false) + " - "
+                            + formatBarsBeats ((double) pr.tree()[ids::cycleEnd], pr.beatsPerBar(), pr.tsDen(), false),
+                            region.reduced (10, 0), juce::Justification::centred, true);
+            }
+        }
 
         // bars / beats
         const double ppb = ctx.pixelsPerBeat;
@@ -62,15 +88,15 @@ public:
             if (x > getWidth()) break;
             const bool labelled = ((int) bar % barStep) == 0;
             g.setColour (labelled ? theme::textDim : theme::outline);
-            g.drawVerticalLine ((int) x, labelled ? 15.0f : 26.0f, (float) getHeight());
+            g.drawVerticalLine ((int) x, labelled ? (float) rulerTextY : rulerTextY + 11.0f, (float) getHeight());
             if (labelled)
-                g.drawText (juce::String ((int) bar + 1), (int) x + 4, 15, 40, 16, juce::Justification::centredLeft);
+                g.drawText (juce::String ((int) bar + 1), (int) x + 4, rulerTextY, 40, 16, juce::Justification::centredLeft);
             if (bpb * ppb > 60)
                 for (int b = 1; b < (int) bpb; ++b)
                 {
                     const float bx = owner.beatToX (bar * bpb + b);
                     g.setColour (theme::outline);
-                    g.drawVerticalLine ((int) bx, 29.0f, (float) getHeight());
+                    g.drawVerticalLine ((int) bx, rulerTextY + 14.0f, (float) getHeight());
                 }
         }
 
@@ -82,7 +108,7 @@ public:
             if (mx < -120 || mx > getWidth()) continue;
             const auto name = m[ids::name].toString();
             const float w = juce::jmin (140.0f, (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 12.0f);
-            juce::Rectangle<float> tag (mx, 15.0f, w, 14.0f);
+            juce::Rectangle<float> tag (mx, (float) rulerTextY, w, 14.0f);
             g.setColour (juce::Colour (0xff3b82f6));
             g.fillRoundedRectangle (tag, 3.0f);
             g.setColour (juce::Colours::white);
@@ -92,10 +118,10 @@ public:
         // playhead marker
         const float px = owner.beatToX (ctx.engine.getPositionBeats());
         juce::Path tri;
-        tri.addTriangle (px - 6, 14, px + 6, 14, px, 24);
+        tri.addTriangle (px - 6, (float) rulerTextY - 1, px + 6, (float) rulerTextY - 1, px, rulerTextY + 9.0f);
         g.setColour (theme::accent);
         g.fillPath (tri);
-        g.fillRect (px - 0.5f, 22.0f, 1.0f, (float) getHeight() - 22.0f);
+        g.fillRect (px - 0.5f, rulerTextY + 7.0f, 1.0f, (float) getHeight() - rulerTextY - 7.0f);
 
         g.setColour (theme::outline);
         g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
@@ -103,7 +129,7 @@ public:
 
     juce::ValueTree markerAt (juce::Point<int> pos) const
     {
-        if (pos.y < 14 || pos.y > 30) return {};
+        if (pos.y < cycleStripH || pos.y > rulerTextY + 16) return {};
         juce::ValueTree best;
         for (auto m : owner.ctx.project.markers())
         {
@@ -157,84 +183,217 @@ public:
         });
     }
 
+    // ---- cycle (repeat) strip -----------------------------------------------------------------------
+    enum CycleMode { cycleNone, cycleCreate, cycleStart, cycleEnd, cycleMove };
+
+    /** 0 none, 1 start edge, 2 end edge, 3 inside the region. */
+    int cyclePartAt (juce::Point<int> pos) const
+    {
+        if (pos.y >= cycleStripH) return 0;
+        auto& t = owner.ctx.project.tree();
+        const float x0 = owner.beatToX ((double) t[ids::cycleStart]), x1 = owner.beatToX ((double) t[ids::cycleEnd]);
+        const float grab = juce::jmin (9.0f, juce::jmax (4.0f, (x1 - x0) / 3.0f));
+        if (std::abs (pos.x - x0) <= grab) return 1;
+        if (std::abs (pos.x - x1) <= grab) return 2;
+        if (pos.x > x0 && pos.x < x1) return 3;
+        return 0;
+    }
+
+    /** The cycle snaps to the grid, but never coarser than a bar (so it can always be set precisely). Shift = no snap. */
+    double cycleSnap (double beat, bool free) const
+    {
+        auto& ctx = owner.ctx;
+        if (free) return juce::jmax (0.0, beat);
+        double g = ctx.gridBeats (ctx.pixelsPerBeat);
+        if (g <= 0.0) g = 0.25;
+        g = juce::jmin (g, ctx.project.beatsPerBar());
+        return juce::jmax (0.0, std::round (beat / g) * g);
+    }
+    double cycleMinLength() const
+    {
+        auto& ctx = owner.ctx;
+        const double g = ctx.gridBeats (ctx.pixelsPerBeat);
+        return juce::jlimit (0.25, ctx.project.beatsPerBar(), g > 0.0 ? g : 0.25);
+    }
+
+    void setCycle (double start, double end, bool on = true)
+    {
+        auto& tree = owner.ctx.project.tree();
+        if (end < start) std::swap (start, end);
+        tree.setProperty (ids::cycleStart, juce::jmax (0.0, start), nullptr);
+        tree.setProperty (ids::cycleEnd, juce::jmax (start + 0.0625, end), nullptr);
+        tree.setProperty (ids::cycleOn, on, nullptr);
+        // already past the new end while playing: jump back into the repeat
+        auto& eng = owner.ctx.engine;
+        if (on && eng.isPlaying() && eng.getPositionBeats() >= juce::jmax (start + 0.0625, end))
+            eng.setPositionBeats (juce::jmax (0.0, start));
+        owner.repaintAll();
+    }
+
+    void cycleMenu (const juce::MouseEvent& e)
+    {
+        auto& ctx = owner.ctx;
+        auto& p = ctx.project;
+        const double bpb = p.beatsPerBar();
+        const double cs = p.tree()[ids::cycleStart], ce = p.tree()[ids::cycleEnd];
+        const double clickBar = std::floor (owner.xToBeat ((float) e.x) / bpb) * bpb;
+        // the section between the markers around the click
+        double secStart = 0.0, secEnd = -1.0;
+        for (auto m : p.markers())
+        {
+            const double b = m[ids::b];
+            if (b <= owner.xToBeat ((float) e.x)) secStart = juce::jmax (secStart, b);
+            else secEnd = secEnd < 0 ? b : juce::jmin (secEnd, b);
+        }
+        juce::PopupMenu m;
+        m.addItem (1, (bool) p.tree()[ids::cycleOn] ? "Turn Repeat Off" : "Turn Repeat On");
+        m.addSeparator();
+        m.addItem (2, "Repeat This Bar");
+        m.addItem (3, "Repeat 4 Bars From Here");
+        m.addItem (4, "Repeat Selected Clips", ! ctx.selectedClips.isEmpty());
+        m.addItem (5, "Repeat This Section (between markers)", secEnd > secStart);
+        m.addSeparator();
+        m.addItem (6, "Double Length");
+        m.addItem (7, "Halve Length", ce - cs > cycleMinLength() * 1.5);
+        m.addItem (8, "Move Forward (next section of the same length)");
+        m.addItem (9, "Move Back", cs > 0.0);
+        m.addSeparator();
+        m.addItem (-1, "Drag the edges to resize, the middle to move, or drag empty strip to draw. Shift = no snap.", false);
+        m.showMenuAsync (juce::PopupMenu::Options(), [this, clickBar, bpb, cs, ce, secStart, secEnd] (int r)
+        {
+            auto& c = owner.ctx;
+            auto& pr = c.project;
+            const double len = ce - cs;
+            switch (r)
+            {
+                case 1: pr.tree().setProperty (ids::cycleOn, ! (bool) pr.tree()[ids::cycleOn], nullptr); owner.repaintAll(); break;
+                case 2: setCycle (clickBar, clickBar + bpb); break;
+                case 3: setCycle (clickBar, clickBar + 4 * bpb); break;
+                case 4:
+                {
+                    double a = 1.0e9, b = 0.0;
+                    for (int id : c.selectedClips)
+                        if (auto cl = pr.clipById (id); cl.isValid()) { a = juce::jmin (a, cl.start()); b = juce::jmax (b, cl.endBeats (pr.tempo())); }
+                    if (b > a) setCycle (a, b);
+                    break;
+                }
+                case 5: setCycle (secStart, secEnd); break;
+                case 6: setCycle (cs, cs + len * 2.0); break;
+                case 7: setCycle (cs, cs + len * 0.5); break;
+                case 8: setCycle (ce, ce + len); break;
+                case 9: setCycle (juce::jmax (0.0, cs - len), juce::jmax (0.0, cs - len) + len); break;
+                default: break;
+            }
+        });
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const int part = cyclePartAt (e.getPosition());
+        if (part != hoverPart) { hoverPart = part; repaint(); }
+        setMouseCursor (part == 1 || part == 2 ? juce::MouseCursor::LeftRightResizeCursor
+                      : part == 3 ? juce::MouseCursor::DraggingHandCursor
+                      : e.y < cycleStripH ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor);
+    }
+    void mouseExit (const juce::MouseEvent&) override { if (hoverPart != 0) { hoverPart = 0; repaint(); } }
+
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (e.y < cycleStripH)
+        {
+            // double-click the strip: repeat that bar
+            const double bpb = owner.ctx.project.beatsPerBar();
+            const double bar = std::floor (owner.xToBeat ((float) e.x) / bpb) * bpb;
+            setCycle (bar, bar + bpb);
+            return;
+        }
         if (auto m = markerAt (e.getPosition()); m.isValid()) renameMarker (m);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
         auto& p = owner.ctx.project;
-        if (e.mods.isPopupMenu() && e.y >= 14) { cycleDrag = false; markerMenu (e); ignoreDrag = true; return; }
+        cycleMode = cycleNone;
+        movedCycle = false;
         ignoreDrag = false;
+        if (e.y < cycleStripH)
+        {
+            if (e.mods.isPopupMenu()) { cycleMenu (e); ignoreDrag = true; return; }
+            cs0 = p.tree()[ids::cycleStart];
+            ce0 = p.tree()[ids::cycleEnd];
+            downBeat = owner.xToBeat ((float) e.x);
+            const int part = cyclePartAt (e.getPosition());
+            cycleMode = part == 1 ? cycleStart : part == 2 ? cycleEnd : part == 3 ? cycleMove : cycleCreate;
+            return;
+        }
+        if (e.mods.isPopupMenu()) { markerMenu (e); ignoreDrag = true; return; }
         if (auto m = markerAt (e.getPosition()); m.isValid())
         {
             owner.ctx.engine.setPositionBeats ((double) m[ids::b]);
-            cycleDrag = false;
             ignoreDrag = true;
             owner.repaintAll();
             return;
         }
-        dragStartBeat = owner.ctx.snap (owner.xToBeat ((float) e.x), owner.ctx.pixelsPerBeat, e.mods.isShiftDown());
-        cycleDrag = e.y < 14;
-        movedCycle = false;
-        if (cycleDrag)
-        {
-            const double cs = p.tree()[ids::cycleStart], ce = p.tree()[ids::cycleEnd];
-            const double b = owner.xToBeat ((float) e.x);
-            grabOffset = (b >= cs && b <= ce) ? b - cs : -1.0;   // inside: move the whole region
-            cycleLen = ce - cs;
-        }
-        else
-        {
-            owner.ctx.engine.setPositionBeats (dragStartBeat);
-        }
+        owner.ctx.engine.setPositionBeats (owner.ctx.snap (owner.xToBeat ((float) e.x), owner.ctx.pixelsPerBeat, e.mods.isShiftDown()));
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (ignoreDrag) return;
         auto& ctx = owner.ctx;
-        auto& tree = ctx.project.tree();
-        const double b = ctx.snap (owner.xToBeat ((float) e.x), ctx.pixelsPerBeat, e.mods.isShiftDown());
-        if (cycleDrag)
+        const bool free = e.mods.isShiftDown();
+        if (cycleMode != cycleNone)
         {
-            if (std::abs (e.getDistanceFromDragStartX()) < 3) return;
+            if (! movedCycle && std::abs (e.getDistanceFromDragStartX()) < 3) return;
             movedCycle = true;
-            if (grabOffset >= 0.0)
+            const double now = owner.xToBeat ((float) e.x);
+            const double minLen = free ? 0.0625 : cycleMinLength();
+            switch (cycleMode)
             {
-                const double start = ctx.snap (owner.xToBeat ((float) e.x) - grabOffset, ctx.pixelsPerBeat, e.mods.isShiftDown());
-                tree.setProperty (ids::cycleStart, start, nullptr);
-                tree.setProperty (ids::cycleEnd, start + cycleLen, nullptr);
+                case cycleStart: setCycle (juce::jmin (cycleSnap (now, free), ce0 - minLen), ce0, true); break;
+                case cycleEnd:   setCycle (cs0, juce::jmax (cycleSnap (now, free), cs0 + minLen), true); break;
+                case cycleMove:
+                {
+                    const double start = cycleSnap (cs0 + (now - downBeat), free);
+                    setCycle (start, start + (ce0 - cs0), true);
+                    break;
+                }
+                case cycleCreate:
+                {
+                    double a = cycleSnap (downBeat, free), b = cycleSnap (now, free);
+                    if (std::abs (b - a) < minLen) b = a + (now >= downBeat ? minLen : -minLen);
+                    setCycle (juce::jmin (a, b), juce::jmax (a, b), true);
+                    break;
+                }
+                default: break;
             }
-            else
-            {
-                tree.setProperty (ids::cycleStart, juce::jmin (dragStartBeat, b), nullptr);
-                tree.setProperty (ids::cycleEnd, juce::jmax (dragStartBeat, b) + (b == dragStartBeat ? ctx.gridBeats (ctx.pixelsPerBeat) : 0.0), nullptr);
-            }
-            tree.setProperty (ids::cycleOn, true, nullptr);
+            ctx.setStatus ("Repeat: bar " + formatBarsBeats ((double) ctx.project.tree()[ids::cycleStart], ctx.project.beatsPerBar(), ctx.project.tsDen(), false)
+                           + " to " + formatBarsBeats ((double) ctx.project.tree()[ids::cycleEnd], ctx.project.beatsPerBar(), ctx.project.tsDen(), false)
+                           + (free ? "" : "   (hold Shift to move freely)"));
+            return;
         }
-        else
-        {
-            ctx.engine.setPositionBeats (b);
-        }
+        ctx.engine.setPositionBeats (ctx.snap (owner.xToBeat ((float) e.x), ctx.pixelsPerBeat, free));
         owner.repaintAll();
     }
 
     void mouseUp (const juce::MouseEvent&) override
     {
         if (ignoreDrag) return;
-        if (cycleDrag && ! movedCycle)
+        // a click (no drag) on the region switches repeat on / off
+        if (cycleMode == cycleMove && ! movedCycle)
         {
             auto& tree = owner.ctx.project.tree();
             tree.setProperty (ids::cycleOn, ! (bool) tree[ids::cycleOn], nullptr);
             owner.repaintAll();
         }
+        cycleMode = cycleNone;
     }
 
     ArrangementView& owner;
-    double dragStartBeat = 0, grabOffset = -1, cycleLen = 0;
-    bool cycleDrag = false, movedCycle = false, ignoreDrag = false;
+    CycleMode cycleMode = cycleNone;
+    double cs0 = 0, ce0 = 0, downBeat = 0;
+    int hoverPart = 0;
+    bool movedCycle = false, ignoreDrag = false;
 };
 
 // =====================================================================================================
