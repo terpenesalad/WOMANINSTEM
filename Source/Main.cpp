@@ -4,6 +4,7 @@
 #include "UI/Scope/ScopeWindow.h"
 #include "UI/LookAndFeel.h"
 #include "UI/Studio/PluginEditors.h"
+#include "UI/Studio/PluginMenus.h"
 #include "Daw/Plugins/PluginHost.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 
@@ -94,6 +95,16 @@ public:
             ed.reset();
             p->releaseResources();
             std::cout << "  [ok]   " << info.name << " editor" << std::endl;
+        }
+        {
+            // the Studio's instrument menu offers the newer built-in instruments
+            daw::PluginHost host;
+            auto menu = daw::PluginMenu::instruments (host);
+            juce::StringArray names;
+            for (juce::PopupMenu::MenuItemIterator it (menu.menu, true); it.next();) names.add (it.getItem().text);
+            const bool ok = names.contains ("Piano Room (real pianos in rooms)") && names.contains ("Yodel Yeti (singing yeti)");
+            if (! ok) ++failures;
+            std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio instrument menu lists Piano Room and Yodel Yeti" << std::endl;
         }
         failures += runScopeSelfTest();
         failures += runPedalboardSelfTest();

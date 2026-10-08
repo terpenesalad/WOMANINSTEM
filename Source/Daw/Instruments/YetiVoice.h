@@ -18,7 +18,9 @@ public:
     void prepareToPlay (double sampleRate, int blockSize) override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     double getTailLengthSeconds() const override { return 4.0; }
-    juce::StringArray getProgramNames() override;
+    juce::StringArray getProgramNames() override { return presetNames(); }
+    /** Preset names without creating an instance (creating a piano starts loading its samples). */
+    static juce::StringArray presetNames();
     void loadProgram (int) override;
     juce::AudioProcessorEditor* createCustomEditor() override { return editorFactory ? editorFactory (*this) : nullptr; }
     static std::function<juce::AudioProcessorEditor* (YetiVoice&)> editorFactory;

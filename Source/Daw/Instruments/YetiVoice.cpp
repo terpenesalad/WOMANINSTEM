@@ -144,7 +144,7 @@ namespace
     }
 }
 
-juce::StringArray YetiVoice::getProgramNames()
+juce::StringArray YetiVoice::presetNames()
 {
     juce::StringArray n;
     for (auto& p : yetiPresets()) n.add (p.name);

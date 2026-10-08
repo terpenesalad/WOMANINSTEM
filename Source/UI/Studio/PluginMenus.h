@@ -3,6 +3,8 @@
 #include "StudioContext.h"
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/BeatLab.h"
+#include "Daw/Instruments/PianoRoom.h"
+#include "Daw/Instruments/YetiVoice.h"
 
 namespace wis::daw
 {
@@ -145,6 +147,8 @@ struct PluginMenu
         };
         static const juce::StringArray homeKeys { "Dream Pop Organ (Slow Rock)", "Bedroom Waltz", "Tropical Bossa", "Haunted Music Box", "Cassette Strings",
                                                   "Disco Brass", "Choir in the Attic", "Vibes Lounge" };
+        m.menu.addSubMenu ("Piano Room (real pianos in rooms)", presetMenu ("piano", PianoRoom::presetNames(), "Piano Room: "));
+        m.menu.addSubMenu ("Yodel Yeti (singing yeti)", presetMenu ("yeti", YetiVoice::presetNames(), "Yodel Yeti: "));
         m.menu.addSubMenu ("HomeKeys 20 (80s keyboard)", presetMenu ("homekeys", homeKeys, {}));
         static const juce::StringArray kitNames { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" };
         m.menu.addSubMenu ("Rhythm Box (vintage drums)", presetMenu ("rhythmbox", kitNames, "Rhythm Box: "));

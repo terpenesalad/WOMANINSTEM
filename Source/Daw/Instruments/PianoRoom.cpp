@@ -308,7 +308,7 @@ namespace
     }
 }
 
-juce::StringArray PianoRoom::getProgramNames()
+juce::StringArray PianoRoom::presetNames()
 {
     juce::StringArray n;
     for (auto& p : pianoPresets()) n.add (p.name);

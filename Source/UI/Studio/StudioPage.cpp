@@ -362,7 +362,9 @@ void StudioPage::addTrackMenu()
 {
     juce::PopupMenu m;
     m.addSectionHeader ("New track");
-    m.addItem (1, "Software Instrument  (piano, keys, strings, synth...)");
+    m.addItem (16, "Piano Room  (real grand, vintage grand and upright pianos, in a room you choose)");
+    m.addItem (17, "Yodel Yeti  (a singing yeti: vowel pad, choir, throat singing, delay)");
+    m.addItem (1, "Software Instrument  (Sound Library: keys, strings, synths...)");
     m.addItem (2, "Drummer  (drum kit + 8 bars of groove)");
     m.addItem (3, "Audio: Guitar or Bass  (with Amp & Pedals)");
     m.addItem (4, "Audio: Microphone / Vocals");
@@ -423,6 +425,8 @@ void StudioPage::addTrackMenu()
             case 9: t = project.addTrack (kindInstrument, "Sampler", insertAt); project.setInstrument (t, builtinRef ("sampler")); break;
             case 10: t = project.addTrack (kindInstrument, "Drum Pads", insertAt); project.setInstrument (t, builtinPresetRef ("drumpads", 0)); break;
             case 15: t = project.addTrack (kindInstrument, "Beat Lab", insertAt); project.setInstrument (t, builtinPresetRef ("beatlab", 0)); break;
+            case 16: t = project.addTrack (kindInstrument, "Piano Room", insertAt); project.setInstrument (t, builtinPresetRef ("piano", 0)); break;
+            case 17: t = project.addTrack (kindInstrument, "Yodel Yeti", insertAt); project.setInstrument (t, builtinPresetRef ("yeti", 0)); break;
             case 11:
                 t = project.addTrack (kindAudio, "Loop Station", insertAt);
                 project.setPlugin (t.inserts(), -1, builtinRef ("looper"));
@@ -443,7 +447,14 @@ void StudioPage::addTrackMenu()
             default: return;
         }
         ctx.selectTrack (t.id());
-        if (r == 15)
+        if (r == 16 || r == 17)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.instrument());
+            setStatus (r == 16 ? juce::String ("Piano Room ready: play your MIDI keyboard (or Ctrl+K for Musical Typing); pick a piano, a preset and a room in its window.")
+                               : juce::String ("Yodel Yeti ready: play your MIDI keyboard (or Ctrl+K for Musical Typing), or click and drag on his vowel pad to sing."));
+        }
+        else if (r == 15)
         {
             engine.rebuildNow();
             openPluginWindow (t.instrument());
@@ -716,7 +727,7 @@ void StudioPage::applyBrowserItem (const juce::String& item, int trackId, double
         if (t.clips().getNumChildren() == 0) t.v.setProperty (ids::name, trackName, project.um());
         ctx.selectTrack (t.id());
         engine.rebuildNow();
-        if (id == "sampler" || id == "drumpads" || id == "homekeys" || id == "beatlab") openPluginWindow (t.instrument());
+        if (id == "sampler" || id == "drumpads" || id == "homekeys" || id == "beatlab" || id == "piano" || id == "yeti") openPluginWindow (t.instrument());
         setStatus (id == "sampler" ? juce::String ("Sampler ready: drop an audio file onto it, then play it from your keyboard.")
                  : id == "homekeys" ? juce::String ("HomeKeys 20 ready: play along with its rhythm box (press play), or turn on Auto Accompaniment.")
                  : id == "beatlab" ? juce::String ("Beat Lab ready: press Play in it (or play the song), click steps, drop loops onto lanes.")

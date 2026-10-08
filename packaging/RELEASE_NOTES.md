@@ -1,4 +1,4 @@
-## WOMANINSTEM 3.4 for Windows (64-bit): Piano Room, Yodel Yeti, KEYS and artist-style rigs
+## WOMANINSTEM 3.4.1 for Windows (64-bit): Piano Room, Yodel Yeti, KEYS and artist-style rigs
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
@@ -6,6 +6,9 @@
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
 Songs and rig presets from 2.0 to 3.3 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### Fixed in 3.4.1
+- **Piano Room and Yodel Yeti are now in the Studio**: *+ Track → Piano Room* or *+ Track → Yodel Yeti* (their window opens straight away), the track menu's *Instrument* list, and the Library's *Sounds* tab. In Play Along they're under **KEYS** (Ctrl+K): pick the instrument, then *Edit the sound...*.
 
 ### New in 3.4
 
