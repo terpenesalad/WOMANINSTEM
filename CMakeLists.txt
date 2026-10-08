@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # ------------------------------------------------------------------------------
 #  WOMANINSTEM - stem separation + play-along amp rig
 # ------------------------------------------------------------------------------
-project(WOMANINSTEM VERSION 3.1.0 LANGUAGES C CXX)
+project(WOMANINSTEM VERSION 3.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -263,6 +263,8 @@ if(WIS_BUILD_APP)
         Source/UI/SeparationOverlay.cpp
         Source/UI/LibraryView.cpp
         Source/UI/AppShell.cpp
+        Source/UI/Scope/ScopeRenderer.cpp
+        Source/UI/Scope/ScopeWindow.cpp
         Source/UI/Studio/TrackHeader.cpp
         Source/UI/Studio/ArrangementView.cpp
         Source/UI/Studio/PianoRoll.cpp

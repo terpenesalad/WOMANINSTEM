@@ -152,6 +152,7 @@ DawEngine::DawEngine (Project& p, PluginHost& h) : project (p), host (h)
     cache.addChangeListener (this);
     master.setSize (2, maxBlock);
     clickBuf.setSize (1, maxBlock);
+    scopeTrack.setSize (2, maxBlock);
     liveMidi.ensureSize (4096);
     startTimerHz (30);
 }
@@ -229,6 +230,7 @@ void DawEngine::prepareAll()
     const juce::ScopedLock sl (processLock);
     master.setSize (2, maxBlock, false, true, false);
     clickBuf.setSize (1, maxBlock, false, true, false);
+    scopeTrack.setSize (2, maxBlock, false, true, false);
     for (auto& [id, slot] : slots)
         slot->prepare (sampleRate, maxBlock);
     for (auto& [id, rt] : runtimes)
@@ -1194,6 +1196,10 @@ void DawEngine::renderBlock (const float* const* in, int numIn, float* const* ou
 
     master.clear (0, n);
     clickBuf.clear (0, n);
+    auto* scopeFeed = offline.load() ? nullptr : scope.load();
+    const bool scopeWantsTrack = scopeFeed != nullptr && (scopeFeed->wants (ScopeFeed::studioTrack) || scopeFeed->wants (ScopeFeed::studioDuet))
+                                 && n <= scopeTrack.getNumSamples();
+    if (scopeWantsTrack) scopeTrack.clear (0, n);
 
     liveMidi.clear();
     if (! offline.load())
@@ -1256,6 +1262,18 @@ void DawEngine::renderBlock (const float* const* in, int numIn, float* const* ou
         done += len;
     }
     position = pos;
+
+    // oscilloscope: the master (before the master volume and the click) and / or the selected track
+    if (scopeFeed != nullptr)
+    {
+        if (scopeFeed->wants (ScopeFeed::studioMaster))
+            scopeFeed->push (master.getReadPointer (0), master.getReadPointer (1), n, sampleRate);
+        else if (scopeFeed->wants (ScopeFeed::studioTrack) && scopeWantsTrack)
+            scopeFeed->push (scopeTrack.getReadPointer (0), scopeTrack.getReadPointer (1), n, sampleRate);
+        else if (scopeFeed->wants (ScopeFeed::studioDuet) && scopeWantsTrack)
+            scopeFeed->pushPair (scopeTrack.getReadPointer (0), scopeTrack.getReadPointer (1),
+                                 master.getReadPointer (0), master.getReadPointer (1), n, sampleRate);
+    }
 
     // master volume, metronome, safety limiter, meters
     const bool raw = bounceMode.load();
@@ -1476,6 +1494,15 @@ void DawEngine::renderSegment (Snapshot& s, juce::int64 t0, int len, int off, bo
             }
             slot.slot->process (buf, len, emptyMidi, key);
         }
+
+        // oscilloscope: the selected track after its instrument and effects, before the fader
+        if (rt.id == selected && ! offline.load())
+            if (auto* sf = scope.load(); sf != nullptr && (sf->wants (ScopeFeed::studioTrack) || sf->wants (ScopeFeed::studioDuet))
+                                          && off + len <= scopeTrack.getNumSamples())
+            {
+                scopeTrack.copyFrom (0, off, buf, 0, 0, len);
+                scopeTrack.copyFrom (1, off, buf, 1, 0, len);
+            }
 
         const bool contributes = ! rt.mute.load() && (! s.anySolo || tr.soloed);
 

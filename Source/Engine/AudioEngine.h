@@ -4,6 +4,7 @@
 #include "Rig/RigProcessor.h"
 #include "StemPlayer.h"
 #include "Recorder.h"
+#include "ScopeFeed.h"
 
 namespace wis
 {
@@ -40,6 +41,9 @@ public:
     double getRoundTripLatencyMs() const { return latencyMs.load(); }
     juce::StringArray getActiveInputNames() const;
     juce::Array<int> getActiveInputChannels() const;
+
+    /** The oscilloscope window's tap (nullptr = none). */
+    std::atomic<ScopeFeed*> scope { nullptr };
 
     std::function<void (double newRate)> onSampleRateChanged;   // called on the audio thread start - message thread must rebuild song
 

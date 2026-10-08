@@ -341,6 +341,39 @@ int main (int argc, char** argv)
         auto quiet = renderRange (engine, project, 3.5, 6.0);
         check (quiet.getMagnitude (0, quiet.getNumSamples()) < 0.01f, "Volume automation applies");
         t.automation().removeAllChildren (nullptr);
+
+        // oscilloscope taps: the selected track (after its instrument, before the fader) and the master
+        {
+            wis::ScopeFeed feed;
+            engine.scope = &feed;
+            std::uint64_t cursor = feed.getWritePosition();
+            std::vector<float> sa, sb;
+            auto peakOf = [] (const std::vector<float>& v) { float p = 0; for (auto x : v) p = juce::jmax (p, std::abs (x)); return p; };
+
+            renderRange (engine, project, 3.5, 5.0);
+            check (feed.read (cursor, sa, sb, 1 << 15) == 0, "Scope off: nothing captured");
+
+            feed.tap = wis::ScopeFeed::studioMaster;
+            renderRange (engine, project, 3.5, 5.0);
+            feed.read (cursor, sa, sb, 1 << 15);
+            check (peakOf (sa) > 0.01f && peakOf (sb) > 0.01f, "Scope sees the master (" + juce::String (peakOf (sa), 3) + ")");
+
+            feed.tap = wis::ScopeFeed::studioDuet;
+            engine.selectedTrackId = t.id();
+            t.v.setProperty (ids::mute, true, nullptr);
+            renderRange (engine, project, 3.5, 5.0);
+            feed.read (cursor, sa, sb, 1 << 15);
+            check (peakOf (sa) > 0.01f && peakOf (sb) < 1.0e-5f,
+                   "Scope duet: the selected track on X even when muted (" + juce::String (peakOf (sa), 3) + "), silent master on Y");
+            t.v.setProperty (ids::mute, false, nullptr);
+
+            feed.tap = wis::ScopeFeed::studioTrack;
+            engine.selectedTrackId = 0;
+            renderRange (engine, project, 3.5, 5.0);
+            feed.read (cursor, sa, sb, 1 << 15);
+            check (peakOf (sa) < 1.0e-6f, "Scope track tap is silent when another track is selected");
+            engine.scope = nullptr;
+        }
         project.removeTrack (t);
     }
 

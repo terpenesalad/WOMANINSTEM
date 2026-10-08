@@ -53,11 +53,25 @@ Stems are cached in your **Library** (24-bit FLAC), so a song is only ever split
 
 **Practice tools**: mute/solo/volume/balance per stem · one-click *"I'm playing: Bass"* · drag to loop a section (then drag its edges to fine-tune it) · slow down to 50% without pitch change · transpose ±12 semitones · record yourself as **Mix + Rig + dry DI** WAV files (re-amp the DI later) · safety limiter on the output.
 
+## Scope
+
+A glowing oscilloscope beam drawn by the sound, like the psychedelic projections behind Tame Impala. Click **Scope** at the top (or `Ctrl+Shift+O`), pick what it watches (your instrument, the song, everything, or **you vs the song** on the two axes; in the Studio the master or the selected track), drag the window onto a projector or second screen and press **F** for full screen.
+
+<p align="center"><img src="docs/scope.png" width="720" alt="Scope"></p>
+
+- **Swirl**: a note draws a circle that grows the harder you play; chords and distortion turn it into flowers and knots. **XY**: classic Lissajous figures. **Wave**: the waveform, held still.
+- Colours *Tame (lime + aqua)*, *Phosphor*, *Aqua*, *Hot pink*, *Amber*, *Rainbow*; size, trail, glow, spin, tangle and brightness; *Mirror* for a kaleidoscope; *Auto size* keeps it filling the screen.
+- Full screen hides the controls and the pointer after a moment. Keys: `F` full screen, `Esc` back, `1` `2` `3` shapes, `C` colours, `M` mirror.
+
 ## The Studio
 
 A GarageBand / Logic-style recording studio, built in. Everything runs at low latency on the same audio interface and the same amp rig.
 
 ![Studio mixer](docs/studio-mixer.png)
+
+### New in 3.2
+
+- **Scope**: a projector-ready oscilloscope light show that reacts to your playing, a track or the whole mix (see [Scope](#scope)).
 
 ### New in 3.1
 
@@ -177,6 +191,7 @@ Mouse: double-click empty space on an instrument track for a new MIDI clip, doub
 | `L` | loop on/off (drag across the waveform to set it, double-click to clear) |
 | `R` | record |
 | `Ctrl+O` | open a song |
+| `Ctrl+Shift+O` | Scope (both modes) |
 
 ### How long does separation take?
 It runs on your CPU, so it depends on your computer. Measured on GitHub's 4-core cloud server, a **3-minute song took about 5 minutes**. A modern 8-core desktop with 16 GB of RAM should be roughly 2–3× faster. Each worker thread needs about 1.2 GB of RAM, so the app picks the thread count from your cores *and* your memory (8 GB machines use 2 workers). *Max quality* adds three fine-tuned models (vocals, drums, bass) and takes about 4× longer. Songs are only split once; after that they open instantly from the Library, and you can tune up and noodle on the rig while you wait.
@@ -219,7 +234,7 @@ Every push builds and tests on Windows and Linux via GitHub Actions. **To publis
 Source/
   Separation/   audio decoding, Demucs inference (multi-threaded), lead/backing vocal split, model download
   Library/      stem cache (FLAC + manifest), export
-  Engine/       real-time audio callback, stem player (loop, time-stretch), recorder
+  Engine/       real-time audio callback, stem player (loop, time-stretch), recorder, scope feed
   Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
   Daw/
     Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, MIDI files, tempo detection
@@ -227,6 +242,7 @@ Source/
     Plugins/    built-in effects, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
     Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads
   UI/           app shell, look & feel, waveform lanes, mixer, pedalboard, overlays
+    Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors
 Tools/          stemsplit (CLI), rigtest and dawtest (automated tests), tiny VST2 / CLAP test plugins
 packaging/      installer script, end-user readme, release notes

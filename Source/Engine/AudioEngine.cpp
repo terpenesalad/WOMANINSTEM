@@ -132,6 +132,25 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     // ---- rig ----
     rig.processMonoToStereo (in, rigL.data(), rigR.data(), n);
 
+    auto* scopeFeed = scope.load();
+    const double sr = sampleRate.load();
+    if (scopeFeed != nullptr && scopeFeed->wants (ScopeFeed::instrument))
+        scopeFeed->push (rigL.data(), rigR.data(), n, sr);
+
+    // ---- song ----
+    std::fill (mixL.begin(), mixL.begin() + n, 0.0f);
+    std::fill (mixR.begin(), mixR.begin() + n, 0.0f);
+    player.process (mixL.data(), mixR.data(), n);
+
+    if (scopeFeed != nullptr)
+    {
+        if (scopeFeed->wants (ScopeFeed::song))
+            scopeFeed->push (mixL.data(), mixR.data(), n, sr);
+        else if (scopeFeed->wants (ScopeFeed::duet))
+            scopeFeed->pushPair (rigL.data(), rigR.data(), mixL.data(), mixR.data(), n, sr);
+    }
+
+    // ---- monitor volume (after the scope taps: the scope reacts even with monitoring off) ----
     rigGain.setTargetValue (monitorOn.load() ? juce::Decibels::decibelsToGain (rigVolumeDb.load(), -60.0f) : 0.0f);
     for (int i = 0; i < n; ++i)
     {
@@ -139,11 +158,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         rigL[(size_t) i] *= g;
         rigR[(size_t) i] *= g;
     }
-
-    // ---- song ----
-    std::fill (mixL.begin(), mixL.begin() + n, 0.0f);
-    std::fill (mixR.begin(), mixR.begin() + n, 0.0f);
-    player.process (mixL.data(), mixR.data(), n);
 
     // ---- sum, master, limiter ----
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (masterVolumeDb.load(), -60.0f));
@@ -165,6 +179,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     if (hit) limiterHit = true;
     if (pkL > outPeakL.load()) outPeakL = pkL;
     if (pkR > outPeakR.load()) outPeakR = pkR;
+
+    if (scopeFeed != nullptr && scopeFeed->wants (ScopeFeed::everything))
+        scopeFeed->push (mixL.data(), mixR.data(), n, sr);
 
     recorder.write (mixL.data(), mixR.data(), rigL.data(), rigR.data(), in, n);
 

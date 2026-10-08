@@ -1,11 +1,21 @@
-## WOMANINSTEM 3.1 for Windows (64-bit): Beat Lab and Amps 2.0
+## WOMANINSTEM 3.2 for Windows (64-bit): the Scope
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 and 3.0 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0, 3.0 and 3.1 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.2
+
+**Scope: a light show drawn by your playing** (the **Scope** button at the top, or **Ctrl+Shift+O**)
+- A glowing oscilloscope beam, like the psychedelic projections behind bands such as Tame Impala, that moves with the sound in real time.
+- Watch **your instrument**, **the song**, **everything**, or **you vs the song** on the two axes (Play Along). In the Studio: the **master**, the **selected track** (even while you play it live), or **track vs master**.
+- Three shapes: **Swirl** (a note draws a circle that grows the harder you play; chords and distortion turn it into flowers, knots and scribbles), **XY** (classic Lissajous figures, left against right) and **Wave** (the waveform held still).
+- Six colour schemes: *Tame (lime + aqua)*, *Phosphor green*, *Aqua*, *Hot pink*, *Amber*, *Rainbow*. Knobs for size, trail (how long the beam glows), glow, spin, tangle and brightness; *Mirror* turns it into a kaleidoscope; *Auto size* keeps it filling the screen whether you play softly or hard.
+- It's a separate window: drag it onto a **projector or second screen** and press **F** (or double-click) for **full screen**. The controls and mouse pointer hide themselves after a moment; Esc comes back. Keys: 1 / 2 / 3 shapes, C colours, M mirror.
+- It reads the audio before your monitor volume, so it still reacts if you monitor directly through your interface.
 
 ### New in 3.1
 

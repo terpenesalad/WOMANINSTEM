@@ -2,6 +2,7 @@
 
 #include "MainComponent.h"
 #include "Studio/StudioPage.h"
+#include "Scope/ScopeWindow.h"
 
 namespace wis
 {
@@ -31,10 +32,14 @@ public:
     void requestQuit (std::function<void()> quit);
     void saveState();
 
+    /** Opens the oscilloscope window (or brings it to the front / closes it if it's already showing). */
+    void toggleScope();
+
 private:
     class ModeTab;
 
     juce::PropertiesFile& settings;
+    ScopeFeed scopeFeed;                       // before the engines: they write to it until they're gone
     MainComponent playAlong { settings };
     daw::Project project;
     daw::PluginHost host;
@@ -42,7 +47,8 @@ private:
     std::unique_ptr<daw::StudioPage> studio;
 
     std::unique_ptr<ModeTab> playTab, studioTab;
-    juce::TextButton audioButton { "Audio & MIDI" }, helpButton { "?" };
+    juce::TextButton audioButton { "Audio & MIDI" }, helpButton { "?" }, scopeButton { "Scope" };
+    std::unique_ptr<ScopeWindow> scopeWindow;
     int mode = 0;
 };
 

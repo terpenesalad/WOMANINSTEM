@@ -560,6 +560,52 @@ int main (int argc, char** argv)
         for (auto& f : files) allWritten = allWritten && juce::File (f).getSize() > 48000 * 3;
         check (allWritten, "Recorder wrote Mix, Rig and DI files");
         tmp.deleteRecursively();
+
+        // ---- oscilloscope taps ----
+        ScopeFeed feed;
+        engine.scope = &feed;
+        auto runBlocks = [&] (int blocks)
+        {
+            for (int b = 0; b < blocks; ++b)
+            {
+                const int pos = (b * 128) % (int) (bassIn.size() - 128);
+                std::copy (bassIn.begin() + pos, bassIn.begin() + pos + 128, in2.begin());
+                engine.audioDeviceIOCallbackWithContext (ins, 2, outs, 2, 128, {});
+            }
+        };
+        auto peakOf = [] (const std::vector<float>& v) { float p = 0; for (auto x : v) p = juce::jmax (p, std::abs (x)); return p; };
+        std::vector<float> sa, sb;
+        std::uint64_t cursor = feed.getWritePosition();
+
+        runBlocks (10);
+        check (feed.read (cursor, sa, sb, 1 << 15) == 0, "Scope off: nothing is captured");
+
+        feed.tap = ScopeFeed::duet;
+        engine.monitorOn = false;   // direct monitoring on the interface: the scope must still see the player
+        player.seekSeconds (0.0);
+        player.play();
+        runBlocks (40);
+        const int got = feed.read (cursor, sa, sb, 1 << 15);
+        check (got == 40 * 128 && peakOf (sa) > 0.01f && peakOf (sb) > 0.01f,
+               "Scope duet: you on X (" + juce::String (peakOf (sa), 3) + "), the song on Y (" + juce::String (peakOf (sb), 3) + ")");
+
+        feed.tap = ScopeFeed::instrument;
+        player.pause();
+        runBlocks (40);
+        feed.read (cursor, sa, sb, 1 << 15);
+        check (peakOf (sa) > 0.01f && peakOf (sb) > 0.01f, "Scope instrument tap works with monitoring off");
+        engine.monitorOn = true;
+
+        feed.tap = ScopeFeed::everything;
+        runBlocks (1000);   // more than the ring holds: the reader skips to the newest frames
+        const int kept = feed.read (cursor, sa, sb, 4096);
+        check (kept == 4096 && cursor == feed.getWritePosition(), "Scope reader keeps up after an overflow");
+
+        std::vector<float> nanIn (16, std::numeric_limits<float>::quiet_NaN());
+        feed.push (nanIn.data(), nanIn.data(), 16, 48000.0);
+        feed.read (cursor, sa, sb, 64);
+        check (std::all_of (sa.begin(), sa.end(), [] (float x) { return x == 0.0f; }), "Scope feed drops NaNs");
+        engine.scope = nullptr;
     }
 
     std::cout << (failures == 0 ? "ALL RIG TESTS PASSED" : juce::String (failures) + " FAILURE(S)") << std::endl;

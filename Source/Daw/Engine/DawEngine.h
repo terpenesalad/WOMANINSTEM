@@ -5,6 +5,7 @@
 #include "Daw/Model/Project.h"
 #include "Daw/Plugins/PluginHost.h"
 #include "AudioCache.h"
+#include "Engine/ScopeFeed.h"
 #include <bitset>
 
 namespace wis::daw
@@ -167,6 +168,8 @@ public:
     double getSampleRate() const     { return sampleRate; }
 
     std::atomic<int> selectedTrackId { 0 };
+    /** The oscilloscope window's tap (nullptr = none). */
+    std::atomic<ScopeFeed*> scope { nullptr };
     std::atomic<float> metronomeVolumeDb { -6.0f };
     juce::MidiKeyboardState keyboardState;
 
@@ -300,7 +303,7 @@ private:
     int clickRemaining = 0;
 
     // buffers
-    juce::AudioBuffer<float> master, clickBuf;
+    juce::AudioBuffer<float> master, clickBuf, scopeTrack;
     juce::MidiBuffer liveMidi;
     juce::MidiMessageCollector midiCollector;
 

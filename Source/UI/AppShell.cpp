@@ -61,6 +61,13 @@ AppShell::AppShell (juce::PropertiesFile& s) : settings (s)
     addAndMakeVisible (audioButton);
     addAndMakeVisible (helpButton);
 
+    playAlong.getEngine().scope = &scopeFeed;
+    dawEngine.scope = &scopeFeed;
+    scopeButton.setTooltip ("Oscilloscope: a glowing picture drawn by your instrument, the song or the whole mix. "
+                            "Put it on a projector or second screen and go full screen (Ctrl+Shift+O)");
+    scopeButton.onClick = [this] { toggleScope(); };
+    addAndMakeVisible (scopeButton);
+
     playAlong.onOpenInStudio = [this] (const SongInfo& info, const std::array<bool, numStemIds>& muted, const juce::ValueTree& rig, const juce::String& part)
     {
         setMode (1);
@@ -73,6 +80,9 @@ AppShell::AppShell (juce::PropertiesFile& s) : settings (s)
 
 AppShell::~AppShell()
 {
+    scopeWindow.reset();
+    playAlong.getEngine().scope = nullptr;
+    dawEngine.scope = nullptr;
     dawEngine.detach();
     studio.reset();
 }
@@ -103,7 +113,21 @@ void AppShell::setMode (int m)
         playAlong.grabKeyboardFocus();
     }
     settings.setValue ("appMode", m);
+    if (scopeWindow != nullptr) scopeWindow->setAppMode (m);
     repaint();
+}
+
+void AppShell::toggleScope()
+{
+    if (scopeWindow == nullptr)
+    {
+        scopeWindow = std::make_unique<ScopeWindow> (scopeFeed, settings);
+        scopeWindow->setAppMode (mode);
+    }
+    if (scopeWindow->isVisible() && scopeWindow->isActiveWindow())
+        scopeWindow->closeButtonPressed();
+    else
+        scopeWindow->show();
 }
 
 void AppShell::openFile (const juce::File& f)
@@ -135,6 +159,7 @@ void AppShell::saveState()
 {
     playAlong.saveState();
     studio->saveSettings();
+    if (scopeWindow != nullptr) scopeWindow->saveBounds();
     settings.setValue ("appMode", mode);
     settings.saveIfNeeded();
 }
@@ -143,6 +168,7 @@ bool AppShell::keyPressed (const juce::KeyPress& k)
 {
     if (k == juce::KeyPress ('1', juce::ModifierKeys::commandModifier, 0)) { setMode (0); return true; }
     if (k == juce::KeyPress ('2', juce::ModifierKeys::commandModifier, 0)) { setMode (1); return true; }
+    if (k == juce::KeyPress ('o', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)) { toggleScope(); return true; }
     return false;
 }
 
@@ -164,7 +190,7 @@ void AppShell::paint (juce::Graphics& g)
     g.setColour (theme::textFaint);
     g.setFont (uiFont (11.5f));
     const auto tag = mode == 0 ? juce::String ("split it. mute it. play it.") : juce::String ("write it. record it. mix it.");
-    g.drawText (tag, getLocalBounds().removeFromTop (modeBarHeight).withTrimmedLeft (getWidth() / 2 + 150).withTrimmedRight (200), juce::Justification::centredLeft);
+    g.drawText (tag, getLocalBounds().removeFromTop (modeBarHeight).withTrimmedLeft (getWidth() / 2 + 150).withTrimmedRight (290), juce::Justification::centredLeft);
 }
 
 void AppShell::resized()
@@ -182,6 +208,8 @@ void AppShell::resized()
     helpButton.setBounds (right.removeFromRight (32));
     right.removeFromRight (8);
     audioButton.setBounds (right.removeFromRight (124));
+    right.removeFromRight (8);
+    scopeButton.setBounds (right.removeFromRight (78));
 
     playAlong.setBounds (r);
     studio->setBounds (r);
