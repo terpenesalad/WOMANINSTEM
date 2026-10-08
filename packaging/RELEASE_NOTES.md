@@ -1,11 +1,19 @@
-## WOMANINSTEM 3.2 for Windows (64-bit): the Scope
+## WOMANINSTEM 3.3 for Windows (64-bit): the Pedalboard
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0, 3.0 and 3.1 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0, 3.0, 3.1 and 3.2 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.3
+
+**Pedalboard: build your own chain** (the row of pedals at the top of *YOUR RIG*, and in the Studio's *Amp & Pedals*)
+- Your whole signal chain is shown left to right: gate, compressor, drive, **amp + cab**, EQ, tape, chorus, delay, reverb. **Drag any of them to re-order**: put the delay before the drive for distorted echoes, the reverb before the amp for a surf drip, the compressor after the drive... Pedals left of the amp go into its input; pedals to the right sit in its effects loop.
+- **+ Add pedal** puts up to 16 extra pedals on the board, as many of each as you like. New stomp boxes: **Drive Pedal** (overdrive, distortion, fuzz, bass drive), **Boost** (clean, treble booster, mid push), **Wah** (rock it with the Pedal knob, let your picking move it like an envelope filter, or sweep it with an LFO; guitar and bass ranges), **Octaver** (one and two octaves down, one up) and **Volume Swell**. Plus every Studio effect: phaser, flanger, chorus, tremolo, ring modulator, auto filter, pitch shifter, shimmer reverb, tape warble, bitcrusher, grain cloud, loop station, saturator, compressor, EQ and more.
+- Click a pedal to open its knobs and presets, click its light to switch it on or off, right-click to remove, duplicate or move it.
+- The pedalboard is saved in your rig presets and with each song. Presets from before 3.3 load with the standard order.
 
 ### New in 3.2
 

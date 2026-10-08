@@ -5,6 +5,7 @@
 #include "MidiEffects.h"
 #include "VocalTune.h"
 #include "Looper.h"
+#include "GuitarPedals.h"
 #include "Daw/Instruments/HomeKeys.h"
 #include "Daw/Instruments/RhythmBox.h"
 #include "Daw/Instruments/Sampler.h"
@@ -67,6 +68,11 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         add ("grains", "Grain Cloud", "Experimental", "Granular clouds: sprays of tiny pitched, reversed, frozen fragments", false, make<GrainCloud>());
         add ("beatrepeat", "Beat Repeat", "Experimental", "Synced stutters, rolls and glitch fills", false, make<BeatRepeat>());
         add ("looper", "Loop Station", "Experimental", "Looper pedal: record, overdub layers, undo, half-speed, reverse, and drop the loop on the track", false, make<Looper>());
+        add ("stompdrive", "Drive Pedal", "Pedals", "Overdrive, distortion, fuzz or bass drive stomp box (the rig's drive circuits, as many as you like, anywhere in the chain)", false, make<DriveStomp>());
+        add ("boost", "Boost", "Pedals", "Clean, treble or mid boost to push an amp or lift a solo", false, make<BoostStomp>());
+        add ("wah", "Wah", "Pedals", "Wah pedal: rock it with the Pedal knob, let your playing move it (auto / envelope filter) or sweep it with an LFO; guitar and bass ranges", false, make<WahStomp>());
+        add ("octaver", "Octaver", "Pedals", "Adds a note one or two octaves below (and one above) what you play: fat bass lines, organ guitar", false, make<OctaverStomp>());
+        add ("swell", "Volume Swell", "Pedals", "Fades every new note in, like a violin bow or rolling up the volume knob", false, make<SwellStomp>());
         add ("amprig", "Amp & Pedals", "Amps", "The full play-along rig: gate, comp, drive, amps, NAM captures, cabs, IRs, effects", false, make<AmpRigFx>());
 
         add ("testlatency", "Latency Test", "Hidden", "Used by the automated tests", false, make<LatencyTestFx>());

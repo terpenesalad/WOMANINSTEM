@@ -440,7 +440,7 @@ public:
     explicit AmpRigEditor (AmpRigFx& p) : AudioProcessorEditor (p), panel (p.rig, nullptr)
     {
         addAndMakeVisible (panel);
-        setSize (1240, 340);
+        setSize (1240, 382);
         setResizable (true, false);
     }
     void resized() override { panel.setBounds (getLocalBounds()); }

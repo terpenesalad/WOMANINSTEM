@@ -9,6 +9,7 @@
 #include "Separation/VocalSplitter.h"
 #include "Engine/StemPlayer.h"
 #include "Engine/AudioEngine.h"
+#include "Daw/Plugins/BuiltinProcessor.h"
 #include "Engine/Recorder.h"
 #include <iostream>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -475,6 +476,156 @@ int main (int argc, char** argv)
         std::cout << "  7 stems + stretch: " << juce::String (100.0 * ms / 2000.0, 2) << "% CPU of one core" << std::endl;
         player.setSpeed (1.0f);
         player.setTransposeSemitones (0.0f);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    std::cout << "Pedalboard:" << std::endl;
+    {
+        const double psr = 48000.0;
+        const int pn = (int) (psr * 1.5), pblock = 256;
+        auto renderRig = [&] (RigProcessor& r, const std::vector<float>& in, std::vector<float>& L, std::vector<float>& R)
+        {
+            L.assign ((size_t) pn, 0.0f); R.assign ((size_t) pn, 0.0f);
+            for (int pos = 0; pos < pn; pos += pblock)
+                r.processMonoToStereo (in.data() + pos, L.data() + pos, R.data() + pos, juce::jmin (pblock, pn - pos));
+        };
+        auto keysOf = [] (RigProcessor& r) { juce::StringArray k; for (auto& it : r.getBoard()) k.add (it.isPedal ? it.builtinId : it.key); return k.joinIntoString (" "); };
+        const auto guitar = bassLine (psr, pn, true);
+
+        {
+            RigProcessor r;
+            check (keysOf (r) == "gate comp drive ampcab eq tape chorus delay reverb", "Standard order: " + keysOf (r));
+            const auto ids = RigProcessor::pedalIds();
+            check (ids.contains ("wah") && ids.contains ("octaver") && ids.contains ("stompdrive") && ids.contains ("phaser")
+                   && ! ids.contains ("amprig") && ! ids.contains ("synth") && ! ids.contains ("arp"),
+                   juce::String (ids.size()) + " pedals to choose from (no instruments, MIDI effects or the rig itself)");
+        }
+
+        // every pedal, in front of the amp, on a clean guitar preset
+        {
+            juce::StringArray bad;
+            const auto ids = RigProcessor::pedalIds();
+            for (auto& id : ids)
+            {
+                RigProcessor r;
+                r.loadFactoryPreset (1);
+                r.prepareToPlay (psr, pblock);
+                const auto uid = r.addPedal (id);
+                std::vector<float> L, R;
+                renderRig (r, guitar, L, R);
+                const float lvl = rmsDb (L.data(), pn);
+                if (uid.isEmpty() || ! allFinite (L.data(), pn) || ! allFinite (R.data(), pn) || lvl < -60.0f || lvl > 6.0f)
+                    bad.add (id + " (" + juce::String (lvl, 1) + " dB)");
+            }
+            check (bad.isEmpty(), juce::String (ids.size() - bad.size()) + " pedals play with sane output" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+        }
+
+        // re-ordering changes the sound; bypass = not there
+        {
+            RigProcessor a, b;
+            for (auto* r : { &a, &b }) { r->loadFactoryPreset (5); r->prepareToPlay (psr, pblock); }   // high gain
+            a.setParam (pid::delayOn, 1); b.setParam (pid::delayOn, 1);
+            // b: delay moved in front of the drive (echoes get distorted)
+            auto board = b.getBoard();
+            int delayAt = -1;
+            for (int i = 0; i < (int) board.size(); ++i) if (board[(size_t) i].key == "delay") delayAt = i;
+            b.moveBoardItem (delayAt, 0);
+            check (keysOf (b).startsWith ("delay gate"), "Move the delay to the front: " + keysOf (b));
+            std::vector<float> aL, aR, bL, bR;
+            renderRig (a, guitar, aL, aR);
+            renderRig (b, guitar, bL, bR);
+            double diff = 0;
+            for (int i = 0; i < pn; ++i) diff += std::abs (aL[(size_t) i] - bL[(size_t) i]);
+            check (diff / pn > 1.0e-3 && allFinite (bL.data(), pn), "Delay before the amp sounds different from the effects loop (" + juce::String (diff / pn, 5) + ")");
+
+            RigProcessor c, d;
+            for (auto* r : { &c, &d }) { r->loadFactoryPreset (1); r->prepareToPlay (psr, pblock); }
+            const auto wah = c.addPedal ("wah");
+            c.setBoardItemOn (wah, false);
+            std::vector<float> cL, cR, dL, dR;
+            renderRig (c, guitar, cL, cR);
+            renderRig (d, guitar, dL, dR);
+            double bypassDiff = 0;
+            for (int i = 0; i < pn; ++i) bypassDiff += std::abs (cL[(size_t) i] - dL[(size_t) i]);
+            check (bypassDiff < 1.0e-6, "A switched-off pedal is completely out of the signal");
+            c.removePedal (wah);
+            check (keysOf (c) == keysOf (d), "Remove a pedal");
+        }
+
+        // presets keep the board: order, pedals, their knobs and on / off
+        {
+            RigProcessor r;
+            r.loadFactoryPreset (0);
+            const auto oct = r.addPedal ("octaver", 0);
+            r.addPedal ("phaser");
+            r.moveBoardItem (10, 8);   // reverb before the delay
+            if (auto* p = dynamic_cast<daw::BuiltinProcessor*> (r.getPedalProcessor (oct))) p->setParam ("sub2", 0.42f);
+            r.setBoardItemOn (oct, false);
+            const auto saved = r.createPresetState();
+            RigProcessor r2;
+            r2.restorePresetState (saved);
+            check (keysOf (r2) == keysOf (r), "Preset round trip keeps the order: " + keysOf (r2));
+            auto b2 = r2.getBoard();
+            auto* p2 = b2.empty() ? nullptr : dynamic_cast<daw::BuiltinProcessor*> (r2.getPedalProcessor (b2[0].key));
+            check (p2 != nullptr && std::abs (p2->param ("sub2") - 0.42f) < 1.0e-3f && ! b2[0].on, "...and each pedal's knobs and on / off");
+
+            auto old = saved.createCopy();
+            old.removeChild (old.getChildWithName ("PEDALBOARD"), nullptr);
+            r2.restorePresetState (old);
+            check (keysOf (r2) == "gate comp drive ampcab eq tape chorus delay reverb", "Presets from before 3.3 load with the standard order");
+            r.loadFactoryPreset (3);
+            check (keysOf (r) == "gate comp drive ampcab eq tape chorus delay reverb", "Factory presets reset the board");
+        }
+
+        // the new stomp boxes do what they say
+        {
+            auto sine = [&] (float hz, float amp) { std::vector<float> v ((size_t) pn); for (int i = 0; i < pn; ++i) v[(size_t) i] = amp * std::sin (juce::MathConstants<float>::twoPi * hz * (float) i / (float) psr); return v; };
+            auto runFx = [&] (daw::BuiltinProcessor& fx, const std::vector<float>& in) {
+                fx.setPlayConfigDetails (2, 2, psr, pblock);
+                fx.prepareToPlay (psr, pblock);
+                juce::AudioBuffer<float> buf (2, pn);
+                for (int c = 0; c < 2; ++c) buf.copyFrom (c, 0, in.data(), pn);
+                juce::MidiBuffer midi;
+                for (int pos = 0; pos < pn; pos += pblock)
+                {
+                    juce::AudioBuffer<float> view (buf.getArrayOfWritePointers(), 2, pos, juce::jmin (pblock, pn - pos));
+                    fx.processBlock (view, midi);
+                }
+                return std::vector<float> (buf.getReadPointer (0), buf.getReadPointer (0) + pn);
+            };
+            auto energyAt = [&] (const std::vector<float>& v, float hz) {
+                double re = 0, im = 0;
+                for (int i = pn / 2; i < pn; ++i) { const double ph = juce::MathConstants<double>::twoPi * hz * i / psr; re += v[(size_t) i] * std::cos (ph); im += v[(size_t) i] * std::sin (ph); }
+                return std::sqrt (re * re + im * im) / (pn / 2);
+            };
+
+            auto oct = daw::createBuiltin ("octaver");
+            oct->setParam ("dry", 0.0f); oct->setParam ("sub1", 1.0f);
+            const auto o = runFx (*oct, sine (110.0f, 0.3f));
+            check (allFinite (o.data(), pn) && energyAt (o, 55.0f) > 0.03 && energyAt (o, 55.0f) > 3.0 * energyAt (o, 110.0f),
+                   "Octaver plays an octave down (55 Hz: " + juce::String (energyAt (o, 55.0f), 3) + ", 110 Hz: " + juce::String (energyAt (o, 110.0f), 3) + ")");
+
+            auto wahFx = daw::createBuiltin ("wah");
+            wahFx->setParam ("position", 0.0f);
+            const auto heel = runFx (*wahFx, guitar);
+            wahFx->setParam ("position", 1.0f);
+            const auto toe = runFx (*wahFx, guitar);
+            check (centroidHz (toe.data(), pn, psr) > centroidHz (heel.data(), pn, psr) * 1.5f,
+                   "Wah: toe down is brighter than heel down (" + juce::String ((int) centroidHz (heel.data(), pn, psr)) + " -> " + juce::String ((int) centroidHz (toe.data(), pn, psr)) + " Hz)");
+
+            auto boost = daw::createBuiltin ("boost");
+            const auto quiet = sine (440.0f, 0.05f);
+            const auto boosted = runFx (*boost, quiet);
+            check (rmsDb (boosted.data(), pn) > rmsDb (quiet.data(), pn) + 6.0f, "Boost boosts (" + juce::String (rmsDb (boosted.data(), pn) - rmsDb (quiet.data(), pn), 1) + " dB)");
+
+            auto swell = daw::createBuiltin ("swell");
+            auto note = sine (220.0f, 0.3f);
+            for (int i = 0; i < (int) (psr * 0.2); ++i) note[(size_t) i] = 0.0f;   // silence, then a note
+            const auto sw = runFx (*swell, note);
+            const int at = (int) (psr * 0.2);
+            check (rmsDb (sw.data() + at, (int) (psr * 0.05)) < rmsDb (sw.data() + at + (int) (psr * 0.8), (int) (psr * 0.05)) - 12.0f,
+                   "Volume Swell fades the note in");
+        }
     }
 
 

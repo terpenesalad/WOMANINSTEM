@@ -96,8 +96,56 @@ public:
             std::cout << "  [ok]   " << info.name << " editor" << std::endl;
         }
         failures += runScopeSelfTest();
+        failures += runPedalboardSelfTest();
         std::cout << (failures == 0 ? "UI SELF-TEST PASSED" : "UI SELF-TEST FAILED") << std::endl;
         return failures == 0 ? 0 : 1;
+    }
+
+    /** The rig panel with an edited pedalboard lays out and paints (WIS_UI_SNAPSHOTS saves rig-pedalboard.png). */
+    static int runPedalboardSelfTest()
+    {
+        RigProcessor rig;
+        rig.loadFactoryPreset (8);   // dream pop: chorus, delay, tape, reverb on
+        rig.prepareToPlay (48000.0, 512);
+        const auto wah = rig.addPedal ("wah", 0);
+        rig.addPedal ("octaver", 1);
+        rig.addPedal ("stompdrive");
+        const auto phaser = rig.addPedal ("phaser");
+        rig.moveBoardItem ((int) rig.getBoard().size() - 1, 8);   // reverb into the middle of the effects loop
+        rig.setBoardItemOn (wah, false);
+        int failures = rig.getBoard().size() == 13 ? 0 : 1;
+        {
+            RigPanel panel (rig, nullptr);
+            for (auto size : { juce::Point<int> (1440, 378), { 1180, 378 }, { 1920, 420 } })
+            {
+                panel.setSize (size.x, size.y);
+                juce::Image img (juce::Image::ARGB, size.x, size.y, true);
+                juce::Graphics g (img);
+                panel.paintEntireComponent (g, true);
+                const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {});
+                if (snapDir.isNotEmpty() && size.x == 1440)
+                {
+                    juce::FileOutputStream out (juce::File (snapDir).getChildFile ("rig-pedalboard.png"));
+                    if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (img, out); }
+                }
+            }
+            // a pedal's own editor opens and paints
+            if (auto* p = rig.getPedalProcessor (phaser))
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> ed (p->createEditor());
+                if (ed == nullptr) ++failures;
+                else
+                {
+                    juce::Image img (juce::Image::ARGB, juce::jmax (1, ed->getWidth()), juce::jmax (1, ed->getHeight()), true);
+                    juce::Graphics g (img);
+                    ed->paintEntireComponent (g, true);
+                    p->editorBeingDeleted (ed.get());
+                }
+            }
+            rig.removePedal (phaser);
+        }
+        std::cout << (failures == 0 ? "  [ok]   " : "  [FAIL] ") << "Pedalboard: 13 blocks, panel lays out and paints, pedal editor opens" << std::endl;
+        return failures;
     }
 
     /** The oscilloscope: every shape and colour draws a sane picture from a test signal, and the window lays out

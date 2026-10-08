@@ -678,6 +678,7 @@ void AmpRigFx::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     auto* l = buffer.getWritePointer (0);
     auto* r = buffer.getWritePointer (1);
     for (int i = 0; i < n; ++i) mono[(size_t) i] = 0.5f * (l[i] + r[i]);
+    rig.setPlayHead (getPlayHead());   // tempo-synced pedals on the board follow the song
     rig.processMonoToStereo (mono.data(), l, r, n);
 }
 

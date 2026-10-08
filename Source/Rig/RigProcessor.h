@@ -75,6 +75,29 @@ namespace pid
     inline constexpr const char* tapeDrive   = "tape_drive";
 }
 
+/** The reorderable blocks of the rig's pedalboard (the rig's own effects; added pedals sit between them). */
+enum class RigBlock : int { gate = 0, comp, drive, ampCab, eq, tape, chorus, delay, reverb, count };
+const char* rigBlockKey (RigBlock);              // stable key saved in presets ("gate", "ampcab" ...)
+juce::String rigBlockName (RigBlock);            // shown on the pedalboard
+const char* rigBlockPowerParam (RigBlock);       // its on / off parameter (ampCab: the amp's)
+
+/** A pedal added to the board: one of the built-in effects, with its own knobs. */
+struct RigPedal : public juce::ReferenceCountedObject
+{
+    using Ptr = juce::ReferenceCountedObjectPtr<RigPedal>;
+    juce::String uid, builtinId, name;
+    std::unique_ptr<juce::AudioProcessor> proc;
+    std::atomic<bool> bypass { false };
+};
+
+/** The order of the board: an immutable list, swapped into the audio thread when it changes. */
+struct RigChain : public juce::ReferenceCountedObject
+{
+    using Ptr = juce::ReferenceCountedObjectPtr<RigChain>;
+    struct Entry { int block = -1; RigPedal::Ptr pedal; };   // block >= 0: one of RigBlock, else a pedal
+    std::vector<Entry> entries;
+};
+
 /** The play-along rig: mono instrument/mic in -> stereo out.
     Strings & Pickups -> Gate -> Compressor -> Drive -> Amp (built-in or NAM) -> Cab (built-in or IR, + DI blend) -> EQ
     -> Console & Tape -> Chorus -> Delay -> Reverb.
@@ -138,7 +161,44 @@ public:
 
     void setParam (const juce::String& id, float value);
 
+    // ---- pedalboard (message thread) ----
+    /** One block on the board, in signal order. key = a RigBlock key, or the pedal's uid. */
+    struct BoardItem { juce::String key, name, builtinId; bool isPedal = false; bool on = false; int block = -1; };
+    std::vector<BoardItem> getBoard() const;
+    /** Moves the item at index `from` so it ends up at index `to` (indices into getBoard()). */
+    void moveBoardItem (int from, int to);
+    /** Adds one of the built-in effects as a pedal (at `insertAt`, or just before the amp when -1). Returns its uid, or empty. */
+    juce::String addPedal (const juce::String& builtinId, int insertAt = -1, const juce::String& stateBase64 = {});
+    void removePedal (const juce::String& uid);
+    juce::AudioProcessor* getPedalProcessor (const juce::String& uid) const;
+    void setBoardItemOn (const juce::String& key, bool on);
+    bool isBoardItemOn (const juce::String& key) const;
+    /** Back to the standard order with no added pedals. */
+    void resetBoard();
+    /** Built-in effect ids that can be added as pedals. */
+    static juce::StringArray pedalIds();
+    static constexpr int maxPedals = 16;
+    /** Sends a change message whenever the board's layout changes (add / remove / reorder / preset). */
+    juce::ChangeBroadcaster boardChanged;
+
+    /** Told synchronously, on the message thread, just before a pedal leaves the board (close its editor now). */
+    struct BoardListener
+    {
+        virtual ~BoardListener() = default;
+        virtual void pedalRemoved (const juce::String& uid) = 0;
+    };
+    void addBoardListener (BoardListener* l)    { boardListeners.add (l); }
+    void removeBoardListener (BoardListener* l) { boardListeners.remove (l); }
+
 private:
+    void publishChain (std::vector<RigChain::Entry> entries);
+    std::vector<RigChain::Entry> copyEntries() const;
+    void preparePedal (juce::AudioProcessor& p);
+    juce::ValueTree saveBoard() const;
+    void loadBoard (const juce::ValueTree& board);
+    /** Gate / compressor / EQ / tape on one (mono) or two (stereo) channels. */
+    void processCoreBlock (RigBlock b, float* const* chans, int numChannels, int n);
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     float p (const char* id) const { return params.at (id)->load(); }   // keyed by pointer: no allocation
 
@@ -149,17 +209,24 @@ private:
     int maxBlock = 512;
     juce::String presetName;
 
+    mutable juce::SpinLock chainLock;
+    RigChain::Ptr chain, audioChain;               // chain: latest (message thread); audioChain: what the audio thread runs
+    juce::ReferenceCountedArray<RigChain> chainGraveyard;
+    juce::MidiBuffer pedalMidi;
+    juce::ListenerList<BoardListener> boardListeners;
+    int pedalCounter = 0;
+
     InstrumentCharacter character;
-    ConsoleTape tape;
+    ConsoleTape tape, tapeR;
     std::vector<float> diCopy, diLine;
     int diWrite = 0;
-    NoiseGate gate;
+    NoiseGate gate, gateR;
     juce::dsp::Compressor<float> compressor;
     DrivePedal drive;
     BuiltInAmp amp;
     NamAmp nam;
     CabSim cab;
-    std::array<juce::dsp::IIR::Filter<float>, 4> eq;
+    std::array<juce::dsp::IIR::Filter<float>, 4> eq, eqR;
     std::array<float, 4> eqCache { 99, 99, 99, 99 };
     juce::dsp::Chorus<float> chorus;
     StereoDelay delay;

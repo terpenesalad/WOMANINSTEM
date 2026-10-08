@@ -1,4 +1,5 @@
 #include "RigPanel.h"
+#include "Studio/PluginEditors.h"
 
 namespace wis
 {
@@ -93,6 +94,12 @@ void EffectModule::paint (juce::Graphics& g)
     // top accent strip
     g.setColour (on ? accent : theme::ledOff);
     g.fillRoundedRectangle (r.withHeight (3.0f).reduced (10.0f, 0.0f), 1.5f);
+
+    if (flash > 0.0f)
+    {
+        g.setColour (accent.withAlpha (flash));
+        g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 2.5f);
+    }
 
     g.setColour (on ? theme::text : theme::textDim);
     g.setFont (uiFont (12.5f, true));
@@ -296,12 +303,21 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     refreshPresetList();
     refreshInputs();
     updateFileLabels();
+
+    // ---- pedalboard ----
+    board.onOpenPedal = [this] (const juce::String& uid) { openPedal (uid); };
+    board.onShowBlock = [this] (const juce::String& key) { showBlock (key); };
+    addAndMakeVisible (board);
+    rig.addBoardListener (this);
+
     startTimerHz (30);
 }
 
 RigPanel::~RigPanel()
 {
     stopTimer();
+    rig.removeBoardListener (this);
+    pedalWindows.clear();
 }
 
 void RigPanel::refreshInputs()
@@ -503,9 +519,56 @@ void RigPanel::timerCallback()
     if ((++tick & 1) == 0)
         tunerView.setReading (rig.getTuner().analyse());
 
+    for (auto* m : { gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(), eqM.get(), tapeM.get(), chorusM.get(), delayM.get(), reverbM.get() })
+        if (m->flash > 0.0f) { m->flash = juce::jmax (0.0f, m->flash - 0.035f); m->repaint(); }
+
     // keep module highlight in sync with power switches
     for (auto* m : { gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(), eqM.get(), tapeM.get(), chorusM.get(), delayM.get(), reverbM.get() })
         m->repaint (0, 0, m->getWidth(), 30);
+}
+
+void RigPanel::openPedal (const juce::String& uid)
+{
+    if (auto it = pedalWindows.find (uid); it != pedalWindows.end())
+    {
+        it->second->setVisible (true);
+        it->second->toFront (true);
+        return;
+    }
+    auto* proc = rig.getPedalProcessor (uid);
+    if (proc == nullptr) return;
+    juce::String name = proc->getName();
+    for (auto& item : rig.getBoard())
+        if (item.key == uid) name = item.name;
+    juce::Component::SafePointer<RigPanel> safe (this);
+    auto win = std::make_unique<daw::PluginWindow> ("Pedal: " + name, *proc, [safe, uid]
+    {
+        // closed with its X: delete it after this callback has returned
+        juce::MessageManager::callAsync ([safe, uid] { if (safe != nullptr) safe->pedalWindows.erase (uid); });
+        if (safe != nullptr)
+            if (auto it = safe->pedalWindows.find (uid); it != safe->pedalWindows.end()) it->second->setVisible (false);
+    });
+    pedalWindows[uid] = std::move (win);
+}
+
+void RigPanel::pedalRemoved (const juce::String& uid)
+{
+    pedalWindows.erase (uid);   // the editor goes before its pedal does
+}
+
+void RigPanel::showBlock (const juce::String& key)
+{
+    EffectModule* m = nullptr;
+    if (key == "gate") m = gateM.get();
+    else if (key == "comp") m = compM.get();
+    else if (key == "drive") m = driveM.get();
+    else if (key == "ampcab") { m = ampM.get(); cabM->flash = 1.0f; cabM->repaint(); }
+    else if (key == "eq") m = eqM.get();
+    else if (key == "tape") m = tapeM.get();
+    else if (key == "chorus") m = chorusM.get();
+    else if (key == "delay") m = delayM.get();
+    else if (key == "reverb") m = reverbM.get();
+    if (m != nullptr) { m->flash = 1.0f; m->repaint(); }
 }
 
 void RigPanel::paint (juce::Graphics& g)
@@ -524,6 +587,8 @@ void RigPanel::resized()
     savePreset.setBounds (header.removeFromRight (70).reduced (0, 3));
     header.removeFromRight (6);
     presetBox.setBounds (header.removeFromRight (280).reduced (0, 3));
+    r.removeFromTop (2);
+    board.setBounds (r.removeFromTop (36));
     r.removeFromTop (4);
 
     const int rowH = (r.getHeight() - 4) / 2;

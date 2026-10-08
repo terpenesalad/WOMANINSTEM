@@ -116,7 +116,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> libraryWindow;
     juce::File lastFolder;
-    int rigHeight = 336;
+    int rigHeight = 378;
     double pendingRate = 0.0;
     bool embedded = false, active = true;
 

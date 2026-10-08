@@ -5,6 +5,7 @@
 #include "Engine/AudioEngine.h"
 #include "LookAndFeel.h"
 #include "TunerView.h"
+#include "PedalboardStrip.h"
 
 namespace wis
 {
@@ -38,6 +39,7 @@ public:
     void resized() override;
 
     juce::Colour accent;
+    float flash = 0.0f;   // 0..1: highlight ring when picked on the pedalboard (fades out)
 
 private:
     juce::AudioProcessorValueTreeState& state;
@@ -71,7 +73,7 @@ private:
 };
 
 /** The whole play-along rig: input & tuner, pedals, amp, cab, studio effects, presets. */
-class RigPanel : public juce::Component, private juce::Timer
+class RigPanel : public juce::Component, private juce::Timer, private RigProcessor::BoardListener
 {
 public:
     /** engine may be null when the rig is used as a Studio plugin (inputs then come from the track). */
@@ -90,6 +92,9 @@ public:
 
 private:
     void timerCallback() override;
+    void pedalRemoved (const juce::String& uid) override;
+    void openPedal (const juce::String& uid);
+    void showBlock (const juce::String& key);
     void choosePreset (int id);
     void saveUserPreset();
     void chooseNamFile();
@@ -125,6 +130,10 @@ private:
     LevelMeter outputMeter { true };
 
     std::unique_ptr<juce::FileChooser> chooser;
+
+    // pedalboard
+    PedalboardStrip board { rig };
+    std::map<juce::String, std::unique_ptr<juce::DocumentWindow>> pedalWindows;
 };
 
 } // namespace wis

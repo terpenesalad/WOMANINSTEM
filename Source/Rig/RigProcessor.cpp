@@ -1,5 +1,6 @@
 #include "RigProcessor.h"
 #include "Separation/ModelManager.h"
+#include "Daw/Plugins/BuiltinProcessor.h"
 
 namespace wis
 {
@@ -131,9 +132,15 @@ RigProcessor::RigProcessor()
         jassert (raw != nullptr);
         params[id] = raw;
     }
+    resetBoard();
 }
 
-RigProcessor::~RigProcessor() = default;
+RigProcessor::~RigProcessor()
+{
+    const juce::SpinLock::ScopedLockType sl (chainLock);
+    audioChain = nullptr;
+    chain = nullptr;
+}
 
 void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -149,8 +156,10 @@ void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     diCopy.assign ((size_t) maxBlock, 0.0f);
     diLine.assign (4096, 0.0f);
     diWrite = 0;
+    tapeR.prepare (sr);
     gate.prepare (sr);
-    compressor.prepare ({ sr, (juce::uint32) maxBlock, 1 });
+    gateR.prepare (sr);
+    compressor.prepare ({ sr, (juce::uint32) maxBlock, 2 });
     drive.prepare (sr, maxBlock);
     amp.prepare (sr, maxBlock);
     nam.prepare (sr, maxBlock);
@@ -158,6 +167,7 @@ void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
                        (MicType) (int) p (pid::cabMic), p (pid::cabMicPos) / 10.0f, p (pid::cabRoom) / 10.0f);
     cab.prepare (sr, maxBlock);
     for (auto& f : eq) { f.coefficients->coefficients.ensureStorageAllocated (8); f.reset(); }
+    for (size_t b = 0; b < eq.size(); ++b) { eqR[b].coefficients = eq[b].coefficients; eqR[b].reset(); }   // shared coefficients
     eqCache.fill (99.0f);
     chorus.prepare ({ sr, (juce::uint32) maxBlock, 2 });
     delay.prepare (sr, maxBlock);
@@ -169,6 +179,11 @@ void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     compMakeup.reset (sr, 0.02);
     outGain.reset (sr, 0.02);
     reverbMixSm.reset (sr, 0.05);
+
+    pedalMidi.ensureSize (256);
+    for (auto& e : copyEntries())
+        if (e.pedal != nullptr && e.pedal->proc != nullptr)
+            preparePedal (*e.pedal->proc);
 }
 
 void RigProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -218,171 +233,189 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
     character.setParameters ((CharacterType) (int) p (pid::charType), p (pid::charAmount));
     character.process (x, n);
 
-    // ---- gate ----
-    if (p (pid::gateOn) > 0.5f)
+    // ---- the pedalboard, in the order the player chose ----
     {
-        gate.setParameters (p (pid::gateThresh), p (pid::gateRelease));
-        gate.process (x, n);
+        const juce::SpinLock::ScopedTryLockType sl (chainLock);
+        if (sl.isLocked() && audioChain != chain)
+            audioChain = chain;   // the old chain stays alive in the graveyard: nothing is freed on this thread
     }
 
-    // ---- compressor ----
-    if (p (pid::compOn) > 0.5f)
-    {
-        compressor.setThreshold (p (pid::compThresh));
-        compressor.setRatio (p (pid::compRatio));
-        compressor.setAttack (p (pid::compAttack));
-        compressor.setRelease (p (pid::compRelease));
-        float* chans[] = { x };
-        juce::dsp::AudioBlock<float> block (chans, 1, (size_t) n);
-        compressor.process (juce::dsp::ProcessContextReplacing<float> (block));
-        compMakeup.setTargetValue (juce::Decibels::decibelsToGain (p (pid::compLevel)));
-        for (int i = 0; i < n; ++i) x[i] *= compMakeup.getNextValue();
-    }
+    // Mono until something stereo (a pedal, chorus, delay, reverb); a stereo signal going into the drive or the
+    // amp is summed to mono, like plugging a stereo pedal into an amp's single input.
+    bool stereo = false;
+    auto toStereo = [&] { if (! stereo) { std::copy (x, x + n, outL); std::copy (x, x + n, outR); stereo = true; } };
+    auto toMono = [&] { if (stereo) { for (int i = 0; i < n; ++i) x[i] = 0.5f * (outL[i] + outR[i]); stereo = false; } };
+    auto on = [this] (const char* id) { return p (id) > 0.5f; };
 
-    // ---- DI tap (a studio DI box before the pedals and amp) ----
+    // DI tap: a studio DI box just before the drive / amp (whichever comes first), blended back in after the cab
     const float diBlend = p (pid::cabDiBlend);
-    if (diBlend > 0.001f) std::copy (x, x + n, diCopy.begin());
+    bool diTapped = false;
+    float diLatency = 0.0f;
+    auto tapDi = [&] { if (diBlend > 0.001f && ! diTapped) { std::copy (x, x + n, diCopy.begin()); diTapped = true; diLatency = 0.0f; } };
 
-    // ---- drive pedal ----
-    if (p (pid::driveOn) > 0.5f)
+    if (audioChain != nullptr)
     {
-        drive.setParameters ((DriveType) (int) p (pid::driveType), p (pid::driveAmount), p (pid::driveTone), p (pid::driveLevel));
-        drive.process (x, n);
-    }
-
-    // ---- amp ----
-    const auto model = (AmpType) (int) p (pid::ampModel);
-    if (p (pid::ampOn) > 0.5f)
-    {
-        if (model == AmpType::namCapture)
+        for (auto& e : audioChain->entries)
         {
-            amp.setParameters (AmpType::flatDi, 5.0f, p (pid::ampBass), p (pid::ampMid), p (pid::ampTreble), p (pid::ampPresence), p (pid::ampMaster));
-            // Gain knob = input trim into the capture (-12..+12 dB around noon)
-            const float trimDb = (p (pid::ampGain) - 5.0f) * 2.4f;
-            if (nam.process (x, n, trimDb))
-                amp.processToneOnly (x, n);
-            else
-                amp.process (x, n);   // no capture loaded yet: flat
-        }
-        else
-        {
-            amp.setParameters (model, p (pid::ampGain), p (pid::ampBass), p (pid::ampMid), p (pid::ampTreble), p (pid::ampPresence), p (pid::ampMaster));
-            amp.process (x, n);
-        }
-    }
-
-    // ---- cab ----
-    if (p (pid::cabOn) > 0.5f)
-    {
-        cab.setParameters ((CabType) (int) p (pid::cabType), p (pid::cabLowCut), p (pid::cabHighCut),
-                           (MicType) (int) p (pid::cabMic), p (pid::cabMicPos) / 10.0f, p (pid::cabRoom) / 10.0f);
-        cab.process (x, n);
-    }
-    if (diBlend > 0.001f)
-    {
-        // blend the clean DI under the miked amp, like a studio bass recording. The DI is delayed to arrive
-        // together with the amp + cabinet (otherwise the two comb-filter each other), and level matched.
-        float delay = (p (pid::cabOn) > 0.5f ? (float) cab.getArrivalSamples() : 0.0f);
-        if (p (pid::ampOn) > 0.5f && model != AmpType::namCapture) delay += amp.getLatencySamples();
-        if (p (pid::driveOn) > 0.5f) delay += drive.getLatencySamples();
-        const float wet = std::cos (diBlend * juce::MathConstants<float>::halfPi), dry = std::sin (diBlend * juce::MathConstants<float>::halfPi) * 1.4f;
-        const int mask = (int) diLine.size() - 1;
-        const int d0 = (int) std::floor (delay);
-        const float frac = delay - (float) d0;
-        for (int i = 0; i < n; ++i)
-        {
-            diLine[(size_t) diWrite] = diCopy[(size_t) i];
-            const float a = diLine[(size_t) ((diWrite - d0) & mask)], b = diLine[(size_t) ((diWrite - d0 - 1) & mask)];
-            diWrite = (diWrite + 1) & mask;
-            x[i] = x[i] * wet + (a + (b - a) * frac) * dry;
-        }
-    }
-
-    // ---- studio EQ ----
-    if (p (pid::eqOn) > 0.5f)
-    {
-        const float gains[] = { p (pid::eqLow), p (pid::eqLowMid), p (pid::eqHighMid), p (pid::eqHigh) };
-        using AC = juce::dsp::IIR::ArrayCoefficients<float>;
-        for (int b = 0; b < 4; ++b)
-        {
-            if (gains[b] != eqCache[(size_t) b])
+            if (e.pedal != nullptr)
             {
-                eqCache[(size_t) b] = gains[b];
-                const float g = juce::Decibels::decibelsToGain (gains[b]);
-                switch (b)
+                auto* proc = e.pedal->proc.get();
+                if (proc == nullptr || e.pedal->bypass.load()) continue;
+                toStereo();
+                float* chans[] = { outL, outR };
+                juce::AudioBuffer<float> buf (chans, 2, n);
+                pedalMidi.clear();
+                proc->setPlayHead (getPlayHead());
+                proc->processBlock (buf, pedalMidi);
+                if (diTapped) diLatency += (float) proc->getLatencySamples();
+                continue;
+            }
+
+            const auto block = (RigBlock) e.block;
+            switch (block)
+            {
+                case RigBlock::gate:
+                case RigBlock::comp:
+                case RigBlock::eq:
+                case RigBlock::tape:
+                    if (on (rigBlockPowerParam (block)))
+                    {
+                        if (stereo) { float* chans[] = { outL, outR }; processCoreBlock (block, chans, 2, n); }
+                        else        { float* chans[] = { x };          processCoreBlock (block, chans, 1, n); }
+                    }
+                    break;
+
+                case RigBlock::drive:
+                    if (on (pid::driveOn))
+                    {
+                        toMono();
+                        tapDi();
+                        drive.setParameters ((DriveType) (int) p (pid::driveType), p (pid::driveAmount), p (pid::driveTone), p (pid::driveLevel));
+                        drive.process (x, n);
+                        if (diTapped) diLatency += drive.getLatencySamples();
+                    }
+                    break;
+
+                case RigBlock::ampCab:
                 {
-                    case 0: *eq[0].coefficients = AC::makeLowShelf (sr, 100.0f, 0.7f, g); break;
-                    case 1: *eq[1].coefficients = AC::makePeakFilter (sr, 400.0f, 0.9f, g); break;
-                    case 2: *eq[2].coefficients = AC::makePeakFilter (sr, 2000.0f, 0.9f, g); break;
-                    default:*eq[3].coefficients = AC::makeHighShelf (sr, 6000.0f, 0.7f, g); break;
+                    const bool ampOn = on (pid::ampOn), cabOn = on (pid::cabOn);
+                    if (! ampOn && ! cabOn && diBlend <= 0.001f) break;
+                    toMono();
+                    tapDi();
+                    const auto model = (AmpType) (int) p (pid::ampModel);
+                    if (ampOn)
+                    {
+                        if (model == AmpType::namCapture)
+                        {
+                            amp.setParameters (AmpType::flatDi, 5.0f, p (pid::ampBass), p (pid::ampMid), p (pid::ampTreble), p (pid::ampPresence), p (pid::ampMaster));
+                            // Gain knob = input trim into the capture (-12..+12 dB around noon)
+                            const float trimDb = (p (pid::ampGain) - 5.0f) * 2.4f;
+                            if (nam.process (x, n, trimDb))
+                                amp.processToneOnly (x, n);
+                            else
+                                amp.process (x, n);   // no capture loaded yet: flat
+                        }
+                        else
+                        {
+                            amp.setParameters (model, p (pid::ampGain), p (pid::ampBass), p (pid::ampMid), p (pid::ampTreble), p (pid::ampPresence), p (pid::ampMaster));
+                            amp.process (x, n);
+                        }
+                    }
+                    if (cabOn)
+                    {
+                        cab.setParameters ((CabType) (int) p (pid::cabType), p (pid::cabLowCut), p (pid::cabHighCut),
+                                           (MicType) (int) p (pid::cabMic), p (pid::cabMicPos) / 10.0f, p (pid::cabRoom) / 10.0f);
+                        cab.process (x, n);
+                    }
+                    if (diTapped)
+                    {
+                        // blend the clean DI under the miked amp, like a studio bass recording. The DI is delayed to arrive
+                        // together with the amp + cabinet (otherwise the two comb-filter each other), and level matched.
+                        float delaySamples = diLatency + (cabOn ? (float) cab.getArrivalSamples() : 0.0f);
+                        if (ampOn && model != AmpType::namCapture) delaySamples += amp.getLatencySamples();
+                        delaySamples = juce::jlimit (0.0f, (float) diLine.size() - 2.0f, delaySamples);
+                        const float wet = std::cos (diBlend * juce::MathConstants<float>::halfPi), dry = std::sin (diBlend * juce::MathConstants<float>::halfPi) * 1.4f;
+                        const int mask = (int) diLine.size() - 1;
+                        const int d0 = (int) std::floor (delaySamples);
+                        const float frac = delaySamples - (float) d0;
+                        for (int i = 0; i < n; ++i)
+                        {
+                            diLine[(size_t) diWrite] = diCopy[(size_t) i];
+                            const float a = diLine[(size_t) ((diWrite - d0) & mask)], b = diLine[(size_t) ((diWrite - d0 - 1) & mask)];
+                            diWrite = (diWrite + 1) & mask;
+                            x[i] = x[i] * wet + (a + (b - a) * frac) * dry;
+                        }
+                        diTapped = false;
+                    }
+                    break;
                 }
+
+                case RigBlock::chorus:
+                    if (on (pid::chorusOn))
+                    {
+                        toStereo();
+                        chorus.setRate (p (pid::chorusRate));
+                        chorus.setDepth (p (pid::chorusDepth));
+                        chorus.setCentreDelay (7.0f);
+                        chorus.setFeedback (0.0f);
+                        chorus.setMix (p (pid::chorusMix));
+                        float* chans[] = { outL, outR };
+                        juce::dsp::AudioBlock<float> blk (chans, 2, (size_t) n);
+                        chorus.process (juce::dsp::ProcessContextReplacing<float> (blk));
+                    }
+                    break;
+
+                case RigBlock::delay:
+                    if (on (pid::delayOn))
+                    {
+                        toStereo();
+                        delay.setParameters (p (pid::delayTime), p (pid::delayFeedback), p (pid::delayTone), p (pid::delayMix), p (pid::delayPingPong) > 0.5f);
+                        delay.process (outL, outR, n);
+                    }
+                    break;
+
+                case RigBlock::reverb:
+                {
+                    // parallel send
+                    reverbMixSm.setTargetValue (on (pid::reverbOn) ? p (pid::reverbMix) : 0.0f);
+                    if (on (pid::reverbOn) || reverbMixSm.isSmoothing())
+                    {
+                        toStereo();
+                        juce::dsp::Reverb::Parameters rp;
+                        rp.roomSize = 0.3f + 0.68f * p (pid::reverbSize);
+                        rp.damping  = p (pid::reverbDamp);
+                        rp.width    = p (pid::reverbWidth);
+                        rp.wetLevel = 1.0f;
+                        rp.dryLevel = 0.0f;
+                        rp.freezeMode = 0.0f;
+                        reverb.setParameters (rp);
+
+                        std::copy (outL, outL + n, wetL.begin());
+                        std::copy (outR, outR + n, wetR.begin());
+                        preDelay.setDelayMs (p (pid::reverbPreDelay));
+                        preDelay.process (wetL.data(), wetR.data(), n);
+
+                        float* chans[] = { wetL.data(), wetR.data() };
+                        juce::dsp::AudioBlock<float> blk (chans, 2, (size_t) n);
+                        reverb.process (juce::dsp::ProcessContextReplacing<float> (blk));
+
+                        for (int i = 0; i < n; ++i)
+                        {
+                            const float m = reverbMixSm.getNextValue();
+                            const float dry = std::cos (m * juce::MathConstants<float>::halfPi * 0.5f);   // gentle dry dip
+                            outL[i] = outL[i] * dry + wetL[(size_t) i] * m * 0.6f;
+                            outR[i] = outR[i] * dry + wetR[(size_t) i] * m * 0.6f;
+                        }
+                    }
+                    break;
+                }
+
+                case RigBlock::count:
+                default: break;
             }
         }
-        for (int i = 0; i < n; ++i)
-            x[i] = eq[3].processSample (eq[2].processSample (eq[1].processSample (eq[0].processSample (x[i]))));
     }
-
-    // ---- console & tape ----
-    if (p (pid::tapeOn) > 0.5f)
-    {
-        tape.setDrive (p (pid::tapeDrive));
-        tape.process (x, n);
-    }
-
-    // ---- to stereo ----
-    std::copy (x, x + n, outL);
-    std::copy (x, x + n, outR);
-
-    // ---- chorus ----
-    if (p (pid::chorusOn) > 0.5f)
-    {
-        chorus.setRate (p (pid::chorusRate));
-        chorus.setDepth (p (pid::chorusDepth));
-        chorus.setCentreDelay (7.0f);
-        chorus.setFeedback (0.0f);
-        chorus.setMix (p (pid::chorusMix));
-        float* chans[] = { outL, outR };
-        juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
-        chorus.process (juce::dsp::ProcessContextReplacing<float> (block));
-    }
-
-    // ---- delay ----
-    if (p (pid::delayOn) > 0.5f)
-    {
-        delay.setParameters (p (pid::delayTime), p (pid::delayFeedback), p (pid::delayTone), p (pid::delayMix), p (pid::delayPingPong) > 0.5f);
-        delay.process (outL, outR, n);
-    }
-
-    // ---- reverb (parallel send) ----
-    reverbMixSm.setTargetValue (p (pid::reverbOn) > 0.5f ? p (pid::reverbMix) : 0.0f);
-    if (p (pid::reverbOn) > 0.5f || reverbMixSm.isSmoothing())
-    {
-        juce::dsp::Reverb::Parameters rp;
-        rp.roomSize = 0.3f + 0.68f * p (pid::reverbSize);
-        rp.damping  = p (pid::reverbDamp);
-        rp.width    = p (pid::reverbWidth);
-        rp.wetLevel = 1.0f;
-        rp.dryLevel = 0.0f;
-        rp.freezeMode = 0.0f;
-        reverb.setParameters (rp);
-
-        std::copy (outL, outL + n, wetL.begin());
-        std::copy (outR, outR + n, wetR.begin());
-        preDelay.setDelayMs (p (pid::reverbPreDelay));
-        preDelay.process (wetL.data(), wetR.data(), n);
-
-        float* chans[] = { wetL.data(), wetR.data() };
-        juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
-        reverb.process (juce::dsp::ProcessContextReplacing<float> (block));
-
-        for (int i = 0; i < n; ++i)
-        {
-            const float m = reverbMixSm.getNextValue();
-            const float dry = std::cos (m * juce::MathConstants<float>::halfPi * 0.5f);   // gentle dry dip
-            outL[i] = outL[i] * dry + wetL[(size_t) i] * m * 0.6f;
-            outR[i] = outR[i] * dry + wetR[(size_t) i] * m * 0.6f;
-        }
-    }
+    toStereo();
 
     // ---- output ----
     outGain.setTargetValue (juce::Decibels::decibelsToGain (p (pid::outLevel)));
@@ -395,6 +428,346 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
         outPk = juce::jmax (outPk, std::abs (outL[i]), std::abs (outR[i]));
     }
     outputPeak = juce::jmax (outputPeak.load(), outPk);
+}
+
+void RigProcessor::processCoreBlock (RigBlock b, float* const* chans, int numCh, int n)
+{
+    switch (b)
+    {
+        case RigBlock::gate:
+            gate.setParameters (p (pid::gateThresh), p (pid::gateRelease));
+            gate.process (chans[0], n);
+            if (numCh > 1) { gateR.setParameters (p (pid::gateThresh), p (pid::gateRelease)); gateR.process (chans[1], n); }
+            break;
+
+        case RigBlock::comp:
+        {
+            compressor.setThreshold (p (pid::compThresh));
+            compressor.setRatio (p (pid::compRatio));
+            compressor.setAttack (p (pid::compAttack));
+            compressor.setRelease (p (pid::compRelease));
+            juce::dsp::AudioBlock<float> block (chans, (size_t) numCh, (size_t) n);
+            compressor.process (juce::dsp::ProcessContextReplacing<float> (block));
+            compMakeup.setTargetValue (juce::Decibels::decibelsToGain (p (pid::compLevel)));
+            for (int i = 0; i < n; ++i)
+            {
+                const float g = compMakeup.getNextValue();
+                for (int c = 0; c < numCh; ++c) chans[c][i] *= g;
+            }
+            break;
+        }
+
+        case RigBlock::eq:
+        {
+            const float gains[] = { p (pid::eqLow), p (pid::eqLowMid), p (pid::eqHighMid), p (pid::eqHigh) };
+            using AC = juce::dsp::IIR::ArrayCoefficients<float>;
+            for (int k = 0; k < 4; ++k)
+            {
+                if (gains[k] != eqCache[(size_t) k])
+                {
+                    eqCache[(size_t) k] = gains[k];
+                    const float g = juce::Decibels::decibelsToGain (gains[k]);
+                    switch (k)
+                    {
+                        case 0: *eq[0].coefficients = AC::makeLowShelf (sr, 100.0f, 0.7f, g); break;
+                        case 1: *eq[1].coefficients = AC::makePeakFilter (sr, 400.0f, 0.9f, g); break;
+                        case 2: *eq[2].coefficients = AC::makePeakFilter (sr, 2000.0f, 0.9f, g); break;
+                        default:*eq[3].coefficients = AC::makeHighShelf (sr, 6000.0f, 0.7f, g); break;
+                    }
+                }
+            }
+            for (int c = 0; c < numCh; ++c)
+            {
+                auto& f = c == 0 ? eq : eqR;
+                float* d = chans[c];
+                for (int i = 0; i < n; ++i)
+                    d[i] = f[3].processSample (f[2].processSample (f[1].processSample (f[0].processSample (d[i]))));
+            }
+            break;
+        }
+
+        case RigBlock::tape:
+            tape.setDrive (p (pid::tapeDrive));
+            tape.process (chans[0], n);
+            if (numCh > 1) { tapeR.setDrive (p (pid::tapeDrive)); tapeR.process (chans[1], n); }
+            break;
+
+        default: break;
+    }
+}
+
+// ---- pedalboard ----------------------------------------------------------------------------------------
+
+const char* rigBlockKey (RigBlock b)
+{
+    static const char* keys[] = { "gate", "comp", "drive", "ampcab", "eq", "tape", "chorus", "delay", "reverb" };
+    return juce::isPositiveAndBelow ((int) b, (int) RigBlock::count) ? keys[(int) b] : "";
+}
+
+juce::String rigBlockName (RigBlock b)
+{
+    static const char* names[] = { "Gate", "Comp", "Drive", "Amp + Cab", "EQ", "Tape", "Chorus", "Delay", "Reverb" };
+    return juce::isPositiveAndBelow ((int) b, (int) RigBlock::count) ? names[(int) b] : "";
+}
+
+const char* rigBlockPowerParam (RigBlock b)
+{
+    switch (b)
+    {
+        case RigBlock::gate:   return pid::gateOn;
+        case RigBlock::comp:   return pid::compOn;
+        case RigBlock::drive:  return pid::driveOn;
+        case RigBlock::ampCab: return pid::ampOn;
+        case RigBlock::eq:     return pid::eqOn;
+        case RigBlock::tape:   return pid::tapeOn;
+        case RigBlock::chorus: return pid::chorusOn;
+        case RigBlock::delay:  return pid::delayOn;
+        case RigBlock::reverb: return pid::reverbOn;
+        default:               return pid::ampOn;
+    }
+}
+
+static int blockForKey (const juce::String& key)
+{
+    for (int b = 0; b < (int) RigBlock::count; ++b)
+        if (key == rigBlockKey ((RigBlock) b)) return b;
+    return -1;
+}
+
+juce::StringArray RigProcessor::pedalIds()
+{
+    // every built-in audio effect except the rig itself and the ones that need the Studio (side-chain, transport)
+    static const juce::StringArray excluded { "amprig", "vocoder", "beatrepeat" };
+    juce::StringArray ids;
+    for (auto& b : daw::builtinPlugins())
+        if (! b.instrument && ! b.midiFx && b.category != "Hidden" && ! excluded.contains (b.id))
+            ids.add (b.id);
+    return ids;
+}
+
+std::vector<RigChain::Entry> RigProcessor::copyEntries() const
+{
+    const juce::SpinLock::ScopedLockType sl (chainLock);
+    return chain != nullptr ? chain->entries : std::vector<RigChain::Entry> {};
+}
+
+void RigProcessor::publishChain (std::vector<RigChain::Entry> entries)
+{
+    // pedals leaving the board: their editors must close before the processors can go
+    for (auto& old : copyEntries())
+    {
+        if (old.pedal == nullptr) continue;
+        const bool kept = std::any_of (entries.begin(), entries.end(), [&] (const RigChain::Entry& e) { return e.pedal == old.pedal; });
+        if (! kept)
+        {
+            const auto uid = old.pedal->uid;
+            boardListeners.call ([&] (BoardListener& l) { l.pedalRemoved (uid); });
+        }
+    }
+
+    RigChain::Ptr c = new RigChain();
+    c->entries = std::move (entries);
+    {
+        const juce::SpinLock::ScopedLockType sl (chainLock);
+        chain = c;
+    }
+    chainGraveyard.add (c);
+    // free the chains (and removed pedals) the audio thread no longer uses
+    for (int i = chainGraveyard.size(); --i >= 0;)
+        if (chainGraveyard.getObjectPointerUnchecked (i)->getReferenceCount() == 1)
+            chainGraveyard.remove (i);
+    boardChanged.sendChangeMessage();
+}
+
+void RigProcessor::preparePedal (juce::AudioProcessor& proc)
+{
+    proc.setPlayConfigDetails (2, 2, sr, maxBlock);
+    proc.prepareToPlay (sr, maxBlock);
+}
+
+std::vector<RigProcessor::BoardItem> RigProcessor::getBoard() const
+{
+    std::vector<BoardItem> items;
+    for (auto& e : copyEntries())
+    {
+        BoardItem it;
+        if (e.pedal != nullptr)
+        {
+            it.key = e.pedal->uid;
+            it.name = e.pedal->name;
+            it.builtinId = e.pedal->builtinId;
+            it.isPedal = true;
+            it.on = ! e.pedal->bypass.load();
+        }
+        else
+        {
+            it.block = e.block;
+            it.key = rigBlockKey ((RigBlock) e.block);
+            it.name = rigBlockName ((RigBlock) e.block);
+            it.on = isBoardItemOn (it.key);
+        }
+        items.push_back (it);
+    }
+    return items;
+}
+
+void RigProcessor::moveBoardItem (int from, int to)
+{
+    auto entries = copyEntries();
+    if (! juce::isPositiveAndBelow (from, (int) entries.size())) return;
+    to = juce::jlimit (0, (int) entries.size() - 1, to);
+    if (from == to) return;
+    auto e = entries[(size_t) from];
+    entries.erase (entries.begin() + from);
+    entries.insert (entries.begin() + to, e);
+    publishChain (std::move (entries));
+}
+
+juce::String RigProcessor::addPedal (const juce::String& builtinId, int insertAt, const juce::String& stateBase64)
+{
+    auto entries = copyEntries();
+    int pedals = 0;
+    for (auto& e : entries) if (e.pedal != nullptr) ++pedals;
+    if (pedals >= maxPedals || ! pedalIds().contains (builtinId)) return {};
+
+    auto proc = daw::createBuiltin (builtinId);
+    if (proc == nullptr) return {};
+    RigPedal::Ptr pedal = new RigPedal();
+    pedal->builtinId = builtinId;
+    pedal->uid = "p" + juce::String (++pedalCounter) + "_" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt()).substring (0, 4);
+    if (auto* info = daw::findBuiltin (builtinId)) pedal->name = info->name;
+    preparePedal (*proc);
+    if (stateBase64.isNotEmpty()) daw::decodeState (*proc, stateBase64);
+    pedal->proc = std::move (proc);
+
+    if (insertAt < 0)
+    {
+        // by default a new pedal goes in front of the amp, where stomp boxes live (after the drive if it's there)
+        insertAt = (int) entries.size();
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (entries[i].pedal == nullptr && entries[i].block == (int) RigBlock::ampCab) { insertAt = (int) i; break; }
+    }
+    insertAt = juce::jlimit (0, (int) entries.size(), insertAt);
+    entries.insert (entries.begin() + insertAt, RigChain::Entry { -1, pedal });
+    publishChain (std::move (entries));
+    return pedal->uid;
+}
+
+void RigProcessor::removePedal (const juce::String& uid)
+{
+    auto entries = copyEntries();
+    const auto before = entries.size();
+    entries.erase (std::remove_if (entries.begin(), entries.end(), [&] (const RigChain::Entry& e) { return e.pedal != nullptr && e.pedal->uid == uid; }),
+                   entries.end());
+    if (entries.size() != before) publishChain (std::move (entries));
+}
+
+juce::AudioProcessor* RigProcessor::getPedalProcessor (const juce::String& uid) const
+{
+    for (auto& e : copyEntries())
+        if (e.pedal != nullptr && e.pedal->uid == uid) return e.pedal->proc.get();
+    return nullptr;
+}
+
+void RigProcessor::setBoardItemOn (const juce::String& key, bool shouldBeOn)
+{
+    const int b = blockForKey (key);
+    if (b >= 0)
+    {
+        setParam (rigBlockPowerParam ((RigBlock) b), shouldBeOn ? 1.0f : 0.0f);
+        if ((RigBlock) b == RigBlock::ampCab) setParam (pid::cabOn, shouldBeOn ? 1.0f : 0.0f);
+        return;
+    }
+    for (auto& e : copyEntries())
+        if (e.pedal != nullptr && e.pedal->uid == key) e.pedal->bypass = ! shouldBeOn;
+}
+
+bool RigProcessor::isBoardItemOn (const juce::String& key) const
+{
+    const int b = blockForKey (key);
+    if (b >= 0)
+    {
+        if ((RigBlock) b == RigBlock::ampCab) return p (pid::ampOn) > 0.5f || p (pid::cabOn) > 0.5f;
+        return p (rigBlockPowerParam ((RigBlock) b)) > 0.5f;
+    }
+    for (auto& e : copyEntries())
+        if (e.pedal != nullptr && e.pedal->uid == key) return ! e.pedal->bypass.load();
+    return false;
+}
+
+void RigProcessor::resetBoard()
+{
+    std::vector<RigChain::Entry> entries;
+    for (int b = 0; b < (int) RigBlock::count; ++b)
+        entries.push_back ({ b, nullptr });
+    publishChain (std::move (entries));
+}
+
+juce::ValueTree RigProcessor::saveBoard() const
+{
+    juce::ValueTree board ("PEDALBOARD");
+    for (auto& e : copyEntries())
+    {
+        juce::ValueTree item ("ITEM");
+        if (e.pedal != nullptr)
+        {
+            item.setProperty ("pedal", e.pedal->builtinId, nullptr);
+            item.setProperty ("bypass", e.pedal->bypass.load(), nullptr);
+            if (e.pedal->proc != nullptr) item.setProperty ("state", daw::encodeState (*e.pedal->proc), nullptr);
+        }
+        else
+        {
+            item.setProperty ("block", rigBlockKey ((RigBlock) e.block), nullptr);
+        }
+        board.appendChild (item, nullptr);
+    }
+    return board;
+}
+
+void RigProcessor::loadBoard (const juce::ValueTree& board)
+{
+    std::vector<RigChain::Entry> entries;
+    bool seen[(int) RigBlock::count] = {};
+    int pedals = 0;
+    if (board.isValid())
+    {
+        for (auto item : board)
+        {
+            if (item.hasProperty ("block"))
+            {
+                const int b = blockForKey (item["block"].toString());
+                if (b >= 0 && ! seen[b]) { seen[b] = true; entries.push_back ({ b, nullptr }); }
+            }
+            else if (item.hasProperty ("pedal") && pedals < maxPedals)
+            {
+                const auto id = item["pedal"].toString();
+                if (! pedalIds().contains (id)) continue;
+                auto proc = daw::createBuiltin (id);
+                if (proc == nullptr) continue;
+                RigPedal::Ptr pedal = new RigPedal();
+                pedal->builtinId = id;
+                pedal->uid = "p" + juce::String (++pedalCounter) + "_" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt()).substring (0, 4);
+                if (auto* info = daw::findBuiltin (id)) pedal->name = info->name;
+                preparePedal (*proc);
+                if (item.hasProperty ("state")) daw::decodeState (*proc, item["state"].toString());
+                pedal->proc = std::move (proc);
+                pedal->bypass = (bool) item.getProperty ("bypass", false);
+                entries.push_back ({ -1, pedal });
+                ++pedals;
+            }
+        }
+    }
+    // presets saved before 3.3 (or missing blocks): the standard order
+    for (int b = 0; b < (int) RigBlock::count; ++b)
+    {
+        if (seen[b]) continue;
+        // keep the standard order: insert before the first later standard block that's already there
+        auto pos = entries.end();
+        for (auto it = entries.begin(); it != entries.end(); ++it)
+            if (it->pedal == nullptr && it->block > b) { pos = it; break; }
+        entries.insert (pos, { b, nullptr });
+    }
+    publishChain (std::move (entries));
 }
 
 // ---- files -------------------------------------------------------------------------------------------
@@ -432,6 +805,8 @@ void RigProcessor::setParam (const juce::String& id, float value)
 juce::ValueTree RigProcessor::createPresetState()
 {
     auto state = apvts.copyState();
+    state.removeChild (state.getChildWithName ("PEDALBOARD"), nullptr);
+    state.appendChild (saveBoard(), nullptr);
     state.setProperty ("namFile", nam.getFile().getFullPathName(), nullptr);
     state.setProperty ("irFile", cab.getImpulseResponseFile().getFullPathName(), nullptr);
     state.setProperty ("presetName", presetName, nullptr);
@@ -466,7 +841,10 @@ void RigProcessor::restorePresetState (const juce::ValueTree& state)
         }
         copy.setProperty ("rigVersion", 2, nullptr);
     }
+    const auto board = copy.getChildWithName ("PEDALBOARD").createCopy();
+    copy.removeChild (copy.getChildWithName ("PEDALBOARD"), nullptr);
     apvts.replaceState (copy);
+    loadBoard (board);
 }
 
 void RigProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -548,6 +926,7 @@ void RigProcessor::loadFactoryPreset (int index)
             param->setValueNotifyingHost (param->getDefaultValue());
 
     presetName = factoryPresetNames()[index];
+    resetBoard();
     auto set = [this] (const char* id, float v) { setParam (id, v); };
     auto amp = [&] (AmpType t, float g, float b, float m, float tr, float pr, float ms)
     {

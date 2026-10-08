@@ -49,6 +49,7 @@ Stems are cached in your **Library** (24-bit FLAC), so a song is only ever split
 - **Amp**: 12 built-in models, each with its own preamp, real (modelled) tone-stack circuit, power amp, sag and bloom, 4× oversampled. Guitar: *American Clean, Tweed Breakup, British Chime, British Crunch, British Lead, Modern High Gain, Smooth Overdrive*. Bass: *60s British Valve, Classic Tube 8x10, Vintage Flip-Top, Modern Growl, Studio DI*. **Or load any [Neural Amp Modeler](https://www.neuralampmodeler.com/) `.nam` capture** (thousands free on [TONE3000](https://www.tone3000.com))
 - **Cabinet**: 11 speaker cabinets (guitar 4x12s, 2x12s, 1x12s; bass 1x15, 2x15, 4x10 with horn, 8x10, 2x10) with a choice of **microphone** (dynamic, ribbon, condenser, dynamic + ribbon), **mic position** (centre to edge), **room**, and a phase-aligned **DI blend** like a studio bass recording. Or **any impulse response** (`.wav`)
 - **Studio EQ, tape saturation, chorus, stereo/ping-pong delay, reverb** with pre-delay
+- **Pedalboard**: the chain is shown as a row of pedals you can **drag into any order** (delay before the drive, reverb before the amp...), and **+ Add pedal** puts up to 16 more on the board: *Drive Pedal*, *Boost*, *Wah* (pedal, envelope or LFO), *Octaver*, *Volume Swell*, plus phaser, flanger, tremolo, pitch shifter, shimmer, tape warble, bitcrusher, looper and every other Studio effect
 - 22 factory presets, all loudness-matched, that sound finished with no extra EQ: for bass *60s Merseybeat (violin bass)*, *Late 60s Studio (DI + amp)*, *Motown Flatwound*, *Classic Rock 8x10*, *Modern Growl*, *Modern Clean Hi-Fi*, *Punk Pick*, *Dub Deep*, *Fuzz Bass*, *Clean DI*; for guitar clean, jangle, blues, crunch, high gain, lead, dream pop and fuzz. Save your own.
 
 **Practice tools**: mute/solo/volume/balance per stem · one-click *"I'm playing: Bass"* · drag to loop a section (then drag its edges to fine-tune it) · slow down to 50% without pitch change · transpose ±12 semitones · record yourself as **Mix + Rig + dry DI** WAV files (re-amp the DI later) · safety limiter on the output.
@@ -68,6 +69,12 @@ A glowing oscilloscope beam drawn by the sound, like the psychedelic projections
 A GarageBand / Logic-style recording studio, built in. Everything runs at low latency on the same audio interface and the same amp rig.
 
 ![Studio mixer](docs/studio-mixer.png)
+
+### New in 3.3
+
+- **Pedalboard**: re-order the rig (drag pedals around the amp) and add up to 16 pedals, including the new *Drive Pedal*, *Boost*, *Wah*, *Octaver* and *Volume Swell* (also in the Studio's effects list).
+
+<p align="center"><img src="docs/pedalboard.png" width="900" alt="Pedalboard"></p>
 
 ### New in 3.2
 
@@ -239,9 +246,9 @@ Source/
   Daw/
     Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
-    Plugins/    built-in effects, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
+    Plugins/    built-in effects, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
     Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads
-  UI/           app shell, look & feel, waveform lanes, mixer, pedalboard, overlays
+  UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays
     Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors
 Tools/          stemsplit (CLI), rigtest and dawtest (automated tests), tiny VST2 / CLAP test plugins
