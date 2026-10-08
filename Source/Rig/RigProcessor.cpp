@@ -914,7 +914,17 @@ juce::StringArray RigProcessor::factoryPresetNames()
         "Bass - Fuzz Bass",
         "Bass - Clean DI",
         "Vocal Mic",
-        "Acoustic / Keys DI"
+        "Acoustic / Keys DI",
+        // 3.4: sounds in the style of particular players (approximations, not endorsements)
+        "Guitar - Psych Phaser Fuzz (Tame Impala-ish)",
+        "Bass - Psych Pop Hollow-Body (Tame Impala-ish)",
+        "Guitar - Garage Fuzz Blowout (Ty Segall-ish)",
+        "Guitar - Heavy 70s Fuzz Riffs (FUZZ-ish)",
+        "Guitar - 60s Jazz Box (Julie London sessions-ish)",
+        "Guitar - 12-String Jangle (Beatles, George-ish)",
+        "Guitar - Casino Crunch (Beatles, John-ish)",
+        "Guitar - Doom Sludge (Hell 'HEVY'-ish)",
+        "Bass - Doom Sludge Bass"
     };
 }
 
@@ -948,6 +958,20 @@ void RigProcessor::loadFactoryPreset (int index)
     auto tapeSet = [&] (float drv) { set (pid::tapeOn, 1); set (pid::tapeDrive, drv); };
     auto rev = [&] (float size, float damp, float pre, float mix) { set (pid::reverbOn, mix > 0 ? 1.0f : 0.0f); set (pid::reverbSize, size); set (pid::reverbDamp, damp); set (pid::reverbPreDelay, pre); set (pid::reverbMix, mix); };
     auto bassBasics = [&] { set (pid::gateThresh, -70); rev (0.3f, 0.6f, 0, 0.0f); };
+    // a pedal on the board (before the amp, or in its effects loop) with some of its knobs set
+    auto pedal = [&] (const char* id, std::initializer_list<std::pair<const char*, float>> values, bool afterAmp = false, int at = -1)
+    {
+        if (afterAmp)
+        {
+            auto board = getBoard();
+            for (int i = 0; i < (int) board.size(); ++i) if (board[(size_t) i].key == "ampcab") at = i + 1;
+        }
+        const auto uid = addPedal (id, at);
+        if (auto* bp = dynamic_cast<daw::BuiltinProcessor*> (getPedalProcessor (uid)))
+            for (auto& [k, v] : values) bp->setParam (k, v);
+    };
+    auto chorusSet = [&] (float rate, float depth, float mix) { set (pid::chorusOn, 1); set (pid::chorusRate, rate); set (pid::chorusDepth, depth); set (pid::chorusMix, mix); };
+    auto delaySet = [&] (float ms, float fb, float tone, float mix) { set (pid::delayOn, 1); set (pid::delayTime, ms); set (pid::delayFeedback, fb); set (pid::delayTone, tone); set (pid::delayMix, mix); };
 
     switch (index)
     {
@@ -1127,6 +1151,96 @@ void RigProcessor::loadFactoryPreset (int index)
             comp (-20, 2.5f, 15, 200, 3);
             set (pid::gateThresh, -72);
             rev (0.5f, 0.4f, 15, 0.15f);
+            break;
+
+        case 22: // Psych phaser fuzz: squashed hard, a fuzz into a phaser into a chimey combo, tape and tape-ish echo
+            comp (-32, 8.0f, 4, 120, 8);
+            driveSet (DriveType::fuzz, 6.0f, 5.5f, 6.0f);
+            pedal ("phaser", { { "rate", 0.35f }, { "depth", 0.85f }, { "centre", 900.0f }, { "feedback", 0.55f }, { "mix", 0.5f } });
+            amp (AmpType::britishChime, 5.0f, 5.0f, 6.0f, 6.0f, 5.5f, 5.5f);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 80, 9000);
+            tapeSet (5);
+            delaySet (360, 0.35f, 3000, 0.22f);
+            rev (0.55f, 0.5f, 15, 0.14f);
+            set (pid::outLevel, 2.2f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 23: // Psych pop bass: a hollow-body with flats, compressed until it doesn't move, round valve amp, tape
+            chr (CharacterType::violinBass, 7);
+            comp (-30, 6.0f, 12, 150, 6);
+            amp (AmpType::bassSixties, 4.5f, 6.5f, 5.5f, 4.0f, 4.0f, 6.0f);
+            cabSet (CabType::bass1x15Vintage, MicType::dynamic, 4, 2, 35, 6000);
+            tapeSet (5);
+            bassBasics();
+            set (pid::outLevel, -1.6f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 24: // Garage fuzz: a treble booster into a cranked fuzz into a crunchy amp in a roomy garage
+            pedal ("boost", { { "type", 1.0f }, { "gain", 10.0f }, { "tone", 5.0f } }, false, 0);
+            driveSet (DriveType::fuzz, 9.0f, 6.0f, 6.0f);
+            amp (AmpType::britishCrunch, 7.0f, 5.0f, 6.5f, 6.0f, 5.5f, 5.5f);
+            cabSet (CabType::brit4x12, MicType::dynamic, 2, 3, 80, 8500);
+            set (pid::gateThresh, -60);
+            tapeSet (6);
+            rev (0.3f, 0.5f, 5, 0.1f);
+            set (pid::outLevel, 0.8f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 25: // Heavy 70s fuzz riffs: an octave-up pedal first, a big fuzz, a plexi-style lead amp, 4x12
+            pedal ("octaver", { { "dry", 1.0f }, { "sub1", 0.0f }, { "sub2", 0.0f }, { "up", 0.3f } }, false, 0);
+            driveSet (DriveType::fuzz, 7.0f, 4.5f, 6.0f);
+            amp (AmpType::britishLead, 6.5f, 5.5f, 6.0f, 5.5f, 5.5f, 5.0f);
+            cabSet (CabType::brit4x12, MicType::dynamicPlusRibbon, 3, 2, 80, 8000);
+            set (pid::gateThresh, -58);
+            rev (0.4f, 0.5f, 10, 0.1f);
+            set (pid::outLevel, -1.2f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 26: // 60s jazz box: neck humbucker on a hollow-body, tone rolled back, a small clean amp, a ribbon mic, a room
+            chr (CharacterType::humbuckers, 9);
+            comp (-24, 2.5f, 20, 200, 3);
+            amp (AmpType::americanClean, 2.5f, 6.5f, 5.0f, 3.5f, 3.5f, 6.5f);
+            cabSet (CabType::openBack1x12, MicType::ribbon, 5, 3, 70, 6000);
+            set (pid::eqOn, 1); set (pid::eqLow, 1.0f); set (pid::eqHigh, -3.0f);
+            tapeSet (3);
+            rev (0.45f, 0.6f, 20, 0.18f);
+            set (pid::outLevel, 1.5f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 27: // 12-string jangle: bright single coils, compressed, an octave string added, a touch of course detune, chimey combo
+            chr (CharacterType::singleCoils, 6);
+            comp (-26, 4.0f, 6, 150, 5);
+            pedal ("pitchshift", { { "semis", 12.0f }, { "fine", 4.0f }, { "level2", 0.0f }, { "spread", 6.0f }, { "window", 30.0f }, { "mix", 0.28f } });
+            chorusSet (0.3f, 0.15f, 0.2f);
+            amp (AmpType::britishChime, 4.0f, 5.0f, 5.5f, 6.5f, 6.0f, 6.0f);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 90, 11000);
+            tapeSet (4);
+            rev (0.4f, 0.5f, 10, 0.14f);
+            set (pid::outLevel, 3.0f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 28: // Casino crunch: hollow-body P-90s straight into a cranked class-A combo and a saturated desk
+            chr (CharacterType::singleCoils, 4);
+            driveSet (DriveType::distortion, 7.5f, 6.0f, 5.5f);
+            amp (AmpType::britishChime, 7.5f, 5.0f, 6.0f, 6.0f, 5.5f, 5.5f);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 90, 9000);
+            set (pid::gateThresh, -60);
+            tapeSet (7);
+            rev (0.35f, 0.5f, 8, 0.1f);
+            set (pid::outLevel, 2.2f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 29: // Doom sludge: a fuzz with the tone all the way down, a sub octave under it, a dark high-gain stack
+            driveSet (DriveType::fuzz, 9.5f, 3.0f, 6.0f);
+            pedal ("octaver", { { "dry", 1.0f }, { "sub1", 0.35f }, { "sub2", 0.0f }, { "up", 0.0f }, { "tone", 400.0f } });
+            amp (AmpType::modernHighGain, 7.5f, 7.5f, 4.0f, 4.5f, 4.5f, 5.5f);
+            cabSet (CabType::modern4x12, MicType::dynamic, 4, 2, 50, 6500);
+            set (pid::gateThresh, -48); set (pid::gateRelease, 60);
+            set (pid::eqOn, 1); set (pid::eqLow, 2.0f);
+            rev (0.7f, 0.6f, 20, 0.12f);
+            set (pid::outLevel, -0.6f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 30: // Doom sludge bass: bass fuzz into a tube head and an 8x10
+            driveSet (DriveType::bassDrive, 8.5f, 4.0f, 6.0f);
+            amp (AmpType::bassClassicTube, 7.0f, 7.0f, 5.5f, 4.5f, 4.5f, 5.5f);
+            cabSet (CabType::bass8x10, MicType::dynamic, 3, 1, 35, 6000);
+            comp (-24, 3.0f, 15, 180, 3);
+            bassBasics();
+            set (pid::gateThresh, -60);
+            set (pid::outLevel, -4.9f);   // loudness-matched (rigtest --calibrate)
             break;
         default: break;
     }

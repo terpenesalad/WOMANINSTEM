@@ -62,5 +62,6 @@ inline void paintEditorBackground (juce::Graphics& g, juce::Rectangle<int> r, ju
 /** Registers the custom editors for the samplers, HomeKeys, Loop Station and Vocal Tune. */
 void installInstrumentEditors();
 void installBeatLabEditor();
+void installVoiceEditors();
 
 } // namespace wis::daw

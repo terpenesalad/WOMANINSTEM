@@ -818,6 +818,7 @@ void installInstrumentEditors()
     Looper::editorFactory = [] (Looper& l) -> juce::AudioProcessorEditor* { return new LooperEditor (l); };
     VocalTune::editorFactory = [] (VocalTune& v) -> juce::AudioProcessorEditor* { return new VocalTuneEditor (v); };
     installBeatLabEditor();
+    installVoiceEditors();
 }
 
 } // namespace wis::daw

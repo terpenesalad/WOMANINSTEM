@@ -24,6 +24,20 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     rigR.assign ((size_t) maxBlock, 0.0f);
     mixL.assign ((size_t) maxBlock, 0.0f);
     mixR.assign ((size_t) maxBlock, 0.0f);
+    youL.assign ((size_t) maxBlock, 0.0f);
+    youR.assign ((size_t) maxBlock, 0.0f);
+    {
+        const juce::ScopedLock sl (keysLock);
+        keysBuf.setSize (2, maxBlock);
+        keysMidi.ensureSize (2048);
+        if (keys != nullptr)
+        {
+            keys->setPlayConfigDetails (0, 2, sr, maxBlock);
+            keys->prepareToPlay (sr, maxBlock);
+        }
+    }
+    midiCollector.reset (sr);
+    keysGain.reset (sr, 0.03);
 
     rig.setRateAndBufferSizeDetails (sr, maxBlock);
     rig.prepareToPlay (sr, maxBlock);
@@ -63,6 +77,19 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 void AudioEngine::audioDeviceStopped()
 {
     recorder.stop();
+}
+
+std::unique_ptr<juce::AudioProcessor> AudioEngine::setKeysInstrument (std::unique_ptr<juce::AudioProcessor> p)
+{
+    const double sr = sampleRate.load();
+    if (p != nullptr && sr > 0.0)
+    {
+        p->setPlayConfigDetails (0, 2, sr, keysBuf.getNumSamples());
+        p->prepareToPlay (sr, juce::jmax (16, keysBuf.getNumSamples()));
+    }
+    const juce::ScopedLock sl (keysLock);   // waits for the audio thread to finish with the old one
+    std::swap (keys, p);
+    return p;
 }
 
 juce::StringArray AudioEngine::getActiveInputNames() const
@@ -132,10 +159,60 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     // ---- rig ----
     rig.processMonoToStereo (in, rigL.data(), rigR.data(), n);
 
+    // ---- keys: MIDI keyboards, the on-screen keyboard and the computer keys play the keys instrument ----
+    keysMidi.clear();
+    midiCollector.removeNextBlockOfMessages (keysMidi, n);   // always drained, so nothing piles up
+    keyboardState.processNextMidiBuffer (keysMidi, 0, n, true);
+    bool keysPlayed = false;
+    {
+        const juce::ScopedTryLock sl (keysLock);
+        if (sl.isLocked() && keys != nullptr && n <= keysBuf.getNumSamples())
+        {
+            for (const auto meta : keysMidi)
+                if (meta.getMessage().isNoteOn()) { midiNoteSeen = true; break; }
+            juce::AudioBuffer<float> view (keysBuf.getArrayOfWritePointers(), 2, n);
+            view.clear();
+            keys->processBlock (view, keysMidi);
+            keysPlayed = true;
+        }
+        else
+        {
+            for (const auto meta : keysMidi)
+                if (meta.getMessage().isNoteOn()) { midiNoteSeen = true; break; }
+        }
+    }
+    if (keysPlayed)
+    {
+        keysGain.setTargetValue (juce::Decibels::decibelsToGain (keysVolumeDb.load(), -60.0f));
+        float pk = 0.0f;
+        auto* kl = keysBuf.getWritePointer (0);
+        auto* kr = keysBuf.getWritePointer (1);
+        for (int i = 0; i < n; ++i)
+        {
+            const float g = keysGain.getNextValue();
+            kl[i] *= g; kr[i] *= g;
+            pk = juce::jmax (pk, std::abs (kl[i]), std::abs (kr[i]));
+        }
+        if (pk > keysPeak.load()) keysPeak = pk;
+    }
+
     auto* scopeFeed = scope.load();
     const double sr = sampleRate.load();
+    // "you" for the scope = your instrument through the rig plus the keys
+    const float* youLp = rigL.data();
+    const float* youRp = rigR.data();
+    if (scopeFeed != nullptr && keysPlayed && (scopeFeed->wants (ScopeFeed::instrument) || scopeFeed->wants (ScopeFeed::duet)))
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            youL[(size_t) i] = rigL[(size_t) i] + keysBuf.getSample (0, i);
+            youR[(size_t) i] = rigR[(size_t) i] + keysBuf.getSample (1, i);
+        }
+        youLp = youL.data();
+        youRp = youR.data();
+    }
     if (scopeFeed != nullptr && scopeFeed->wants (ScopeFeed::instrument))
-        scopeFeed->push (rigL.data(), rigR.data(), n, sr);
+        scopeFeed->push (youLp, youRp, n, sr);
 
     // ---- song ----
     std::fill (mixL.begin(), mixL.begin() + n, 0.0f);
@@ -147,7 +224,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         if (scopeFeed->wants (ScopeFeed::song))
             scopeFeed->push (mixL.data(), mixR.data(), n, sr);
         else if (scopeFeed->wants (ScopeFeed::duet))
-            scopeFeed->pushPair (rigL.data(), rigR.data(), mixL.data(), mixR.data(), n, sr);
+            scopeFeed->pushPair (youLp, youRp, mixL.data(), mixR.data(), n, sr);
     }
 
     // ---- monitor volume (after the scope taps: the scope reacts even with monitoring off) ----
@@ -157,6 +234,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         const float g = rigGain.getNextValue();
         rigL[(size_t) i] *= g;
         rigR[(size_t) i] *= g;
+    }
+
+    // the keys join "you" after the monitor volume (they can't be monitored through the interface)
+    if (keysPlayed)
+    {
+        juce::FloatVectorOperations::add (rigL.data(), keysBuf.getReadPointer (0), n);
+        juce::FloatVectorOperations::add (rigR.data(), keysBuf.getReadPointer (1), n);
     }
 
     // ---- sum, master, limiter ----

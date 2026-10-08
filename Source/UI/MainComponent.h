@@ -9,6 +9,7 @@
 #include "RigPanel.h"
 #include "SeparationOverlay.h"
 #include "LibraryView.h"
+#include "KeysPanel.h"
 
 namespace wis
 {
@@ -108,6 +109,10 @@ private:
     StemMixer mixer { player };
     WaveformView waveform { player };
     RigPanel rigPanel { rig, &engine };
+    KeysPanel keysPanel { engine, settings };
+    juce::TextButton keysButton { "KEYS" };
+    void showKeys (bool show);
+    void enableMidi (bool on);
     SeparationOverlay overlay;
     juce::Label status;
     juce::String statusText;

@@ -145,6 +145,37 @@ public:
             rig.removePedal (phaser);
         }
         std::cout << (failures == 0 ? "  [ok]   " : "  [FAIL] ") << "Pedalboard: 13 blocks, panel lays out and paints, pedal editor opens" << std::endl;
+
+        {
+            // Play Along's KEYS panel with its default instrument
+            StemPlayer player;
+            Recorder recorder;
+            AudioEngine engine (rig, player, recorder);
+            auto propsFile = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wis_keys_selftest.settings");
+            propsFile.deleteFile();
+            {
+                juce::PropertiesFile props (propsFile, juce::PropertiesFile::Options());
+                KeysPanel keysPanel (engine, props);
+                keysPanel.setSize (1440, 378);
+                keysPanel.setVisible (true);
+                keysPanel.ensureInstrument();
+                const bool ok = engine.getKeysInstrument() != nullptr && engine.getKeysInstrument()->getName() == "Piano Room";
+                if (! ok) ++failures;
+                juce::Image img (juce::Image::ARGB, 1440, 378, true);
+                juce::Graphics g (img);
+                keysPanel.paintEntireComponent (g, true);
+                const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {});
+                if (snapDir.isNotEmpty())
+                {
+                    juce::FileOutputStream out (juce::File (snapDir).getChildFile ("keys-panel.png"));
+                    if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (img, out); }
+                }
+                std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Play Along KEYS panel loads Piano Room and paints" << std::endl;
+                keysPanel.saveSettings();
+                engine.setKeysInstrument (nullptr);
+            }
+            propsFile.deleteFile();
+        }
         return failures;
     }
 

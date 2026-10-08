@@ -332,6 +332,12 @@ MainComponent::MainComponent (juce::PropertiesFile& s) : settings (s)
     addAndMakeVisible (mixer);
     addAndMakeVisible (waveform);
     addAndMakeVisible (rigPanel);
+    addChildComponent (keysPanel);
+    keysPanel.onBack = [this] { showKeys (false); };
+    keysButton.setTooltip ("Play keys along with the song: a real piano in a room, the singing yeti, synths... from a MIDI keyboard or your computer keys (Ctrl+K)");
+    keysButton.setColour (juce::TextButton::buttonColourId, theme::accent2.withAlpha (0.35f));
+    keysButton.onClick = [this] { showKeys (true); };
+    addAndMakeVisible (keysButton);
 
     status.setFont (uiFont (12.0f));
     status.setColour (juce::Label::textColourId, theme::textDim);
@@ -367,6 +373,7 @@ MainComponent::MainComponent (juce::PropertiesFile& s) : settings (s)
     engine.monitorOn = true;
 
     setupAudio();
+    enableMidi (true);
 
     setSize (1360, 860);
     startTimerHz (30);
@@ -389,6 +396,7 @@ MainComponent::~MainComponent()
     saveState();
     recorder.stop();
     deviceManager.removeAudioCallback (&engine);
+    enableMidi (false);
     deviceManager.removeChangeListener (this);
     deviceManager.closeAudioDevice();
     if (libraryWindow != nullptr) delete libraryWindow.getComponent();
@@ -741,6 +749,13 @@ void MainComponent::timerCallback()
         overlay.update (job->getProgress(), job->getStage());
 
     updateTransportLabels();
+
+    // a MIDI keyboard was played before any keys sound was chosen: load the piano
+    if (engine.midiNoteSeen.exchange (false) && engine.getKeysInstrument() == nullptr)
+    {
+        keysPanel.ensureInstrument();
+        setStatus ("MIDI keyboard detected: playing Piano Room. Click KEYS to change the sound.");
+    }
     waveform.refresh();
     mixer.refresh();
 
@@ -772,6 +787,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key.getTextCharacter() == 'l' || key.getTextCharacter() == 'L') { loopButton.triggerClick(); return true; }
     if (key.getTextCharacter() == 'r' || key.getTextCharacter() == 'R') { toggleRecord(); return true; }
     if (key == juce::KeyPress ('o', juce::ModifierKeys::commandModifier, 0)) { browseForSong(); return true; }
+    if (key == juce::KeyPress ('k', juce::ModifierKeys::commandModifier, 0)) { showKeys (! keysPanel.isVisible()); return true; }
     return false;
 }
 
@@ -795,7 +811,8 @@ void MainComponent::showHelp()
       << "3. Pick your input in the rig's INPUT box and a preset (e.g. 'Bass - Vintage Tube').\n"
       << "4. Open Song (or drop an MP3/FLAC on the window). The first time, the AI model (55 MB) downloads.\n"
       << "5. Choose 'I'm playing: Bass' to mute the original bass, press Space and play along.\n\n"
-      << "Shortcuts: Space play/pause, Home restart, Left/Right skip 5 s, L loop, R record, Ctrl+O open.\n"
+      << "Playing keys? Click KEYS (Ctrl+K): a real piano in a room (or the singing yeti, synths...) from a MIDI keyboard or your computer keys.\n\n"
+      << "Shortcuts: Space play/pause, Home restart, Left/Right skip 5 s, L loop, R record, Ctrl+O open, Ctrl+K keys, Ctrl+Shift+O scope.\n"
       << "Drag across the waveform to loop a section; double-click to clear it. Slow tricky parts down with Speed.\n\n"
       << "Amp captures: load any .nam file (free at tone3000.com) in the AMP section. "
       << "Cabinet IRs: load any .wav IR in the CABINET section.\n\n"
@@ -812,6 +829,7 @@ void MainComponent::setActive (bool shouldBeActive)
     if (active)
     {
         deviceManager.addAudioCallback (&engine);
+        enableMidi (true);
         rigPanel.refreshInputs();
         startTimerHz (30);
     }
@@ -820,8 +838,30 @@ void MainComponent::setActive (bool shouldBeActive)
         if (player.isPlaying()) player.pause();
         if (recorder.isRecording()) toggleRecord();
         deviceManager.removeAudioCallback (&engine);
+        enableMidi (false);
+        engine.keyboardState.allNotesOff (0);
         stopTimer();
     }
+}
+
+void MainComponent::enableMidi (bool on)
+{
+    // MIDI keyboards play the keys (the Studio attaches its own MIDI input while it owns the device)
+    deviceManager.removeMidiInputDeviceCallback ({}, &engine.midiCollector);
+    if (! on) return;
+    for (auto& m : juce::MidiInput::getAvailableDevices())
+        if (! deviceManager.isMidiInputDeviceEnabled (m.identifier))
+            deviceManager.setMidiInputDeviceEnabled (m.identifier, true);
+    deviceManager.addMidiInputDeviceCallback ({}, &engine.midiCollector);
+}
+
+void MainComponent::showKeys (bool show)
+{
+    keysPanel.setVisible (show);
+    rigPanel.setVisible (! show);
+    keysButton.setVisible (! show);
+    if (show) keysPanel.focusKeyboard();
+    else grabKeyboardFocus();
 }
 
 void MainComponent::openInStudio()
@@ -850,6 +890,7 @@ void MainComponent::saveState()
         settings.setValue ("rigState", rigXml.get());
     settings.setValue ("inputChannel", engine.selectedInput.load());
     settings.setValue ("masterVolume", masterVolume.getValue());
+    keysPanel.saveSettings();
     settings.saveIfNeeded();
 }
 
@@ -959,6 +1000,8 @@ void MainComponent::resized()
 
     // ---- rig (bottom) ----
     rigPanel.setBounds (r.removeFromBottom (juce::jmin (rigHeight, r.getHeight() / 2 + 40)));
+    keysPanel.setBounds (rigPanel.getBounds());
+    keysButton.setBounds (rigPanel.getX() + 118, rigPanel.getY() + 9, 76, 26);
 
     // ---- lanes ----
     auto lanes = r;

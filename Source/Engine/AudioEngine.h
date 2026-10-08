@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 #include "Rig/RigProcessor.h"
 #include "StemPlayer.h"
 #include "Recorder.h"
@@ -42,6 +43,17 @@ public:
     juce::StringArray getActiveInputNames() const;
     juce::Array<int> getActiveInputChannels() const;
 
+    // ---- keys: a MIDI instrument (piano, yeti...) played from a MIDI keyboard or the computer keyboard ----
+    juce::MidiMessageCollector midiCollector;     // add as a MIDI input callback
+    juce::MidiKeyboardState keyboardState;        // on-screen keyboard and computer keys
+    /** Message thread: installs (and prepares) the instrument; returns the old one, safe to delete. */
+    std::unique_ptr<juce::AudioProcessor> setKeysInstrument (std::unique_ptr<juce::AudioProcessor> p);
+    juce::AudioProcessor* getKeysInstrument() const { return keys.get(); }
+    std::atomic<float> keysVolumeDb { 0.0f };
+    /** Set when MIDI notes arrive (so the UI can load an instrument if there's none yet). */
+    std::atomic<bool> midiNoteSeen { false };
+    float readKeysPeak() { return keysPeak.exchange (0.0f); }
+
     /** The oscilloscope window's tap (nullptr = none). */
     std::atomic<ScopeFeed*> scope { nullptr };
 
@@ -63,7 +75,13 @@ private:
     juce::Array<int> activeInputChannels;
     std::atomic<int> firstInput { -1 }, secondInput { -1 };
 
-    std::vector<float> inMono, rigL, rigR, mixL, mixR;
+    std::vector<float> inMono, rigL, rigR, mixL, mixR, youL, youR;
+    juce::AudioBuffer<float> keysBuf;
+    juce::MidiBuffer keysMidi;
+    std::unique_ptr<juce::AudioProcessor> keys;
+    juce::CriticalSection keysLock;
+    juce::SmoothedValue<float> keysGain;
+    std::atomic<float> keysPeak { 0 };
     juce::SmoothedValue<float> rigGain, masterGain;
 
     std::atomic<float> outPeakL { 0 }, outPeakR { 0 };

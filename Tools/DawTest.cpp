@@ -19,6 +19,9 @@
 #include <tuple>
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
+#include "Daw/Instruments/PianoRoom.h"
+#include "Daw/Instruments/YetiVoice.h"
+#include "Daw/Instruments/RoomIr.h"
 #include <iostream>
 
 using namespace wis::daw;
@@ -1171,6 +1174,193 @@ int main (int argc, char** argv)
             (good ? ok : bad)++;
         }
         check (bad == 0, juce::String (ok) + " built-in plugins run every preset with finite, sane output" + (problems.isEmpty() ? juce::String() : ": " + problems.joinIntoString (", ")));
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Piano Room, rooms and Yodel Yeti:" << std::endl;
+    {
+        // plays `notes` (note, velocity 0..1, on second, off second) through an instrument for `seconds`
+        struct Note { int note; float vel; double on, off; };
+        auto play = [] (BuiltinProcessor& p, std::vector<Note> notes, double seconds, std::vector<std::pair<double, int>> cc64 = {})
+        {
+            p.setPlayConfigDetails (0, 2, sr, block);
+            p.prepareToPlay (sr, block);
+            const int total = (int) (seconds * sr);
+            juce::AudioBuffer<float> out (2, total);
+            out.clear();
+            for (int pos = 0; pos < total; pos += block)
+            {
+                const int n = juce::jmin (block, total - pos);
+                juce::MidiBuffer midi;
+                for (auto& nt : notes)
+                {
+                    const int on = (int) (nt.on * sr), off = (int) (nt.off * sr);
+                    if (on >= pos && on < pos + n) midi.addEvent (juce::MidiMessage::noteOn (1, nt.note, nt.vel), on - pos);
+                    if (off >= pos && off < pos + n) midi.addEvent (juce::MidiMessage::noteOff (1, nt.note), off - pos);
+                }
+                for (auto& [t, v] : cc64)
+                    if ((int) (t * sr) >= pos && (int) (t * sr) < pos + n) midi.addEvent (juce::MidiMessage::controllerEvent (1, 64, v), (int) (t * sr) - pos);
+                juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+                p.processBlock (view, midi);
+            }
+            return out;
+        };
+        // fundamental by autocorrelation (between 40 and 1200 Hz) on a mono window
+        auto pitchOf = [] (const juce::AudioBuffer<float>& b, int from, int len)
+        {
+            std::vector<float> x ((size_t) len);
+            for (int i = 0; i < len; ++i) x[(size_t) i] = b.getSample (0, from + i) + b.getSample (1, from + i);
+            int bestLag = 0; double best = 0;
+            const int minLag = (int) (sr / 1200), maxLag = (int) (sr / 40);
+            std::vector<double> ac ((size_t) maxLag + 2, 0.0);
+            for (int lag = minLag; lag <= maxLag; ++lag)
+            {
+                double acc = 0;
+                for (int i = 0; i + lag < len; ++i) acc += x[(size_t) i] * x[(size_t) (i + lag)];
+                ac[(size_t) lag] = acc;
+            }
+            const double peak = *std::max_element (ac.begin(), ac.end());
+            for (int lag = minLag; lag <= maxLag; ++lag)   // first lag that reaches 90% of the best (avoids octave errors)
+                if (ac[(size_t) lag] > 0.9 * peak && ac[(size_t) lag] >= ac[(size_t) lag - 1] && ac[(size_t) lag] >= ac[(size_t) lag + 1]) { bestLag = lag; break; }
+            juce::ignoreUnused (best);
+            return bestLag > 0 ? sr / bestLag : 0.0;
+        };
+
+        // ---- rooms ----
+        {
+            juce::StringArray bad;
+            for (int sp = 1; sp < roomir::numSpaces; ++sp)
+            {
+                auto ir = roomir::design (sp, sr, 1.0f, 0.5f, 0.0f);
+                double e = 0;
+                for (int i = 0; i < ir.getNumSamples(); ++i) e += ir.getSample (0, i) * ir.getSample (0, i);
+                // time for the energy to fall 20 dB, x3 = a T60 estimate (Schroeder integration)
+                std::vector<double> tail ((size_t) ir.getNumSamples() + 1, 0.0);
+                for (int i = ir.getNumSamples(); --i >= 0;) tail[(size_t) i] = tail[(size_t) i + 1] + ir.getSample (0, i) * ir.getSample (0, i);
+                int t5 = 0, t25 = 0;
+                for (int i = 0; i < ir.getNumSamples(); ++i)
+                {
+                    const double db = 10.0 * std::log10 (tail[(size_t) i] / tail[0] + 1e-30);
+                    if (t5 == 0 && db < -5.0) t5 = i;
+                    if (t25 == 0 && db < -25.0) { t25 = i; break; }
+                }
+                const double t60 = 3.0 * (t25 - t5) / sr;
+                const double want = roomir::decaySeconds (sp);
+                const bool okDecay = sp == roomir::canyon || sp == roomir::forest || (t60 > want * 0.5 && t60 < want * 1.8);
+                if (! allFinite (ir) || std::abs (e - 1.0) > 0.01 || ! okDecay)
+                    bad.add (roomir::spaceNames()[sp] + " (T60 " + juce::String (t60, 2) + " s, wanted ~" + juce::String (want, 2) + ")");
+            }
+            check (bad.isEmpty(), juce::String (roomir::numSpaces - 1) + " spaces design sane impulse responses" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+
+            // the canyon answers back: a distinct echo ~190 ms after the start
+            auto canyon = roomir::design (roomir::canyon, sr, 1.0f, 0.5f, 0.0f);
+            auto energyIn = [&] (const juce::AudioBuffer<float>& b, double t0, double t1) { double e = 0; for (int i = (int) (t0 * sr); i < (int) (t1 * sr); ++i) e += b.getSample (0, i) * b.getSample (0, i); return e; };
+            check (energyIn (canyon, 0.185, 0.215) > 4.0 * energyIn (canyon, 0.15, 0.18),
+                   "Canyon: a distinct echo comes back (" + juce::String (energyIn (canyon, 0.185, 0.215), 4) + " vs " + juce::String (energyIn (canyon, 0.15, 0.18), 4) + " before it)");
+        }
+
+        // ---- pianos ----
+        const bool haveSamples = PianoPackCache::isInstalled ("grand") && PianoPackCache::isInstalled ("steinway") && PianoPackCache::isInstalled ("upright");
+        std::cout << (haveSamples ? "  (piano samples found)" : "  (piano samples NOT found: sampled models fall back to the modelled grand; set WIS_PIANOS)") << std::endl;
+        for (int model = 0; model < 5; ++model)
+        {
+            PianoRoom piano;
+            piano.setParam ("model", (float) model);
+            piano.setParam ("space", 0.0f);   // dry, so pitch and decay measure the piano itself
+            piano.setNonRealtime (true);
+            piano.waitUntilReady();
+            const auto name = PianoRoom::modelNames()[model];
+            auto soft = play (piano, { { 60, 0.25f, 0.05, 1.5 } }, 1.0);
+            auto loud = play (piano, { { 60, 0.95f, 0.05, 1.5 } }, 1.0);
+            const float ls = rms (soft, (int) (0.06 * sr), (int) (0.5 * sr)), ll = rms (loud, (int) (0.06 * sr), (int) (0.5 * sr));
+            const double f = pitchOf (loud, (int) (0.3 * sr), (int) (0.12 * sr));
+            const double want = model == 4 ? 523.25 : 261.63;
+            check (allFinite (loud) && ll > 0.005f && ll < 0.9f && ll > ls * 1.6f && std::abs (f / want - 1.0) < 0.04,
+                   name + ": plays C" + (model == 4 ? "5" : "4") + " at " + juce::String (f, 1) + " Hz, louder when hit harder (" + juce::String (juce::Decibels::gainToDecibels (ls), 1) + " -> " + juce::String (juce::Decibels::gainToDecibels (ll), 1) + " dB)");
+            if (model == 0)
+            {
+                // released without the pedal: damped; with the pedal down: still ringing
+                auto damped = play (piano, { { 48, 0.8f, 0.05, 0.4 } }, 1.6);
+                auto held = play (piano, { { 48, 0.8f, 0.05, 0.4 } }, 1.6, { { 0.01, 127 } });
+                const float d = rms (damped, (int) (1.3 * sr), (int) (1.6 * sr)), h = rms (held, (int) (1.3 * sr), (int) (1.6 * sr));
+                check (h > d * 8.0f, "Sustain pedal keeps the strings ringing (" + juce::String (juce::Decibels::gainToDecibels (h / juce::jmax (1e-9f, d)), 1) + " dB more)");
+                auto top = play (piano, { { 96, 0.8f, 0.05, 0.3 } }, 1.0);
+                check (rms (top, (int) (0.6 * sr), (int) (0.9 * sr)) > 1.0e-4f, "The top keys have no dampers and ring on");
+                piano.setParam ("tune", 432.0f);
+                auto low = play (piano, { { 69, 0.8f, 0.05, 1.0 } }, 0.6);
+                const double a4 = pitchOf (low, (int) (0.25 * sr), (int) (0.12 * sr));
+                check (std::abs (a4 - 432.0) < 432.0 * 0.03, "Tuning: A4 = 432 Hz (" + juce::String (a4, 1) + ")");
+            }
+        }
+        {
+            // every preset, including the rooms, runs clean
+            PianoRoom piano;
+            piano.setNonRealtime (true);
+            juce::StringArray bad;
+            for (int pr = 0; pr < piano.getNumPrograms(); ++pr)
+            {
+                piano.setCurrentProgram (pr);
+                piano.waitUntilReady();
+                auto out = play (piano, { { 48, 0.7f, 0.02, 0.8 }, { 64, 0.7f, 0.02, 0.8 }, { 67, 0.7f, 0.3, 0.8 } }, 1.2);
+                const float r = rms (out, 0, out.getNumSamples());
+                if (! allFinite (out) || r < 0.002f || out.getMagnitude (0, out.getNumSamples()) > 2.0f)
+                    bad.add (piano.getProgramName (pr) + " (" + juce::String (juce::Decibels::gainToDecibels (r), 1) + " dB)");
+            }
+            check (bad.isEmpty(), juce::String (piano.getNumPrograms()) + " piano presets play cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+        }
+
+        // ---- the yeti ----
+        {
+            YetiVoice yeti;
+            yeti.setParam ("delayMix", 0.0f);
+            yeti.setParam ("reverb", 0.0f);
+            yeti.setParam ("vibDepth", 0.0f);
+            auto band = [&] (const juce::AudioBuffer<float>& b, double lo, double hi)
+            {
+                // energy in a band via a crude DFT over a 0.2 s window
+                double e = 0;
+                const int from = (int) (0.4 * sr), len = (int) (0.2 * sr);
+                for (double f = lo; f < hi; f += 20.0)
+                {
+                    double re = 0, im = 0;
+                    for (int i = 0; i < len; ++i) { const double ph = juce::MathConstants<double>::twoPi * f * i / sr; const float x = b.getSample (0, from + i); re += x * std::cos (ph); im += x * std::sin (ph); }
+                    e += re * re + im * im;
+                }
+                return e;
+            };
+            yeti.setParam ("vowel", 0.5f);   // A
+            auto a = play (yeti, { { 45, 0.9f, 0.05, 0.9 } }, 1.0);
+            yeti.setParam ("vowel", 1.0f);   // I
+            auto ee = play (yeti, { { 45, 0.9f, 0.05, 0.9 } }, 1.0);
+            const double f = pitchOf (a, (int) (0.4 * sr), (int) (0.15 * sr));
+            check (allFinite (a) && rms (a, (int) (0.3 * sr), (int) (0.8 * sr)) > 0.01f && std::abs (f / 110.0 - 1.0) < 0.04,
+                   "Yeti sings A2 at " + juce::String (f, 1) + " Hz (" + juce::String (juce::Decibels::gainToDecibels (rms (a, (int) (0.3 * sr), (int) (0.8 * sr))), 1) + " dB)");
+            check (band (a, 420, 800) > band (ee, 420, 800) * 2.0 && band (ee, 1300, 1700) > band (a, 1300, 1700) * 1.5,
+                   "Vowels: 'ah' has the open first formant, 'ee' the high second one (F1 band " + juce::String (band (a, 420, 800) / juce::jmax (1e-12, band (ee, 420, 800)), 2)
+                   + "x, F2 band " + juce::String (band (ee, 1300, 1700) / juce::jmax (1e-12, band (a, 1300, 1700)), 2) + "x)");
+            check (yeti.face.notes.load() >= 2, "The animation hears the notes");
+
+            yeti.setParam ("delayMix", 0.6f);
+            yeti.setParam ("delayTime", 300.0f);
+            auto echo = play (yeti, { { 45, 0.9f, 0.05, 0.25 } }, 1.2);
+            check (rms (echo, (int) (0.65 * sr), (int) (0.85 * sr)) > 0.003f, "Its delay echoes after the note stops");
+
+            yeti.padX = 0.2f; yeti.padY = 0.5f; yeti.padDown = true;
+            auto padOut = play (yeti, {}, 0.8);
+            yeti.padDown = false;
+            check (rms (padOut, (int) (0.3 * sr), (int) (0.7 * sr)) > 0.01f, "Singing from the X/Y pad without a keyboard");
+
+            juce::StringArray bad;
+            for (int pr = 0; pr < yeti.getNumPrograms(); ++pr)
+            {
+                yeti.setCurrentProgram (pr);
+                auto out = play (yeti, { { 43, 0.8f, 0.05, 0.8 }, { 47, 0.8f, 0.4, 0.8 } }, 1.2);
+                const float r = rms (out, 0, out.getNumSamples());
+                if (! allFinite (out) || r < 0.003f || out.getMagnitude (0, out.getNumSamples()) > 2.5f)
+                    bad.add (yeti.getProgramName (pr) + " (" + juce::String (juce::Decibels::gainToDecibels (r), 1) + " dB, peak " + juce::String (out.getMagnitude (0, out.getNumSamples()), 2) + ")");
+            }
+            check (bad.isEmpty(), juce::String (yeti.getNumPrograms()) + " yeti presets sing cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+        }
     }
 
     // -------------------------------------------------------------------------------------------

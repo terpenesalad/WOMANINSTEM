@@ -1,11 +1,30 @@
-## WOMANINSTEM 3.3 for Windows (64-bit): the Pedalboard
+## WOMANINSTEM 3.4 for Windows (64-bit): Piano Room, Yodel Yeti, KEYS and artist-style rigs
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0, 3.0, 3.1 and 3.2 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.3 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.4
+
+**Piano Room: real pianos in real (and unreal) places** (Studio: *+ Track → Software Instrument*, Library → Piano Room; Play Along: **KEYS**)
+- Three sampled pianos: a **Concert Grand** (Yamaha C5, 6 velocity layers), a darker **Vintage Grand** (Steinway) and a **Upright** (Kawai, recorded in a living room), plus a **Modelled Grand** built from physics and a **Toy Piano**.
+- **Character**: hammers (soft to hard), felt, lid, dynamics, damper release, stretch tuning, A4 tuning (415 to 466 Hz), **honky-tonk** detune, **tacks**, **age** (every key its own amount out of tune, unisons drifting, wobble), key and pedal noise, sympathetic string resonance, latched sustain. The top keys ring on like a real piano's (no dampers).
+- **Tone**: bass / body / treble, four mic positions (inside the lid to the back of the room), width, drive, compressor, tape (wow, flutter, saturation, hiss) and lo-fi (old radio / megaphone).
+- **Space**: put the piano in a vocal booth, living room, wooden studio, big live room, bar, bathroom, concert hall, church, cathedral, **forest clearing**, **canyon** (echoes off the far walls), underground car park, plate or spring tank. Amount, size, distance, tone and pre-delay. The editor shows the piano in the place you picked.
+- 21 presets, including *Intimate Ballad Grand* and *Murder Ballad Grand* (Nick Cave territory), *Rain Dog Upright* and *Junkyard Parlour* (Tom Waits-style), *Bohemian Rock Grand* and *Stadium Rock Grand* (Queen-style), *Swedish Psych Upright* and *Forest Cabin Psych* (Dungen-style), *Honky-Tonk Saloon*, *Tack Piano*, *Felt Piano*, *Lo-Fi Cassette Keys*.
+
+**KEYS in Play Along** (the **KEYS** button on the rig, or Ctrl+K)
+- Play a piano (or the yeti, the Sound Library, a synth, HomeKeys) along with any song, from a **MIDI keyboard** (plug it in, it just works) or your **computer keys** (A W S E D F T G Y H U J K..., Z / X change octave). Sustain button, volume, every knob one click away. The keys are recorded with you and drawn by the Scope.
+
+**Yodel Yeti: a singing yeti** (Studio instrument)
+- A vowel-morphing voice: an **X/Y pad** (vowel across, pitch up and down: click and drag to sing without a keyboard), the mod wheel, a vowel LFO, a new vowel every note, random vowels or an "O-M" chant. Glide, vibrato that swells in, a closed-mouth "mmm" at the edges of notes, **throat singing** overtones, a Tuvan-style **growl**, choirs of up to 5, five voice types, head size, and a stereo **delay** and mountain reverb.
+- The yeti (in his red bobble hat) sings what you play: his mouth makes the vowels, he bounces on every note, his eyes follow the pitch, he sways with the vibrato, closes his eyes and puts his hands together on long notes, and meditates when you stop.
+
+**Artist-style rig presets** (Play Along rig and *Amp & Pedals*; approximations, not endorsements)
+- *Psych Phaser Fuzz* and *Psych Pop Hollow-Body* bass (Tame Impala-ish), *Garage Fuzz Blowout* (Ty Segall-ish), *Heavy 70s Fuzz Riffs* (FUZZ-ish), *60s Jazz Box* (the Julie London sessions), *12-String Jangle* (George) and *Casino Crunch* (John), *Doom Sludge* guitar and bass (Hell, *HEVY*). Several use the new pedalboard (phaser, treble booster, octave-up, sub octave, a 12-string octave voice).
 
 ### New in 3.3
 

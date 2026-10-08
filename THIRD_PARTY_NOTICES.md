@@ -16,6 +16,9 @@ WOMANINSTEM is built on these open-source projects. Thank you to their authors.
 | libFLAC, Ogg Vorbis (bundled in JUCE) | FLAC / OGG decoding and encoding | BSD-style |
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) by Bernhard Schelling | SoundFont (`.sf2`) playback for the Studio's Sound Library | MIT |
 | [GeneralUser GS](https://www.schristiancollins.com/generaluser.php) v2.0.3 by S. Christian Collins | The built-in Sound Library: 287 General MIDI instruments and drum kits (bundled in `sounds/`) | GeneralUser GS License v2.0 (free for any use, see `sounds/GeneralUser-GS-LICENSE.txt`) |
+| [Salamander Grand Piano V3](https://archive.org/details/SalamanderGrandPianoV3) by Alexander Holm (via [sfzinstruments](https://github.com/sfzinstruments/SalamanderGrandPiano)) | Piano Room's *Concert Grand* (Yamaha C5): 6 of 16 velocity layers, trimmed, bundled in `pianos/grand/` | CC-BY 3.0 |
+| [Splendid Grand Piano](https://github.com/sfzinstruments/SplendidGrandPiano) (Steinway samples by Akai; SFZ by kinwie) | Piano Room's *Vintage Grand*, trimmed, bundled in `pianos/steinway/` | Public domain |
+| [Upright Piano KW](http://freepats.zenvoid.org/Piano/acoustic-grand-piano.html#UprightKW) by Gonzalo and Roberto, FreePats | Piano Room's *Upright* (Kawai upright), trimmed, bundled in `pianos/upright/` | CC0 |
 | VST3 SDK by Steinberg Media Technologies (bundled in JUCE) | Hosting VST3 instruments and effects in the Studio | BSD-style (the SDK subset bundled with JUCE) |
 | [CLAP](https://github.com/free-audio/clap) by the free-audio community | Hosting CLAP instruments and effects | MIT |
 | lilv, serd, sord, sratom, zix and the LV2 specification (bundled in JUCE) by David Robillard and contributors | Hosting LV2 instruments and effects | ISC |
@@ -31,4 +34,7 @@ The separation model is downloaded from the
 MIT-licensed Demucs checkpoints).
 
 Amp captures (`.nam`), cabinet impulse responses, SoundFonts, samples and plugins you load are made by their respective
-authors and are subject to their own licenses; apart from GeneralUser GS, none are bundled with WOMANINSTEM.
+authors and are subject to their own licenses; apart from GeneralUser GS and the three piano sample sets above, none are
+bundled with WOMANINSTEM. Room sounds in Piano Room are designed by WOMANINSTEM (no recorded impulse responses). Yodel Yeti
+and its character are original; it is not affiliated with any other singing-voice plugin. Rig presets named after artists
+are approximations of their recorded sounds, not endorsements.

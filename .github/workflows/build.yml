@@ -68,6 +68,21 @@ jobs:
           $hash = (Get-FileHash sounds/GeneralUser-GS.sf2 -Algorithm SHA256).Hash.ToLower()
           if ($hash -ne $env:SF_SHA256) { throw "SoundFont checksum mismatch: $hash" }
 
+      - name: Cache piano samples
+        id: piano-cache
+        uses: actions/cache@v4
+        with:
+          path: pianos
+          key: pianos-${{ hashFiles('Tools/prep_pianos.py') }}
+
+      - name: Build the piano sample packs (Salamander grand, Splendid grand, Upright KW; ~90 MB)
+        if: steps.piano-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          python -m pip install --quiet soundfile numpy
+          python Tools/prep_pianos.py piano-dl pianos
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error title=Piano samples::prep_pianos.py failed"; exit 1 }
+
       - name: Get the ASIO SDK (GPLv3) for low-latency audio
         id: asio
         shell: pwsh
@@ -124,6 +139,7 @@ jobs:
         shell: pwsh
         run: |
           $env:WIS_SOUNDFONT = "$PWD\sounds\GeneralUser-GS.sf2"
+          $env:WIS_PIANOS = "$PWD\pianos"
           build\dawtest_artefacts\Release\dawtest.exe 2>&1 | Tee-Object -FilePath dawtest.log
           $code = $LASTEXITCODE
           $msg = ((Get-Content dawtest.log) -replace '%','%25') -join '%0A'
@@ -161,6 +177,7 @@ jobs:
           Copy-Item build/WOMANINSTEM_artefacts/Release/WOMANINSTEM.exe $d/
           Copy-Item sounds/GeneralUser-GS.sf2 "$d/sounds/"
           Copy-Item sounds/GeneralUser-GS-LICENSE.txt "$d/sounds/"
+          Copy-Item pianos -Destination "$d/pianos" -Recurse
           Copy-Item build/stemsplit_artefacts/Release/stemsplit.exe $d/
           Copy-Item "models/$env:MODEL_FILE" "$d/models/"
           Copy-Item LICENSE "$d/LICENSE.txt"
@@ -241,6 +258,19 @@ jobs:
           curl -fsSL -o sounds/GeneralUser-GS.sf2 "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/$SF_COMMIT/GeneralUser-GS.sf2"
           echo "$SF_SHA256  sounds/GeneralUser-GS.sf2" | sha256sum -c -
 
+      - name: Cache piano samples
+        id: piano-cache
+        uses: actions/cache@v4
+        with:
+          path: pianos
+          key: pianos-${{ hashFiles('Tools/prep_pianos.py') }}
+
+      - name: Build the piano sample packs
+        if: steps.piano-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install --quiet --break-system-packages soundfile numpy || python3 -m pip install --quiet soundfile numpy
+          python3 Tools/prep_pianos.py piano-dl pianos
+
       - name: Cache dependencies
         uses: actions/cache@v4
         with:
@@ -263,7 +293,7 @@ jobs:
       - name: Test - Studio (DAW engine, instruments, effects, recording, export)
         run: |
           set -o pipefail
-          WIS_SOUNDFONT=$PWD/sounds/GeneralUser-GS.sf2 ./build/dawtest_artefacts/Release/dawtest 2>&1 | tee dawtest.log || { echo "::error title=dawtest failed::$(sed 's/%/%25/g' dawtest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+          WIS_SOUNDFONT=$PWD/sounds/GeneralUser-GS.sf2 WIS_PIANOS=$PWD/pianos ./build/dawtest_artefacts/Release/dawtest 2>&1 | tee dawtest.log || { echo "::error title=dawtest failed::$(sed 's/%/%25/g' dawtest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
 
       - name: Test - every plugin editor opens and paints
         timeout-minutes: 5
