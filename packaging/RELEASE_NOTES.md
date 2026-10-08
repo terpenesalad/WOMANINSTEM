@@ -1,13 +1,36 @@
-## WOMANINSTEM 3.0 for Windows (64-bit): the Studio grows up
+## WOMANINSTEM 3.1 for Windows (64-bit): Beat Lab and Amps 2.0
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs made in 2.0 open in 3.0 unchanged.
+Songs and rig presets from 2.0 and 3.0 open unchanged (old amp and cabinet choices are mapped to the closest new models).
 
-### New in 3.0
+### New in 3.1
+
+**Beat Lab: a groovebox for beats and loops** (*+ Track → Beat Lab*, or *Library → Sounds → Beat Lab*)
+- 8 lanes: four vintage drum machines, a **Glitch Lab** kit (clicks, zaps, FM blips, bit-crushed hits, sub booms), or **drag your own samples and loops onto a lane**. Loops are chopped across the lane's steps so they **stay in time at any tempo**; move steps around to re-arrange the beat. Or repitch them like a record.
+- Steps with velocity, **rolls / ratchets** (2 to 16 hits, even, pitch-rising, pitch-falling or fading), **chance**, pitch, micro-timing and reverse. Euclidean rhythms, randomise (tame to wild), shift, copy.
+- 8 patterns (switch on the bar, or chain them), swing, **per-lane length and rate** for polymeters (5 against 7 against 16...), up to 64 steps.
+- Per lane: volume, pan, tune, decay, DJ filter with resonance, drive, bit-crush, reverb and delay sends, choke groups.
+- **Perform**: hold Stutter (1/4 to 1/64), Tape Stop, Reverse or Fill; sweep the XY filter pad.
+- **Glitch / IDM section**: *Mutate* gives every bar its own variation, *Chaos* throws in rolls, reversals and pitch jumps, *Break Shuffle* re-orders loop slices for drill'n'bass edits. Presets: Drill Machine, Polymeter Maze, Ambient Glitch, Braindance.
+- 14 presets: Boom Bap, Lo-Fi Hip Hop, House, Techno, Trap, Breakbeat, Drum & Bass, Dream Pop Machine, Reggaeton, Afrobeat and the four IDM kits.
+- **Pattern to Song** turns the pattern into a MIDI clip at the playhead (sliced loops still play the right slices).
+
+**Amps 2.0** (Play Along rig and the *Amp & Pedals* plugin)
+- **12 amp models** with modelled tone-stack circuits, preamp, power amp, sag and bloom. Guitar: American Clean, Tweed Breakup, British Chime, British Crunch, British Lead, Modern High Gain, Smooth Overdrive. Bass: 60s British Valve, Classic Tube 8x10, Vintage Flip-Top, Modern Growl, Studio DI.
+- **11 cabinets** with **microphone choice** (dynamic, ribbon, condenser, dynamic + ribbon), **mic position**, **room** and a phase-aligned **DI blend**. Zero-latency convolution.
+- **Strings & Pickups**: make any bass sound like flatwounds, a 60s violin bass or a foam-muted bass, or brighter roundwounds; guitar single coils or humbuckers. One knob, no EQ.
+- **Bass Drive** that keeps your clean low end, and **Tape** saturation.
+- **22 loudness-matched presets** that sound finished straight away. For bass: *60s Merseybeat (violin bass)*, *Late 60s Studio (DI + amp)*, *Motown Flatwound*, *Classic Rock 8x10*, *Modern Growl*, *Modern Clean Hi-Fi*, *Punk Pick*, *Dub Deep*, *Fuzz Bass*, *Clean DI*.
+
+**Repeat bar fixed**
+- Studio: the yellow repeat (cycle) bar now has its own strip at the top of the ruler. Drag to draw it, drag its edges to resize, drag the middle to move, click to turn it on / off, double-click a bar to repeat just that bar, right-click for quick choices (4 bars, selected clips, between markers, double, halve, move).
+- Play Along: drag the edges of a loop to adjust it.
+
+### Also new in 3.0
 
 **Plugins of every kind**
 - Hosts **VST3, VST (2.x), CLAP and LV2** instruments and effects (Project → Plugin Manager → Options → Scan). Every plugin is still tested in a separate process first, so a crashing plugin can't take the app down.

@@ -4,6 +4,7 @@
 #include "Daw/Model/DrumPatterns.h"
 #include "Daw/Model/MidiLoops.h"
 #include "Daw/Instruments/VintageRhythms.h"
+#include "Daw/Instruments/BeatLab.h"
 #include "Library/SongLibrary.h"
 
 namespace wis::daw
@@ -142,6 +143,12 @@ void BrowserPanel::populate()
         auto* machines = addGroup ("Vintage Drum Machines");
         const juce::StringArray kitNames { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" };
         for (int i = 0; i < kitNames.size(); ++i) addLeaf (machines, kitNames[i], "inst:rhythmbox:" + juce::String (i), "Rhythm Box");
+        auto* beatLab = addGroup ("Beat Lab (groovebox: beats, loops, glitch)");
+        {
+            const auto names = BeatLab::presetNames();
+            for (int i = 0; i < names.size(); ++i)
+                addLeaf (beatLab, names[i], "inst:beatlab:" + juce::String (i), "Beat Lab: step sequencer, your samples and loops, stutter and glitch");
+        }
         auto* samplers = addGroup ("Samplers");
         addLeaf (samplers, "Sampler", "inst:sampler:-1", "load any sound: play it, one-shot it, or slice a loop");
         for (int i = 0; i < kitNames.size(); ++i) addLeaf (samplers, "Drum Pads - " + kitNames[i], "inst:drumpads:" + juce::String (i), "16 pads, drop your own samples");

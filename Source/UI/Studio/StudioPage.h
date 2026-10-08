@@ -13,6 +13,8 @@
 namespace wis::daw
 {
 
+class BeatLab;
+
 /** The Studio: a full DAW page (control bar, library, arrangement, editor / mixer / keyboard). */
 class StudioPage : public juce::Component,
                    public juce::DragAndDropContainer,
@@ -59,6 +61,7 @@ private:
     void importFiles (const juce::StringArray& files, int trackId, double beat);
     Track trackForInstrument (int trackId, const juce::String& name);
     void bounceInPlace (int trackId);
+    void patternToSong (BeatLab& b, const juce::MidiMessageSequence& seq, double lengthBeats);
     void audioFromPlugin (BuiltinProcessor& p, const juce::File& f);
 
     void newProject();

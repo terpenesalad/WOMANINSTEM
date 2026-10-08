@@ -1,6 +1,7 @@
 #include "Daw/Model/MidiLoops.h"
 #include "Daw/Instruments/VintageRhythms.h"
 #include "Daw/Instruments/HomeKeys.h"
+#include "Daw/Instruments/BeatLab.h"
 #include "StudioPage.h"
 #include "PluginMenus.h"
 #include "Daw/Model/DrumPatterns.h"
@@ -65,6 +66,7 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     BuiltinProcessor::fileToRef = [this] (const juce::File& f) { return project.makeRef (project.importIntoProject (f)); };
     BuiltinProcessor::refToFile = [this] (const juce::String& r) { return project.resolve (r); };
     BuiltinProcessor::onAudioToTrack = [this] (BuiltinProcessor& p, const juce::File& f) { audioFromPlugin (p, f); };
+    BeatLab::onPatternToSong = [this] (BeatLab& b, const juce::MidiMessageSequence& seq, double lengthBeats) { patternToSong (b, seq, lengthBeats); };
     engine.onError = [this] (const juce::String& m) { setStatus (m); };
     engine.onRecordingFinished = [this] { setStatus ("Recorded. Press R to record another take, or Cmd/Ctrl+Z to undo it."); };
 
@@ -161,6 +163,7 @@ StudioPage::~StudioPage()
     pluginManagerWindow.reset();
     engine.onSlotRemoved = nullptr;
     BuiltinProcessor::onAudioToTrack = nullptr;
+    BeatLab::onPatternToSong = nullptr;
     engine.onError = nullptr;
     engine.onRecordingFinished = nullptr;
     project.onLoaded = nullptr;
@@ -370,6 +373,7 @@ void StudioPage::addTrackMenu()
     m.addItem (9, "Sampler  (play / slice any sound)");
     m.addItem (10, "Drum Pads  (16 pads for your own samples)");
     m.addItem (11, "Audio: Loop Station  (looper pedal on your input)");
+    m.addItem (15, "Beat Lab  (groovebox: beats, loops, samples, glitch)");
     m.addSeparator();
     m.addItem (12, "Aux Bus: Reverb  (shared reverb you send tracks to)");
     m.addItem (13, "Aux Bus: Delay");
@@ -418,6 +422,7 @@ void StudioPage::addTrackMenu()
             }
             case 9: t = project.addTrack (kindInstrument, "Sampler", insertAt); project.setInstrument (t, builtinRef ("sampler")); break;
             case 10: t = project.addTrack (kindInstrument, "Drum Pads", insertAt); project.setInstrument (t, builtinPresetRef ("drumpads", 0)); break;
+            case 15: t = project.addTrack (kindInstrument, "Beat Lab", insertAt); project.setInstrument (t, builtinPresetRef ("beatlab", 0)); break;
             case 11:
                 t = project.addTrack (kindAudio, "Loop Station", insertAt);
                 project.setPlugin (t.inserts(), -1, builtinRef ("looper"));
@@ -438,7 +443,13 @@ void StudioPage::addTrackMenu()
             default: return;
         }
         ctx.selectTrack (t.id());
-        if (r >= 12)
+        if (r == 15)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.instrument());
+            setStatus ("Beat Lab: press Play in it (or play the song), click steps to make a beat, drop loops and samples onto lanes.");
+        }
+        else if (r >= 12)
             setStatus ("Bus added. Send tracks to it from the mixer (+ Send) or route a track's output into it.");
         else if (r == 11)
         {
@@ -624,6 +635,36 @@ void StudioPage::audioFromPlugin (BuiltinProcessor& p, const juce::File& f)
     setStatus ("The loop is on \"" + target.name() + "\" at bar " + juce::String ((int) (at / bpb) + 1) + ". Clear the Loop Station if you don't want to hear it twice.");
 }
 
+void StudioPage::patternToSong (BeatLab& b, const juce::MidiMessageSequence& seq, double lengthBeats)
+{
+    Track owner;
+    for (auto tv : project.tracks())
+    {
+        Track t (tv);
+        if (t.instrument().isValid() && engine.getProcessor (t.instrument()[ids::id].toString()) == &b) owner = t;
+    }
+    if (! owner.isValid()) { setStatus ("Couldn't find the Beat Lab's track."); return; }
+    ctx.beginEdit ("Beat Lab pattern to song");
+    const double bpb = project.beatsPerBar();
+    const double at = std::floor (engine.getPositionBeats() / bpb) * bpb;
+    const double len = std::ceil (lengthBeats / bpb - 1.0e-9) * bpb;
+    auto c = project.addMidiClip (owner, at, len, "Beat Lab " + juce::String::charToString ((juce::juce_wchar) ('A' + b.getPatternEditing())));
+    for (int i = 0; i < seq.getNumEvents(); ++i)
+    {
+        auto* ev = seq.getEventPointer (i);
+        if (! ev->message.isNoteOn()) continue;
+        const double start = ev->message.getTimeStamp();
+        const double end = ev->noteOffObject != nullptr ? ev->noteOffObject->message.getTimeStamp() : start + 0.1;
+        project.addNote (c, ev->message.getNoteNumber(), start, juce::jmax (0.01, end - start), juce::jlimit (1, 127, (int) ev->message.getVelocity()));
+    }
+    // the clip plays it now; pause the Beat Lab's own sequencer so it doesn't play twice
+    b.setParam ("sync", 0.0f);
+    if (b.isRunning()) b.startStop();
+    ctx.selectTrack (owner.id());
+    ctx.selectClip (c.id(), false);
+    setStatus ("Pattern added at bar " + juce::String ((int) (at / bpb) + 1) + " on \"" + owner.name() + "\". Loop or copy the clip to make a song.");
+}
+
 Track StudioPage::trackForInstrument (int trackId, const juce::String& name)
 {
     auto t = project.trackById (trackId);
@@ -675,9 +716,10 @@ void StudioPage::applyBrowserItem (const juce::String& item, int trackId, double
         if (t.clips().getNumChildren() == 0) t.v.setProperty (ids::name, trackName, project.um());
         ctx.selectTrack (t.id());
         engine.rebuildNow();
-        if (id == "sampler" || id == "drumpads" || id == "homekeys") openPluginWindow (t.instrument());
+        if (id == "sampler" || id == "drumpads" || id == "homekeys" || id == "beatlab") openPluginWindow (t.instrument());
         setStatus (id == "sampler" ? juce::String ("Sampler ready: drop an audio file onto it, then play it from your keyboard.")
                  : id == "homekeys" ? juce::String ("HomeKeys 20 ready: play along with its rhythm box (press play), or turn on Auto Accompaniment.")
+                 : id == "beatlab" ? juce::String ("Beat Lab ready: press Play in it (or play the song), click steps, drop loops onto lanes.")
                  : ref.name + " is ready.");
     }
     else if (kind == "rhythm")

@@ -817,6 +817,7 @@ void installInstrumentEditors()
     HomeKeys::editorFactory = [] (HomeKeys& k) -> juce::AudioProcessorEditor* { return new HomeKeysEditor (k); };
     Looper::editorFactory = [] (Looper& l) -> juce::AudioProcessorEditor* { return new LooperEditor (l); };
     VocalTune::editorFactory = [] (VocalTune& v) -> juce::AudioProcessorEditor* { return new VocalTuneEditor (v); };
+    installBeatLabEditor();
 }
 
 } // namespace wis::daw

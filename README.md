@@ -7,7 +7,7 @@
 
 <p align="center">
   Drop in any MP3 or FLAC → AI splits it into stems → mute your part → plug in your bass, guitar or mic and play along through a real amp rig.<br>
-  Then take it into the <b>Studio</b>: a full multitrack recording studio with software instruments, an 80s home keyboard with a rhythm box, samplers, arpeggiators, a looper, vocal pitch correction, buses and sends, time-stretching, and VST3 / VST / CLAP / LV2 plugins.
+  Then take it into the <b>Studio</b>: a full multitrack recording studio with software instruments, the <b>Beat Lab</b> groovebox, an 80s home keyboard with a rhythm box, samplers, arpeggiators, a looper, vocal pitch correction, buses and sends, time-stretching, and VST3 / VST / CLAP / LV2 plugins.
 </p>
 
 <p align="center">
@@ -43,20 +43,29 @@ Stems are cached in your **Library** (24-bit FLAC), so a song is only ever split
 **Play-along rig**: plug into any USB audio interface (ASIO, WASAPI exclusive/shared) and play through:
 
 - **Input** with channel picker, gain, clip warning and a **chromatic tuner** (down to low B on a 5-string)
+- **Strings & Pickups**: one knob turns your bass or guitar into another one: flatwounds, a 60s hollow-body *violin bass*, foam mute, bright roundwounds, P-bass, single coils or humbuckers. No EQ fiddling.
 - **Noise gate** (hysteresis + hold, no chatter) and **compressor**
-- **Drive pedal**: overdrive / distortion / fuzz, 2× oversampled
-- **Amp**: 6 built-in voicings (Clean Combo, Brit Crunch, Hot Lead, Bass Tube, Bass Modern, Flat/DI), 4× oversampled triode stages, tone stack, presence, power-amp sag. **Or load any [Neural Amp Modeler](https://www.neuralampmodeler.com/) `.nam` capture** (thousands free on [TONE3000](https://www.tone3000.com))
-- **Cabinet**: 5 built-in speaker models or **any impulse response** (`.wav`), with low/high cut
-- **Studio EQ, chorus, stereo/ping-pong delay, reverb** with pre-delay
-- 10 factory presets (guitar, bass, vocal mic, acoustic/keys), all loudness-matched. Save your own.
+- **Drive pedal**: overdrive / distortion / fuzz, plus a **bass drive** that keeps your clean low end, oversampled
+- **Amp**: 12 built-in models, each with its own preamp, real (modelled) tone-stack circuit, power amp, sag and bloom, 4× oversampled. Guitar: *American Clean, Tweed Breakup, British Chime, British Crunch, British Lead, Modern High Gain, Smooth Overdrive*. Bass: *60s British Valve, Classic Tube 8x10, Vintage Flip-Top, Modern Growl, Studio DI*. **Or load any [Neural Amp Modeler](https://www.neuralampmodeler.com/) `.nam` capture** (thousands free on [TONE3000](https://www.tone3000.com))
+- **Cabinet**: 11 speaker cabinets (guitar 4x12s, 2x12s, 1x12s; bass 1x15, 2x15, 4x10 with horn, 8x10, 2x10) with a choice of **microphone** (dynamic, ribbon, condenser, dynamic + ribbon), **mic position** (centre to edge), **room**, and a phase-aligned **DI blend** like a studio bass recording. Or **any impulse response** (`.wav`)
+- **Studio EQ, tape saturation, chorus, stereo/ping-pong delay, reverb** with pre-delay
+- 22 factory presets, all loudness-matched, that sound finished with no extra EQ: for bass *60s Merseybeat (violin bass)*, *Late 60s Studio (DI + amp)*, *Motown Flatwound*, *Classic Rock 8x10*, *Modern Growl*, *Modern Clean Hi-Fi*, *Punk Pick*, *Dub Deep*, *Fuzz Bass*, *Clean DI*; for guitar clean, jangle, blues, crunch, high gain, lead, dream pop and fuzz. Save your own.
 
-**Practice tools**: mute/solo/volume/balance per stem · one-click *"I'm playing: Bass"* · drag to loop a section · slow down to 50% without pitch change · transpose ±12 semitones · record yourself as **Mix + Rig + dry DI** WAV files (re-amp the DI later) · safety limiter on the output.
+**Practice tools**: mute/solo/volume/balance per stem · one-click *"I'm playing: Bass"* · drag to loop a section (then drag its edges to fine-tune it) · slow down to 50% without pitch change · transpose ±12 semitones · record yourself as **Mix + Rig + dry DI** WAV files (re-amp the DI later) · safety limiter on the output.
 
 ## The Studio
 
 A GarageBand / Logic-style recording studio, built in. Everything runs at low latency on the same audio interface and the same amp rig.
 
 ![Studio mixer](docs/studio-mixer.png)
+
+### New in 3.1
+
+- **Beat Lab**: a groovebox for messing around with beats and loops (*+ Track → Beat Lab*). 8 lanes of drum-machine sounds, a *Glitch Lab* kit, **your own samples, or loops** that are chopped across the steps so they stay in time at any tempo. Per-step velocity, **ratchets / rolls** (up to 16, with rising, falling or fading shapes), **chance**, pitch, micro-timing and reverse. 8 patterns with chaining, per-lane length and rate (**polymeter**), per-lane filter, drive, bit-crush, reverb and delay. Hold-to-play **stutter, tape stop, reverse and fill**, an XY **filter sweep**, and an **IDM section**: *Mutate* (a new variation every bar), *Chaos* (rolls, reversals, pitch jumps) and *Break Shuffle* (re-orders loop slices). 14 presets from boom bap and house to drill'n'bass and braindance. *Pattern to Song* turns a pattern into a MIDI clip.
+- **Amps 2.0**: 12 new amp models, 11 cabinets with mic choice / position / room / DI blend, *Strings & Pickups*, bass drive, tape saturation and 22 presets (see [Play Along](#play-along)).
+- **Repeat (cycle) bar**: drag anywhere in the top strip of the ruler to draw it, drag its edges to resize it, drag the middle to move it, click to turn it on or off, double-click a bar to repeat just that bar, right-click for *Repeat 4 bars / selected clips / between markers / double / halve / move*.
+
+<p align="center"><img src="docs/beatlab.png" width="820" alt="Beat Lab"></p>
 
 ### New in 3.0
 
@@ -80,6 +89,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 - **Vintage Rhythm Box**: the same 20 rhythms and 4 kits as a drum machine. Drop any rhythm in as an editable 8-bar loop from *Library → Drums*.
 - **Sampler**: drop in any audio file. *Classic* plays it across the keys, *One Shot* plays it to the end, *Slice* chops it by transients (or 4/8/16/32 equal slices), one slice per key from C2. Start/end and loop markers (with crossfade), ADSR, filter with envelope, velocity, glide, mono/legato, reverse.
 - **Drum Pads**: 16 pads (the standard drum notes, so drum grooves play them) with your own samples or four synthesized kits. Per pad: tune, gain, pan, decay, filter, reverse, choke group.
+- **Beat Lab**: a step-sequencer groovebox (see *New in 3.1*). It follows the song while it plays, or runs on its own; lanes also play from MIDI notes C2-G2 and the chosen lane plays melodically from C3 up.
 - **Drummer**: 18 grooves played by a real kit (rock, pop, four-on-the-floor, disco, funk, Motown, boom bap, trap, half-time, shuffle, jazz swing, reggae, bossa nova, metal...) with crash cymbals and tom fills. Drop 8 bars in and edit any hit.
 - **Audio** tracks for guitar, bass, vocals or anything else, mono or stereo inputs, with input monitoring.
 - **Your Play-Along rig as a plugin**: *Amp & Pedals* puts the whole rig (gate, comp, drive, amp/NAM, cab/IR, EQ, chorus, delay, reverb, tuner) on any track.

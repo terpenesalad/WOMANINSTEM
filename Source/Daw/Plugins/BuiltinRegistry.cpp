@@ -8,6 +8,7 @@
 #include "Daw/Instruments/HomeKeys.h"
 #include "Daw/Instruments/RhythmBox.h"
 #include "Daw/Instruments/Sampler.h"
+#include "Daw/Instruments/BeatLab.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Instruments/StudioSynth.h"
 
@@ -34,6 +35,7 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         add ("rhythmbox", "Rhythm Box", "Instrument", "Vintage drum machine kits (home keyboard, compact rhythm unit, 808-style, toy lo-fi) on the standard drum map", true, make<RhythmBox>());
         add ("sampler", "Sampler", "Instrument", "Play any sample across the keyboard, as a one-shot or chopped into slices; loops, envelopes, filter, glide", true, make<Sampler>());
         add ("drumpads", "Drum Pads", "Instrument", "16 pads of your own samples (or synth drums) with tune, decay, filter, reverse and choke groups", true, make<DrumPads>());
+        add ("beatlab", "Beat Lab", "Instrument", "Groovebox for beats and loops: 8 lanes of synth drums, your samples or chopped loops; ratchets, probability, polymeter, stutter and tape-stop, plus a glitch / IDM section", true, make<BeatLab>());
 
         add ("arp", "Arpeggiator", "MIDI FX", "Up/down/random/chord arpeggios synced to the song, with octaves, swing, latch, rhythms, probability and ratchets", false, make<Arpeggiator>());
         add ("chordtrig", "Chord Trigger", "MIDI FX", "Play whole chords from a single key", false, make<ChordTrigger>());

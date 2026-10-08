@@ -70,6 +70,9 @@ public:
             p->setPlayConfigDetails (info.instrument ? 0 : 2, 2, 48000.0, 512);
             p->prepareToPlay (48000.0, 512);
             for (int i = 0; i < p->getProgramNames().size(); ++i) p->setCurrentProgram (i);
+            // WIS_UI_PROGRAM=<plugin id>:<preset> shows that preset in the snapshot
+            const auto want = juce::SystemStats::getEnvironmentVariable ("WIS_UI_PROGRAM", {});
+            if (want.upToFirstOccurrenceOf (":", false, false) == info.id) p->setCurrentProgram (want.fromFirstOccurrenceOf (":", false, false).getIntValue());
             std::unique_ptr<juce::AudioProcessorEditor> ed (p->createEditor());
             if (ed == nullptr) { ++failures; std::cout << "FAIL editor " << info.id << std::endl; continue; }
             for (auto size : { juce::Point<int> (ed->getWidth(), ed->getHeight()), { 300, 200 }, { 1400, 900 } })

@@ -2,6 +2,7 @@
 
 #include "StudioContext.h"
 #include "Daw/Instruments/InstrumentRefs.h"
+#include "Daw/Instruments/BeatLab.h"
 
 namespace wis::daw
 {
@@ -147,6 +148,7 @@ struct PluginMenu
         m.menu.addSubMenu ("HomeKeys 20 (80s keyboard)", presetMenu ("homekeys", homeKeys, {}));
         static const juce::StringArray kitNames { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" };
         m.menu.addSubMenu ("Rhythm Box (vintage drums)", presetMenu ("rhythmbox", kitNames, "Rhythm Box: "));
+        m.menu.addSubMenu ("Beat Lab (groovebox: beats, loops, glitch)", presetMenu ("beatlab", BeatLab::presetNames(), "Beat Lab: "));
         juce::PopupMenu samplers;
         samplers.addItem (id, "Sampler (load any sound)");
         m.refs[id++] = builtinRef ("sampler");

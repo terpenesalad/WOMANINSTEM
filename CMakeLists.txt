@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # ------------------------------------------------------------------------------
 #  WOMANINSTEM - stem separation + play-along amp rig
 # ------------------------------------------------------------------------------
-project(WOMANINSTEM VERSION 3.0.0 LANGUAGES C CXX)
+project(WOMANINSTEM VERSION 3.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -184,7 +184,8 @@ set(WIS_ENGINE_SOURCES
     Source/Daw/Instruments/VintageRhythms.cpp
     Source/Daw/Instruments/RhythmBox.cpp
     Source/Daw/Instruments/HomeKeys.cpp
-    Source/Daw/Instruments/Sampler.cpp)
+    Source/Daw/Instruments/Sampler.cpp
+    Source/Daw/Instruments/BeatLab.cpp)
 
 set(WIS_JUCE_DEFS
     JUCE_WEB_BROWSER=0
@@ -270,6 +271,7 @@ if(WIS_BUILD_APP)
         Source/UI/Studio/ControlBar.cpp
         Source/UI/Studio/PluginEditors.cpp
         Source/UI/Studio/InstrumentEditors.cpp
+        Source/UI/Studio/BeatLabEditor.cpp
         Source/UI/Studio/StudioPage.cpp
         ${WIS_ENGINE_SOURCES})
     wis_configure_target(WOMANINSTEM)

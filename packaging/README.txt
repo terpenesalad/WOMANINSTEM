@@ -36,7 +36,7 @@ Studio quick start
    Ctrl+K (Musical Typing) and use A S D F G H J K L (white keys) / W E T Y U O P (black keys).
 2. "+ Track": Drummer (a kit plus 8 bars of groove), Software Instrument (piano, keys,
    strings, synths...), HomeKeys 20 (80s keyboard with a 20-rhythm rhythm box), Vintage Rhythm
-   Box, Sampler, Drum Pads, Loop Station, Audio: Guitar or Bass (records through Amp & Pedals),
+   Box, Sampler, Drum Pads, Loop Station, Beat Lab (groovebox), Audio: Guitar or Bass (records through Amp & Pedals),
    Microphone, and Aux Buses (a shared reverb or delay your tracks send to).
 3. Library (left): Sounds = instruments and drum kits, Drums = 18 grooves + 20 vintage rhythms,
    Loops = chords / bass lines / arpeggios in your song's key, FX = effects and MIDI effects,
@@ -75,11 +75,32 @@ Practice tools
 
 Tone
 ----
-- Built-in amps: Clean Combo, Brit Crunch, Hot Lead, Bass Tube, Bass Modern, Flat/DI.
+- Presets: 22 finished sounds. Bass: 60s Merseybeat (violin bass), Late 60s Studio (DI + amp),
+  Motown Flatwound, Classic Rock 8x10, Modern Growl, Modern Clean Hi-Fi, Punk Pick, Dub Deep,
+  Fuzz Bass, Clean DI. Guitar: clean, jangle, blues, crunch, high gain, lead, dream pop, fuzz.
+- Amps: American Clean, Tweed Breakup, British Chime, British Crunch, British Lead, Modern High
+  Gain, Smooth Overdrive; Bass: 60s British Valve, Classic Tube 8x10, Vintage Flip-Top, Modern
+  Growl, Studio DI; Flat/DI.
+- Cabinet: 11 cabinets, microphone (dynamic / ribbon / condenser / both), Mic Pos (centre to
+  edge = brighter to darker), Room, DI Blend (mixes in your clean bass, phase-aligned).
+- Strings & Pickups: flatwounds, 60s violin bass, foam mute, roundwounds, P-bass, single coils,
+  humbuckers. Tape: warm saturation.
 - Load NAM...: any Neural Amp Modeler capture (.nam). Thousands are free at https://www.tone3000.com
 - Load IR...: any cabinet impulse response (.wav).
 - Gate, Compressor, Drive (overdrive/distortion/fuzz), Studio EQ, Chorus, Delay, Reverb, Tuner.
 - Save your own presets with "Save".
+
+Beat Lab (groovebox)
+--------------------
+"+ Track > Beat Lab". Press Play in it (or play the song) and click steps to make a beat.
+- Drag samples or loops onto a lane name. Loops are chopped across the steps and stay in time.
+- Trig / Velocity / Ratchet / Pitch / Chance / Nudge: what dragging a step changes.
+  Right-click a step for rolls, chance, pitch, reverse; right-click a lane for Euclidean
+  rhythms, randomise, length (odd lengths = polymeter) and loading samples.
+- A-H: 8 patterns (Shift-click copies the current one). Chain plays them in turn.
+- Mutate / Chaos / Break Shuffle: the glitch section. Hold the Perform pads for stutters,
+  tape stop, reverse and fills; drag the XY pad for a filter sweep.
+- Pattern to Song puts the pattern into the song as a MIDI clip.
 
 Play Along shortcuts
 --------------------

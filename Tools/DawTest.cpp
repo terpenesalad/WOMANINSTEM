@@ -13,6 +13,7 @@
 #include "Daw/Plugins/Looper.h"
 #include "Daw/Instruments/Sampler.h"
 #include "Daw/Instruments/HomeKeys.h"
+#include "Daw/Instruments/BeatLab.h"
 #include "Daw/Instruments/VintageRhythms.h"
 #include "Daw/Model/MidiLoops.h"
 #include <tuple>
@@ -887,6 +888,200 @@ int main (int argc, char** argv)
         check (looper.getState() == Looper::empty, "Clear empties it");
     }
 
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Beat Lab:" << std::endl;
+    {
+        struct Head : juce::AudioPlayHead
+        {
+            double ppq = 0.0, bpm = 120.0; bool playing = true;
+            juce::Optional<PositionInfo> getPosition() const override
+            {
+                PositionInfo p;
+                p.setIsPlaying (playing); p.setBpm (bpm); p.setPpqPosition (ppq);
+                p.setTimeSignature (juce::AudioPlayHead::TimeSignature { 4, 4 });
+                return p;
+            }
+        } head;
+        // renders `seconds` of the Beat Lab, following the host clock (or not)
+        auto run = [&] (BeatLab& bl, double seconds)
+        {
+            juce::AudioBuffer<float> out (2, (int) (seconds * sr));
+            out.clear();
+            head.ppq = 0.0;
+            juce::AudioBuffer<float> buf (2, block);
+            for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+            {
+                juce::MidiBuffer midi;
+                buf.clear();
+                bl.processBlock (buf, midi);
+                for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, block);
+                if (head.playing) head.ppq += block / sr * head.bpm / 60.0;
+            }
+            return out;
+        };
+        // onsets: first sample above the threshold after 20 ms of quiet
+        auto onsets = [] (const juce::AudioBuffer<float>& b, float thr)
+        {
+            std::vector<double> t;
+            int quiet = 100000;
+            bool armed = true;
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const float a = std::abs (b.getSample (0, i));
+                if (quiet > (int) (0.02 * sr)) armed = true;
+                if (a > thr && armed) { t.push_back (i / sr); armed = false; }
+                quiet = a > thr * 0.3f ? 0 : quiet + 1;
+            }
+            return t;
+        };
+        auto fresh = [&]
+        {
+            auto bl = std::make_unique<BeatLab>();
+            bl->setPlayHead (&head);
+            bl->setCurrentProgram (BeatLab::presetNames().size() - 1);   // Empty Kit
+            for (int l = 0; l < BeatLab::numLanes; ++l) bl->setParam (BeatLab::laneParam (l, "mute"), l == 0 ? 0.0f : 1.0f);
+            bl->setParam (BeatLab::laneParam (0, "kit"), (float) BeatLab::glitchKit);
+            bl->setParam (BeatLab::laneParam (0, "voice"), 2.0f);   // Click: short and sharp
+            bl->setParam (BeatLab::laneParam (0, "vol"), 0.0f);
+            bl->rebuildSoundsNow();
+            bl->prepareToPlay (sr, block);
+            return bl;
+        };
+        auto on = [] (BeatLab& bl, int s, int ratchet = 1, int prob = 100)
+        {
+            BeatLab::Step st; st.on = true; st.velocity = 127; st.ratchet = ratchet; st.probability = prob;
+            bl.setStep (0, 0, s, st);
+        };
+
+        {
+            auto bl = fresh();
+            on (*bl, 0); on (*bl, 8);
+            const auto t = onsets (run (*bl, 4.0), 0.05f);
+            bool good = t.size() == 4;
+            for (size_t i = 0; good && i < t.size(); ++i) good = std::abs (t[i] - 1.0 * (double) i) < 0.003;
+            juce::String got; for (auto x : t) got << juce::String (x, 3) << " ";
+            check (good, "Steps 1 and 9 play on beats 1 and 3, in sync with the song (" + got.trim() + " s)");
+        }
+        {
+            auto bl = fresh();
+            on (*bl, 4, 4);
+            const auto t = onsets (run (*bl, 2.0), 0.05f);
+            juce::String got; for (auto x : t) got << juce::String (x, 4) << " ";
+            const bool good = t.size() == 4 && std::abs (t[0] - 0.5) < 0.003 && std::abs (t[3] - (0.5 + 3 * 0.03125)) < 0.003;
+            check (good, "A 4x ratchet rolls four hits inside one 1/16 step (" + got.trim() + " s)");
+        }
+        {
+            auto bl = fresh();
+            for (int s = 0; s < 16; ++s) on (*bl, s, 1, 0);
+            const auto silent = run (*bl, 2.0);
+            for (int s = 0; s < 16; ++s) on (*bl, s, 1, 50);
+            const auto half = onsets (run (*bl, 8.0), 0.05f);
+            check (silent.getMagnitude (0, silent.getNumSamples()) < 1.0e-4f && half.size() > 16 && half.size() < 48,
+                   "Probability: 0% never plays, 50% plays about half the steps (" + juce::String ((int) half.size()) + " of 64)");
+        }
+        {
+            // a 2 s loop with a click every 1/8 of its length; sliced across 16 steps it stays in time at any tempo
+            juce::AudioBuffer<float> loop (2, (int) (2.0 * sr));
+            loop.clear();
+            for (int k = 0; k < 16; ++k) for (int ch = 0; ch < 2; ++ch) loop.setSample (ch, (int) (k * 0.125 * sr) + 50, 0.9f);
+            auto bl = fresh();
+            bl->loadLaneBuffer (0, loop, sr, "Test loop");
+            for (int s = 0; s < 16; ++s) on (*bl, s);
+            head.bpm = 90.0;
+            const auto t = onsets (run (*bl, 2.6), 0.3f);
+            const double step = 60.0 / 90.0 / 4.0;
+            bool good = (int) bl->param (BeatLab::laneParam (0, "mode").toRawUTF8()) == BeatLab::loopSlice && t.size() >= 14;
+            for (size_t i = 0; good && i < t.size(); ++i) good = std::abs (t[i] - (i * step + 50 / sr)) < 0.003;
+            check (good, "A loop dropped on a lane is sliced and stays in time at 90 bpm (" + juce::String ((int) t.size()) + " slices on the grid)");
+
+            // the same pattern as a MIDI clip (Pattern to Song), its own sequencer off: still the right slices, in time
+            double len = 0;
+            const auto seq = bl->patternToMidi (0, len);
+            bl->setParam ("sync", 0.0f);
+            bl->prepareToPlay (sr, block);
+            juce::AudioBuffer<float> out ((int) 2, (int) (2.6 * sr));
+            out.clear();
+            head.ppq = 0.0;
+            juce::AudioBuffer<float> buf (2, block);
+            for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+            {
+                juce::MidiBuffer midi;
+                const double b0 = head.ppq, b1 = b0 + block / sr * head.bpm / 60.0;
+                for (int i = 0; i < seq.getNumEvents(); ++i)
+                {
+                    const auto& m = seq.getEventPointer (i)->message;
+                    if (m.getTimeStamp() >= b0 && m.getTimeStamp() < b1) midi.addEvent (m, (int) ((m.getTimeStamp() - b0) / (b1 - b0) * block));
+                }
+                buf.clear();
+                bl->processBlock (buf, midi);
+                for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, block);
+                head.ppq = b1;
+            }
+            head.bpm = 120.0;
+            const auto t2 = onsets (out, 0.3f);
+            good = t2.size() >= 14;
+            for (size_t i = 0; good && i < t2.size(); ++i) good = std::abs (t2[i] - (i * step + 50 / sr)) < 0.003;
+            check (good, "...and as a MIDI clip in the song it plays the same slices, in time (" + juce::String ((int) t2.size()) + ")");
+        }
+        {
+            auto bl = fresh();
+            head.playing = false;
+            bl->setParam ("sync", 0.0f);
+            bl->setParam ("tempo", 150.0f);
+            on (*bl, 0); on (*bl, 4);
+            bl->startStop();
+            const auto t = onsets (run (*bl, 1.7), 0.05f);
+            head.playing = true;
+            juce::String got; for (auto x : t) got << juce::String (x, 3) << " ";
+            check (t.size() == 3 && std::abs (t[1] - 0.4) < 0.003 && std::abs (t[2] - 1.6) < 0.003 && bl->isRunning(), "Runs on its own clock (150 bpm) when the song is stopped (" + got.trim() + " s)");
+        }
+        {
+            BeatLab a;
+            a.setCurrentProgram (10);   // Drill Machine
+            juce::MemoryBlock mb;
+            a.getStateInformation (mb);
+            BeatLab b;
+            b.setCurrentProgram (0);
+            b.setStateInformation (mb.getData(), (int) mb.getSize());
+            bool same = true;
+            for (int p = 0; p < 2; ++p) for (int l = 0; l < BeatLab::numLanes; ++l) for (int s = 0; s < BeatLab::maxSteps; ++s)
+                same = same && a.getStep (p, l, s).pack() == b.getStep (p, l, s).pack();
+            same = same && b.param (BeatLab::laneParam (1, "kit").toRawUTF8()) == (float) BeatLab::glitchKit;
+            double len = 0;
+            const auto seq = a.patternToMidi (0, len);
+            check (same && seq.getNumEvents() > 40 && std::abs (len - 4.0) < 1.0e-9,
+                   "Patterns, ratchets and kits save and restore; a pattern turns into a " + juce::String (len, 0) + "-beat MIDI clip ("
+                   + juce::String (seq.getNumEvents() / 2) + " notes)");
+        }
+        {
+            // every preset plays at a sensible level (and nothing clips)
+            juce::StringArray levels;
+            bool good = true;
+            const auto names = BeatLab::presetNames();
+            for (int i = 0; i < names.size() - 1; ++i)
+            {
+                BeatLab bl;
+                bl.setPlayHead (&head);
+                bl.setCurrentProgram (i);
+                bl.prepareToPlay (sr, block);
+                const auto out = run (bl, 8.0);
+                const float db = juce::Decibels::gainToDecibels (rms (out, 0, out.getNumSamples()));
+                const float pk = out.getMagnitude (0, out.getNumSamples());
+                levels.add (names[i].fromLastOccurrenceOf (": ", false, false) + " " + juce::String (db, 1));
+                good = good && allFinite (out) && db > -30.0f && db < -8.0f && pk <= 1.0f;
+            }
+            check (good, "Every preset plays at a sensible level (dB rms: " + levels.joinIntoString (", ") + ")");
+        }
+        {
+            auto bl = fresh();
+            for (int s = 0; s < 16; ++s) on (*bl, s);
+            bl->setParam ("chaos", 1.0f); bl->setParam ("mutate", 1.0f);
+            const auto wild = run (*bl, 4.0);
+            check (allFinite (wild) && wild.getMagnitude (0, wild.getNumSamples()) <= 1.0f && onsets (wild, 0.05f).size() > 8,
+                   "Chaos + mutate stays musical-ish: finite, limited, still playing");
+        }
+    }
     // -------------------------------------------------------------------------------------------
     std::cout << "Every built-in plugin and preset (smoke test):" << std::endl;
     {
