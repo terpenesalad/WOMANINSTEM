@@ -70,14 +70,15 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.5
+
+- **Old 32-bit VST plugins** (Delay Lama and friends) run through a built-in 32-bit bridge. *Project → Add a Plugin File...* picks a `.dll`, keeps a copy in WOMANINSTEM's own plugins folder, tests it in a separate process and puts it on a track with its window open. Anything in that folder (`%APPDATA%\WOMANINSTEM\Plugins`, or a `Plugins` folder next to the exe) loads automatically. Plugin instruments can be played from Play Along's KEYS too.
+
 ### New in 3.4
 
 - **Piano Room**: a concert grand, a vintage grand and an upright (real samples), a modelled grand and a toy piano, with hammers, felt, tacks, honky-tonk, age, key noise, string resonance, drive, tape and lo-fi, placed in a room you choose: from a living room or a wooden studio to a church, a cathedral, a forest clearing or a canyon. Presets for Nick Cave-style ballads, a Tom Waits bar upright, a Queen rock grand, Dungen-style psych...
 - **KEYS in Play Along** (Ctrl+K): play the piano (or anything else) along with a song from a MIDI keyboard or your computer keys.
-- **Yodel Yeti**: a singing yeti voice synth with an X/Y vowel pad, glide, vibrato, choir, throat singing, a growl and a delay. He mouths the vowels, bounces, sways and prays along.
 - **Artist-style rig presets**: Tame Impala-ish fuzz phaser and hollow-body bass, Ty Segall-ish garage fuzz, FUZZ-ish heavy riffs, a 60s jazz box, Beatles 12-string jangle (George) and Casino crunch (John), doom sludge guitar and bass.
-
-<p align="center"><img src="docs/yeti.png" width="900" alt="Yodel Yeti"></p>
 
 ### New in 3.3
 
@@ -239,6 +240,7 @@ cmake --build build --config Release --parallel
 
 - **ASIO**: download the [Steinberg ASIO SDK](https://www.steinberg.net/developers/) and add `-DWIS_ASIO_SDK_DIR=path/to/ASIOSDK`.
 - **Model**: put `ggml-model-htdemucs-6s-f16.bin` in a `models/` folder next to the exe, or let the app download it on first use.
+- **32-bit bridge** (Windows): build `Tools/Bridge32/WisBridge32.cpp` as a 32-bit exe (`cl /O2 /EHsc /MT /std:c++17 /DUNICODE WisBridge32.cpp /link user32.lib gdi32.lib shell32.lib /SUBSYSTEM:WINDOWS` from an x86 developer prompt) and put `wisbridge32.exe` next to `WOMANINSTEM.exe`.
 - **Piano samples**: `python Tools/prep_pianos.py dl pianos` (needs `pip install soundfile numpy`) downloads and trims the three freely licensed piano libraries into `pianos/`; put that folder next to the exe (or point `WIS_PIANOS` at it). Without it, Piano Room plays its modelled grand.
 - **Sound Library**: put `GeneralUser-GS.sf2` from [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) in a `sounds/` folder next to the exe (or point `WIS_SOUNDFONT` at it).
 - `rigtest` runs the DSP/engine test-suite, `dawtest` the Studio engine (timing, recording, instruments, effects, buses / sends / delay compensation, time-stretching, side-chain, pitch correction, looper, VST2 and CLAP hosting with test plugins, export, tempo detection), `WOMANINSTEM --selftest-ui` opens every plugin editor, and `stemsplit --selftest` checks separation end-to-end.
@@ -257,11 +259,12 @@ Source/
     Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
     Plugins/    built-in effects, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
-    Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer), Yodel Yeti
+    Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer)
   UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays
     Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors
-Tools/          stemsplit (CLI), rigtest and dawtest (automated tests), tiny VST2 / CLAP test plugins, prep_pianos.py (builds the piano sample packs)
+Tools/          stemsplit (CLI), rigtest and dawtest (automated tests), tiny VST2 / CLAP test plugins, prep_pianos.py (builds the piano sample packs),
+                Bridge32/ (wisbridge32.exe: hosts 32-bit VST2 plugins for the 64-bit app, plus its smoke test)
 packaging/      installer script, end-user readme, release notes
 ```
 

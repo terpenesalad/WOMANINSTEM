@@ -102,9 +102,9 @@ public:
             auto menu = daw::PluginMenu::instruments (host);
             juce::StringArray names;
             for (juce::PopupMenu::MenuItemIterator it (menu.menu, true); it.next();) names.add (it.getItem().text);
-            const bool ok = names.contains ("Piano Room (real pianos in rooms)") && names.contains ("Yodel Yeti (singing yeti)");
+            const bool ok = names.contains ("Piano Room (real pianos in rooms)");
             if (! ok) ++failures;
-            std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio instrument menu lists Piano Room and Yodel Yeti" << std::endl;
+            std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio instrument menu lists Piano Room" << std::endl;
         }
         failures += runScopeSelfTest();
         failures += runPedalboardSelfTest();

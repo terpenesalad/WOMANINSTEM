@@ -1,14 +1,24 @@
-## WOMANINSTEM 3.4.1 for Windows (64-bit): Piano Room, Yodel Yeti, KEYS and artist-style rigs
+## WOMANINSTEM 3.5 for Windows (64-bit): old 32-bit plugins (Delay Lama!), Piano Room, KEYS
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.3 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.4 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.5
+
+**Old 32-bit plugins work** (Delay Lama and the other classic freeware VSTs from the 2000s)
+- WOMANINSTEM is a 64-bit app, and Windows can't load a 32-bit plugin inside a 64-bit program. 3.5 includes a **32-bit bridge** (`wisbridge32.exe`): the old plugin runs in its own little process and its sound, MIDI, tempo, parameters and saved settings are passed back and forth. If an old plugin crashes, only the bridge goes down, never your song.
+- **Project → Add a Plugin File...** (or **+ Track → Plugin from a File...**): pick the `.dll`. WOMANINSTEM keeps its own copy (in `%APPDATA%\WOMANINSTEM\Plugins`, so it still works if you tidy up your Downloads), tests it in a separate process and puts it on a new track with its window open. From then on it's in *Library → Sounds → Plugin Instruments* like any other plugin. Works for `.vst3` and `.clap` files too.
+- **Your plugins folder**: anything in `%APPDATA%\WOMANINSTEM\Plugins` (or a `Plugins` folder next to `WOMANINSTEM.exe`) is picked up automatically when the app starts. *Project → Open My Plugins Folder* opens it.
+- A 32-bit plugin's own window (Delay Lama's singing monk included) opens as a separate window next to WOMANINSTEM. Close it and click *Show its window* to bring it back.
+- Yodel Yeti (3.4) is gone: Delay Lama itself now works.
+- **Plugin instruments in Play Along**: anything you've added in the Studio (VST3, VST, 32-bit VSTs, CLAP) can now be played from **KEYS** along with a song.
 
 ### Fixed in 3.4.1
-- **Piano Room and Yodel Yeti are now in the Studio**: *+ Track → Piano Room* or *+ Track → Yodel Yeti* (their window opens straight away), the track menu's *Instrument* list, and the Library's *Sounds* tab. In Play Along they're under **KEYS** (Ctrl+K): pick the instrument, then *Edit the sound...*.
+- **Piano Room is now in the Studio**: *+ Track → Piano Room* (its window opens straight away), the track menu's *Instrument* list, and the Library's *Sounds* tab. In Play Along it's under **KEYS** (Ctrl+K).
 
 ### New in 3.4
 
@@ -20,11 +30,7 @@ Songs and rig presets from 2.0 to 3.3 open unchanged (old amp and cabinet choice
 - 21 presets, including *Intimate Ballad Grand* and *Murder Ballad Grand* (Nick Cave territory), *Rain Dog Upright* and *Junkyard Parlour* (Tom Waits-style), *Bohemian Rock Grand* and *Stadium Rock Grand* (Queen-style), *Swedish Psych Upright* and *Forest Cabin Psych* (Dungen-style), *Honky-Tonk Saloon*, *Tack Piano*, *Felt Piano*, *Lo-Fi Cassette Keys*.
 
 **KEYS in Play Along** (the **KEYS** button on the rig, or Ctrl+K)
-- Play a piano (or the yeti, the Sound Library, a synth, HomeKeys) along with any song, from a **MIDI keyboard** (plug it in, it just works) or your **computer keys** (A W S E D F T G Y H U J K..., Z / X change octave). Sustain button, volume, every knob one click away. The keys are recorded with you and drawn by the Scope.
-
-**Yodel Yeti: a singing yeti** (Studio instrument)
-- A vowel-morphing voice: an **X/Y pad** (vowel across, pitch up and down: click and drag to sing without a keyboard), the mod wheel, a vowel LFO, a new vowel every note, random vowels or an "O-M" chant. Glide, vibrato that swells in, a closed-mouth "mmm" at the edges of notes, **throat singing** overtones, a Tuvan-style **growl**, choirs of up to 5, five voice types, head size, and a stereo **delay** and mountain reverb.
-- The yeti (in his red bobble hat) sings what you play: his mouth makes the vowels, he bounces on every note, his eyes follow the pitch, he sways with the vibrato, closes his eyes and puts his hands together on long notes, and meditates when you stop.
+- Play a piano (or the Sound Library, a synth, HomeKeys, or plugin instruments such as Delay Lama) along with any song, from a **MIDI keyboard** (plug it in, it just works) or your **computer keys** (A W S E D F T G Y H U J K..., Z / X change octave). Sustain button, volume, every knob one click away. The keys are recorded with you and drawn by the Scope.
 
 **Artist-style rig presets** (Play Along rig and *Amp & Pedals*; approximations, not endorsements)
 - *Psych Phaser Fuzz* and *Psych Pop Hollow-Body* bass (Tame Impala-ish), *Garage Fuzz Blowout* (Ty Segall-ish), *Heavy 70s Fuzz Riffs* (FUZZ-ish), *60s Jazz Box* (the Julie London sessions), *12-String Jangle* (George) and *Casino Crunch* (John), *Doom Sludge* guitar and bass (Hell, *HEVY*). Several use the new pedalboard (phaser, treble booster, octave-up, sub octave, a 12-string octave voice).

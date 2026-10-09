@@ -1,6 +1,8 @@
 #include "Vst2Format.h"
 #include "Vst2Abi.h"
 #include "NativeWindow.h"
+#include "Vst2Bridge.h"
+#include "Separation/ModelManager.h"
 
 namespace wis::daw
 {
@@ -553,6 +555,15 @@ void Vst2PluginFormat::findAllTypesForFile (juce::OwnedArray<juce::PluginDescrip
     const juce::File f (fileOrIdentifier);
     if (! fileMightContainThisPluginType (fileOrIdentifier)) return;
     juce::String error;
+   #if JUCE_WINDOWS && JUCE_64BIT
+    if (vst2bridge::isWin32Dll (f))
+    {
+        // an old 32-bit plugin: it runs in the 32-bit bridge process
+        auto d = std::make_unique<juce::PluginDescription>();
+        if (vst2bridge::describe (f, *d, error)) results.add (d.release());
+        return;
+    }
+   #endif
     auto module = Module::open (f, error);
     if (module == nullptr) return;
 
@@ -595,6 +606,10 @@ void Vst2PluginFormat::findAllTypesForFile (juce::OwnedArray<juce::PluginDescrip
 
 std::unique_ptr<juce::AudioPluginInstance> Vst2PluginFormat::create (const juce::PluginDescription& d, double sr, int block, juce::String& error)
 {
+   #if JUCE_WINDOWS && JUCE_64BIT
+    if (vst2bridge::isWin32Dll (juce::File (d.fileOrIdentifier)))
+        return vst2bridge::create (d, sr, block, error);
+   #endif
     auto module = Module::open (juce::File (d.fileOrIdentifier), error);
     if (module == nullptr) return {};
     auto* e = instantiate (*module, d.hasSharedContainer ? d.uniqueId : 0, error);
@@ -666,6 +681,7 @@ juce::FileSearchPath Vst2PluginFormat::getDefaultLocationsToSearch()
         paths.add (juce::File (programFiles + sub));
     const auto registered = juce::WindowsRegistry::getValue ("HKEY_LOCAL_MACHINE\\Software\\VST\\VSTPluginsPath");
     if (registered.isNotEmpty()) paths.add (juce::File (registered));
+    paths.add (ModelManager::appDataDirectory().getChildFile ("Plugins"));   // WOMANINSTEM's own plugins folder
    #else
     for (auto p : { "~/.vst", "~/.lxvst", "/usr/lib/vst", "/usr/local/lib/vst", "/usr/lib/lxvst", "/usr/local/lib/lxvst" })
         paths.add (juce::File (p));

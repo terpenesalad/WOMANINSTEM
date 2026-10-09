@@ -43,7 +43,7 @@ public:
     juce::StringArray getActiveInputNames() const;
     juce::Array<int> getActiveInputChannels() const;
 
-    // ---- keys: a MIDI instrument (piano, yeti...) played from a MIDI keyboard or the computer keyboard ----
+    // ---- keys: a MIDI instrument (piano, Delay Lama...) played from a MIDI keyboard or the computer keyboard ----
     juce::MidiMessageCollector midiCollector;     // add as a MIDI input callback
     juce::MidiKeyboardState keyboardState;        // on-screen keyboard and computer keys
     /** Message thread: installs (and prepares) the instrument; returns the old one, safe to delete. */

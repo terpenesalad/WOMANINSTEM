@@ -20,7 +20,6 @@
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Instruments/PianoRoom.h"
-#include "Daw/Instruments/YetiVoice.h"
 #include "Daw/Instruments/RoomIr.h"
 #include <iostream>
 
@@ -1177,7 +1176,7 @@ int main (int argc, char** argv)
     }
 
     // -------------------------------------------------------------------------------------------
-    std::cout << "Piano Room, rooms and Yodel Yeti:" << std::endl;
+    std::cout << "Piano Room and rooms:" << std::endl;
     {
         // plays `notes` (note, velocity 0..1, on second, off second) through an instrument for `seconds`
         struct Note { int note; float vel; double on, off; };
@@ -1308,59 +1307,6 @@ int main (int argc, char** argv)
             }
             check (bad.isEmpty(), juce::String (piano.getNumPrograms()) + " piano presets play cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
         }
-
-        // ---- the yeti ----
-        {
-            YetiVoice yeti;
-            yeti.setParam ("delayMix", 0.0f);
-            yeti.setParam ("reverb", 0.0f);
-            yeti.setParam ("vibDepth", 0.0f);
-            auto band = [&] (const juce::AudioBuffer<float>& b, double lo, double hi)
-            {
-                // energy in a band via a crude DFT over a 0.2 s window
-                double e = 0;
-                const int from = (int) (0.4 * sr), len = (int) (0.2 * sr);
-                for (double f = lo; f < hi; f += 20.0)
-                {
-                    double re = 0, im = 0;
-                    for (int i = 0; i < len; ++i) { const double ph = juce::MathConstants<double>::twoPi * f * i / sr; const float x = b.getSample (0, from + i); re += x * std::cos (ph); im += x * std::sin (ph); }
-                    e += re * re + im * im;
-                }
-                return e;
-            };
-            yeti.setParam ("vowel", 0.5f);   // A
-            auto a = play (yeti, { { 45, 0.9f, 0.05, 0.9 } }, 1.0);
-            yeti.setParam ("vowel", 1.0f);   // I
-            auto ee = play (yeti, { { 45, 0.9f, 0.05, 0.9 } }, 1.0);
-            const double f = pitchOf (a, (int) (0.4 * sr), (int) (0.15 * sr));
-            check (allFinite (a) && rms (a, (int) (0.3 * sr), (int) (0.8 * sr)) > 0.01f && std::abs (f / 110.0 - 1.0) < 0.04,
-                   "Yeti sings A2 at " + juce::String (f, 1) + " Hz (" + juce::String (juce::Decibels::gainToDecibels (rms (a, (int) (0.3 * sr), (int) (0.8 * sr))), 1) + " dB)");
-            check (band (a, 420, 800) > band (ee, 420, 800) * 2.0 && band (ee, 1300, 1700) > band (a, 1300, 1700) * 1.5,
-                   "Vowels: 'ah' has the open first formant, 'ee' the high second one (F1 band " + juce::String (band (a, 420, 800) / juce::jmax (1e-12, band (ee, 420, 800)), 2)
-                   + "x, F2 band " + juce::String (band (ee, 1300, 1700) / juce::jmax (1e-12, band (a, 1300, 1700)), 2) + "x)");
-            check (yeti.face.notes.load() >= 2, "The animation hears the notes");
-
-            yeti.setParam ("delayMix", 0.6f);
-            yeti.setParam ("delayTime", 300.0f);
-            auto echo = play (yeti, { { 45, 0.9f, 0.05, 0.25 } }, 1.2);
-            check (rms (echo, (int) (0.65 * sr), (int) (0.85 * sr)) > 0.003f, "Its delay echoes after the note stops");
-
-            yeti.padX = 0.2f; yeti.padY = 0.5f; yeti.padDown = true;
-            auto padOut = play (yeti, {}, 0.8);
-            yeti.padDown = false;
-            check (rms (padOut, (int) (0.3 * sr), (int) (0.7 * sr)) > 0.01f, "Singing from the X/Y pad without a keyboard");
-
-            juce::StringArray bad;
-            for (int pr = 0; pr < yeti.getNumPrograms(); ++pr)
-            {
-                yeti.setCurrentProgram (pr);
-                auto out = play (yeti, { { 43, 0.8f, 0.05, 0.8 }, { 47, 0.8f, 0.4, 0.8 } }, 1.2);
-                const float r = rms (out, 0, out.getNumSamples());
-                if (! allFinite (out) || r < 0.003f || out.getMagnitude (0, out.getNumSamples()) > 2.5f)
-                    bad.add (yeti.getProgramName (pr) + " (" + juce::String (juce::Decibels::gainToDecibels (r), 1) + " dB, peak " + juce::String (out.getMagnitude (0, out.getNumSamples()), 2) + ")");
-            }
-            check (bad.isEmpty(), juce::String (yeti.getNumPrograms()) + " yeti presets sing cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
-        }
     }
 
     // -------------------------------------------------------------------------------------------
@@ -1415,16 +1361,22 @@ int main (int argc, char** argv)
     }
 
 #if defined (WIS_TEST_VST2) && defined (WIS_TEST_CLAP)
-    for (auto [formatName, path, latency] : { std::tuple<const char*, const char*, int> { "VST", WIS_TEST_VST2, 0 }, { "CLAP", WIS_TEST_CLAP, 32 } })
+    std::vector<std::tuple<juce::String, juce::String, int>> pluginTests { { "VST", WIS_TEST_VST2, 0 }, { "CLAP", WIS_TEST_CLAP, 32 } };
+    // Windows CI: the same test synth built 32-bit, through the 32-bit bridge (wisbridge32.exe)
+    const auto x86Plugin = juce::SystemStats::getEnvironmentVariable ("WIS_TEST_VST2_X86", {});
+    if (x86Plugin.isNotEmpty()) pluginTests.push_back ({ "VST", x86Plugin, 0 });
+    for (auto [formatName, path, latency] : pluginTests)
     {
-        std::cout << formatName << " hosting:" << std::endl;
+        const bool bridged = path == x86Plugin;
+        std::cout << formatName << (bridged ? " hosting through the 32-bit bridge:" : " hosting:") << std::endl;
         while (project.numTracks() > 0) project.removeTrack (project.track (0));
         juce::AudioPluginFormat* format = nullptr;
         for (auto* f : host.formats.getFormats()) if (f->getName() == formatName) format = f;
         juce::OwnedArray<juce::PluginDescription> found;
         if (format != nullptr) format->findAllTypesForFile (found, path);
-        check (found.size() == 1 && found[0]->isInstrument && found[0]->name.startsWith ("WIS Test Synth"),
-               juce::String ("Scan finds the test plugin (") + (found.isEmpty() ? juce::String ("nothing") : found[0]->name) + ")");
+        check (found.size() == 1 && found[0]->isInstrument && found[0]->name.startsWith ("WIS Test Synth")
+               && (! bridged || found[0]->descriptiveName.contains ("32-bit")),
+               juce::String ("Scan finds the test plugin (") + (found.isEmpty() ? juce::String ("nothing") : found[0]->descriptiveName) + ")");
         if (found.isEmpty()) continue;
 
         project.setTempo (120.0);

@@ -43,6 +43,20 @@ AppShell::AppShell (juce::PropertiesFile& s) : settings (s)
 
     studio = std::make_unique<daw::StudioPage> (project, dawEngine, host, settings);
     studio->setDeviceManager (&playAlong.getDeviceManager());
+    playAlong.setPluginHost (&host);
+
+    // plugins kept in WOMANINSTEM's plugins folder (e.g. Delay Lama) load automatically
+    juce::Component::SafePointer<AppShell> safe (this);
+    juce::Timer::callAfterDelay (1500, [safe]
+    {
+        if (safe == nullptr) return;
+        safe->host.scanPluginFoldersAsync ([safe] (int added)
+        {
+            if (safe == nullptr || added == 0) return;
+            safe->studio->pluginsChanged();
+            safe->playAlong.pluginsChanged();
+        });
+    });
     addChildComponent (*studio);
 
     playTab = std::make_unique<ModeTab> ("PLAY ALONG", "Split songs and jam");

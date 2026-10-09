@@ -24,6 +24,7 @@ WOMANINSTEM is built on these open-source projects. Thank you to their authors.
 | lilv, serd, sord, sratom, zix and the LV2 specification (bundled in JUCE) by David Robillard and contributors | Hosting LV2 instruments and effects | ISC |
 
 VST (2.x) plugins are hosted through WOMANINSTEM's own implementation of the plugin interface; no Steinberg VST2 SDK code is included.
+32-bit VST2 plugins run in `wisbridge32.exe`, WOMANINSTEM's own bridge (same interface implementation, no third-party code).
 
 ASIO and VST are trademarks of Steinberg Media Technologies GmbH. CLAP is an open standard by the free-audio community.
 HomeKeys 20 and the Rhythm Box are original designs inspired by 1980s home keyboards and drum machines; all their sounds
@@ -35,6 +36,5 @@ MIT-licensed Demucs checkpoints).
 
 Amp captures (`.nam`), cabinet impulse responses, SoundFonts, samples and plugins you load are made by their respective
 authors and are subject to their own licenses; apart from GeneralUser GS and the three piano sample sets above, none are
-bundled with WOMANINSTEM. Room sounds in Piano Room are designed by WOMANINSTEM (no recorded impulse responses). Yodel Yeti
-and its character are original; it is not affiliated with any other singing-voice plugin. Rig presets named after artists
+bundled with WOMANINSTEM. Room sounds in Piano Room are designed by WOMANINSTEM (no recorded impulse responses). Rig presets named after artists
 are approximations of their recorded sounds, not endorsements.

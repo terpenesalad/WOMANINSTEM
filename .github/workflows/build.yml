@@ -126,6 +126,35 @@ jobs:
             exit 1
           }
 
+      # ---- the 32-bit plugin bridge (old 32-bit VST2 plugins such as Delay Lama) ----
+      - name: Build the bridge smoke test (64-bit)
+        shell: pwsh
+        run: |
+          cl /nologo /O2 /EHsc /MT /std:c++17 Tools\Bridge32\BridgeSmokeTest.cpp /Fe:build\BridgeSmokeTest.exe /Fo:build\ 2>&1 | Tee-Object -FilePath bridge64.log
+          if ($LASTEXITCODE -ne 0) { $msg = ((Get-Content bridge64.log) -replace '%','%25') -join '%0A'; Write-Host "::error title=Bridge smoke test build failed::$msg"; exit 1 }
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_x86
+
+      - name: Build wisbridge32.exe and a 32-bit test plugin
+        shell: pwsh
+        run: |
+          cl /nologo /O2 /EHsc /MT /std:c++17 /DUNICODE /D_UNICODE Tools\Bridge32\WisBridge32.cpp /Fe:build\wisbridge32.exe /Fo:build\ /link user32.lib gdi32.lib shell32.lib /SUBSYSTEM:WINDOWS 2>&1 | Tee-Object -FilePath bridge32.log
+          if ($LASTEXITCODE -ne 0) { $msg = ((Get-Content bridge32.log) -replace '%','%25') -join '%0A'; Write-Host "::error title=Bridge build failed::$msg"; exit 1 }
+          cl /nologo /O2 /EHsc /MT /std:c++17 /LD Tools\TestVst2Plugin.cpp /Fe:build\wis_test_vst2_x86.dll /Fo:build\ /link user32.lib gdi32.lib 2>&1 | Tee-Object -FilePath plugin32.log
+          if ($LASTEXITCODE -ne 0) { $msg = ((Get-Content plugin32.log) -replace '%','%25') -join '%0A'; Write-Host "::error title=32-bit test plugin build failed::$msg"; exit 1 }
+
+      - name: Test - 32-bit plugin bridge
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          build\BridgeSmokeTest.exe "$PWD\build\wisbridge32.exe" "$PWD\build\wis_test_vst2_x86.dll" 2>&1 | Tee-Object -FilePath bridgetest.log
+          $code = $LASTEXITCODE
+          $msg = ((Get-Content bridgetest.log) -replace '%','%25') -join '%0A'
+          if ($code -ne 0) { Write-Host "::error title=Bridge test failed::$msg"; exit 1 }
+          Write-Host "::notice title=32-bit bridge::$msg"
+
       - name: Test - rig DSP, tuner, player, engine
         shell: pwsh
         run: |
@@ -140,6 +169,8 @@ jobs:
         run: |
           $env:WIS_SOUNDFONT = "$PWD\sounds\GeneralUser-GS.sf2"
           $env:WIS_PIANOS = "$PWD\pianos"
+          $env:WIS_BRIDGE32 = "$PWD\build\wisbridge32.exe"
+          $env:WIS_TEST_VST2_X86 = "$PWD\build\wis_test_vst2_x86.dll"
           build\dawtest_artefacts\Release\dawtest.exe 2>&1 | Tee-Object -FilePath dawtest.log
           $code = $LASTEXITCODE
           $msg = ((Get-Content dawtest.log) -replace '%','%25') -join '%0A'
@@ -179,6 +210,7 @@ jobs:
           Copy-Item sounds/GeneralUser-GS-LICENSE.txt "$d/sounds/"
           Copy-Item pianos -Destination "$d/pianos" -Recurse
           Copy-Item build/stemsplit_artefacts/Release/stemsplit.exe $d/
+          Copy-Item build/wisbridge32.exe $d/
           Copy-Item "models/$env:MODEL_FILE" "$d/models/"
           Copy-Item LICENSE "$d/LICENSE.txt"
           Copy-Item THIRD_PARTY_NOTICES.md "$d/THIRD_PARTY_NOTICES.txt"

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # ------------------------------------------------------------------------------
 #  WOMANINSTEM - stem separation + play-along amp rig
 # ------------------------------------------------------------------------------
-project(WOMANINSTEM VERSION 3.4.1 LANGUAGES C CXX)
+project(WOMANINSTEM VERSION 3.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -172,6 +172,7 @@ set(WIS_ENGINE_SOURCES
     Source/Daw/Plugins/TestEffects.cpp
     Source/Daw/Plugins/NativeWindow.cpp
     Source/Daw/Plugins/Vst2Format.cpp
+    Source/Daw/Plugins/Vst2Bridge.cpp
     Source/Daw/Plugins/ClapFormat.cpp
     Source/Daw/Plugins/PluginHost.cpp
     Source/Daw/Plugins/CreativeEffects.cpp
@@ -188,8 +189,7 @@ set(WIS_ENGINE_SOURCES
     Source/Daw/Instruments/Sampler.cpp
     Source/Daw/Instruments/BeatLab.cpp
     Source/Daw/Instruments/RoomIr.cpp
-    Source/Daw/Instruments/PianoRoom.cpp
-    Source/Daw/Instruments/YetiVoice.cpp)
+    Source/Daw/Instruments/PianoRoom.cpp)
 
 set(WIS_JUCE_DEFS
     JUCE_WEB_BROWSER=0

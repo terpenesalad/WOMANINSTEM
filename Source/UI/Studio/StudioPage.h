@@ -35,6 +35,8 @@ public:
     bool confirmDiscardThen (std::function<void()> next);   // returns false if it had to ask
     void openProjectFile (const juce::File& f);
     void showShortcuts();
+    /** The plugin list changed (e.g. the background scan of the plugins folder found something). */
+    void pluginsChanged() { browser.refresh(); }
     juce::String getProjectName() const;
 
     void paint (juce::Graphics&) override;
@@ -71,6 +73,8 @@ private:
     void exportDialog (bool stems);
     void exportMidi();
     void showPluginManager();
+    /** Pick a plugin file (.dll / .vst3 / .clap, including old 32-bit VSTs), test it, and put it on a track. */
+    void addPluginFile();
     void addRecent (const juce::File& f);
     void setStatus (const juce::String&);
     void updateTitle();

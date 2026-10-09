@@ -1,11 +1,12 @@
 #include "KeysPanel.h"
 #include "Daw/Plugins/BuiltinProcessor.h"
 #include "Studio/PluginEditors.h"
+#include "Daw/Plugins/PluginHost.h"
 
 namespace wis
 {
 
-juce::StringArray KeysPanel::instrumentIds() { return { "piano", "yeti", "soundfont", "synth", "homekeys" }; }
+juce::StringArray KeysPanel::instrumentIds() { return { "piano", "soundfont", "synth", "homekeys" }; }
 
 KeysPanel::KeysPanel (AudioEngine& e, juce::PropertiesFile& s) : engine (e), settings (s)
 {
@@ -18,15 +19,14 @@ KeysPanel::KeysPanel (AudioEngine& e, juce::PropertiesFile& s) : engine (e), set
     back.onClick = [this] { if (onBack) onBack(); };
     addAndMakeVisible (back);
 
-    const auto ids = instrumentIds();
-    for (int i = 0; i < ids.size(); ++i)
-        if (auto* info = daw::findBuiltin (ids[i]))
-            instrumentBox.addItem (info->name, i + 1);
-    instrumentBox.setTooltip ("What you play: Piano Room (real grand, vintage grand and upright pianos in rooms), the singing Yodel Yeti, "
-                              "the General MIDI Sound Library, the Studio Synth or the HomeKeys 20");
+    refreshInstrumentList();
+    instrumentBox.setTooltip ("What you play: Piano Room (real grand, vintage grand and upright pianos in rooms), "
+                              "the General MIDI Sound Library, the Studio Synth, the HomeKeys 20, or any plugin instrument you've added in the Studio "
+                              "(Project > Add a Plugin File)");
     instrumentBox.onChange = [this]
     {
-        const auto id = instrumentIds()[instrumentBox.getSelectedId() - 1];
+        const int item = instrumentBox.getSelectedId();
+        const auto id = item >= 100 ? externalIds[item - 100] : instrumentIds()[item - 1];
         if (id.isNotEmpty() && id != currentId) loadInstrument (id, {});
     };
     addAndMakeVisible (instrumentBox);
@@ -97,29 +97,91 @@ void KeysPanel::visibilityChanged()
 {
     if (isVisible())
     {
+        refreshInstrumentList();
         ensureInstrument();
         refreshMidiLabel();
     }
+}
+
+void KeysPanel::refreshInstrumentList()
+{
+    instrumentBox.clear (juce::dontSendNotification);
+    const auto ids = instrumentIds();
+    for (int i = 0; i < ids.size(); ++i)
+        if (auto* info = daw::findBuiltin (ids[i]))
+            instrumentBox.addItem (info->name, i + 1);
+    externalIds.clear();
+    if (host != nullptr)
+    {
+        const auto ext = host->externalInstruments();
+        if (! ext.isEmpty())
+        {
+            instrumentBox.addSeparator();
+            instrumentBox.addSectionHeading ("Plugin instruments");
+            for (auto& d : ext)
+            {
+                externalIds.add ("ext:" + d.createIdentifierString());
+                instrumentBox.addItem (d.descriptiveName.contains ("32-bit") ? d.name + "  (32-bit)" : d.name, 100 + externalIds.size() - 1);
+            }
+        }
+    }
+    if (currentId.isNotEmpty()) instrumentBox.setSelectedId (itemIdFor (currentId), juce::dontSendNotification);
+}
+
+int KeysPanel::itemIdFor (const juce::String& id) const
+{
+    if (id.startsWith ("ext:")) { const int i = externalIds.indexOf (id); return i >= 0 ? 100 + i : 0; }
+    const int i = instrumentIds().indexOf (id);
+    return i >= 0 ? i + 1 : 0;
 }
 
 void KeysPanel::ensureInstrument()
 {
     if (engine.getKeysInstrument() != nullptr) return;
     auto id = settings.getValue ("keys.instrument", "piano");
-    if (! instrumentIds().contains (id)) id = "piano";
+    if (! id.startsWith ("ext:") && ! instrumentIds().contains (id)) id = "piano";
     loadInstrument (id, settings.getValue ("keys.state"));
+    if (engine.getKeysInstrument() == nullptr && id != "piano") loadInstrument ("piano", {});   // that plugin is gone
 }
 
 void KeysPanel::loadInstrument (const juce::String& id, const juce::String& state)
 {
     editorWindow.reset();   // the editor goes before its instrument
-    auto proc = daw::createBuiltin (id);
+    std::unique_ptr<juce::AudioProcessor> proc;
+    if (id.startsWith ("ext:"))
+    {
+        if (host == nullptr) return;
+        auto desc = host->known.getTypeForIdentifierString (id.substring (4));
+        if (desc == nullptr) return;
+        const double sr = engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0;
+        const int block = engine.getBlockSize() > 0 ? engine.getBlockSize() : 512;
+        juce::String err;
+        juce::MouseCursor::showWaitCursor();
+        proc = host->formats.createPluginInstance (*desc, sr, block, err);
+        juce::MouseCursor::hideWaitCursor();
+        if (proc == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Couldn't load " + desc->name, err, "OK", this);
+            instrumentBox.setSelectedId (itemIdFor (currentId), juce::dontSendNotification);
+            return;
+        }
+        if (auto* inst = dynamic_cast<juce::AudioPluginInstance*> (proc.get()))
+        {
+            auto layout = inst->getBusesLayout();
+            if (layout.outputBuses.size() > 0) layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+            if (! inst->setBusesLayout (layout)) inst->enableAllBuses();
+        }
+    }
+    else
+    {
+        proc = daw::createBuiltin (id);
+    }
     if (proc == nullptr) return;
     if (state.isNotEmpty()) daw::decodeState (*proc, state);
     currentId = id;
     auto old = engine.setKeysInstrument (std::move (proc));
     old.reset();
-    instrumentBox.setSelectedId (instrumentIds().indexOf (id) + 1, juce::dontSendNotification);
+    instrumentBox.setSelectedId (itemIdFor (id), juce::dontSendNotification);
     refreshPresets();
     settings.setValue ("keys.instrument", id);
 }

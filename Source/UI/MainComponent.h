@@ -41,6 +41,8 @@ public:
     // ---- hosting inside the app shell (Play Along | Studio) ----
     juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
     AudioEngine& getEngine() { return engine; }
+    void setPluginHost (daw::PluginHost* h) { keysPanel.setPluginHost (h); }
+    void pluginsChanged() { keysPanel.refreshInstrumentList(); }
     void setEmbedded (bool e) { embedded = e; audioButton.setVisible (! e); helpButton.setVisible (! e); resized(); repaint(); }
     /** Connects / disconnects the play-along engine from the audio device (only one page owns the audio at a time). */
     void setActive (bool active);

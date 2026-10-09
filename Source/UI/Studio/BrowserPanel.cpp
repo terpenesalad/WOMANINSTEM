@@ -6,7 +6,6 @@
 #include "Daw/Instruments/VintageRhythms.h"
 #include "Daw/Instruments/BeatLab.h"
 #include "Daw/Instruments/PianoRoom.h"
-#include "Daw/Instruments/YetiVoice.h"
 #include "Library/SongLibrary.h"
 
 namespace wis::daw
@@ -145,7 +144,6 @@ void BrowserPanel::populate()
             for (int i = 0; i < names.size(); ++i) addLeaf (grp, names[i], "inst:" + juce::String (id) + ":" + juce::String (i), sub);
         };
         addBuiltinGroup ("piano", PianoRoom::presetNames(), "Piano Room (real pianos in rooms)", "Piano Room: grands and uprights, from a living room to a forest or a canyon");
-        addBuiltinGroup ("yeti", YetiVoice::presetNames(), "Yodel Yeti (singing yeti)", "Yodel Yeti: a singing voice with a vowel pad, choir and delay");
 
         auto* homeKeys = addGroup ("HomeKeys 20 (80s Keyboard)");
         for (int i = 0; i < homeKeysPresets().size(); ++i)

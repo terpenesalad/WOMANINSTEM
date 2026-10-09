@@ -37,7 +37,24 @@ public:
 
     static juce::FileSearchPath defaultSearchPath (juce::AudioPluginFormat&);
 
+    // ---- WOMANINSTEM's own plugin folder ----
+    /** %APPDATA%\WOMANINSTEM\Plugins (created if needed): plugins kept with the app. */
+    static juce::File userPluginFolder();
+    /** The user folder plus a "Plugins" folder next to the exe (if there is one). */
+    static juce::Array<juce::File> pluginFolders();
+    /** Copies a plugin file (or .vst3 bundle) into the user folder and returns the copy; the original if it's
+        already in a plugin folder or the copy fails. */
+    static juce::File keepCopy (const juce::File& pluginFile);
+    /** The format that loads this file ("VST", "VST3", "CLAP"), or null. */
+    juce::AudioPluginFormat* formatForFile (const juce::File& f);
+    /** Scans new or changed plugins in the plugin folders on a background thread (each in a child process);
+        `onDone` runs on the message thread with the number of plugins added. */
+    void scanPluginFoldersAsync (std::function<void (int added)> onDone);
+
 private:
+    class FolderScanThread;
+    std::unique_ptr<FolderScanThread> folderScan;
+    bool outOfProcessInstalled = false;
     struct ChangeSaver;
     std::unique_ptr<ChangeSaver> saver;
 };

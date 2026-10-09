@@ -33,7 +33,95 @@ PluginHost::PluginHost()
 
 PluginHost::~PluginHost()
 {
+    folderScan.reset();
     saver.reset();
+}
+
+// ---- the plugins folder ------------------------------------------------------------------------------------
+
+juce::File PluginHost::userPluginFolder()
+{
+    auto dir = ModelManager::appDataDirectory().getChildFile ("Plugins");
+    dir.createDirectory();
+    return dir;
+}
+
+juce::Array<juce::File> PluginHost::pluginFolders()
+{
+    juce::Array<juce::File> dirs { userPluginFolder() };
+    const auto exeDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+    for (auto name : { "Plugins", "plugins" })
+        if (auto d = exeDir.getChildFile (name); d.isDirectory() && ! dirs.contains (d)) { dirs.add (d); break; }
+    return dirs;
+}
+
+juce::File PluginHost::keepCopy (const juce::File& f)
+{
+    for (auto& dir : pluginFolders())
+        if (f.isAChildOf (dir)) return f;
+    const auto dest = userPluginFolder().getChildFile (f.getFileName());
+    if (dest == f) return f;
+    if (f.isDirectory())   // a .vst3 bundle
+    {
+        dest.deleteRecursively();
+        return f.copyDirectoryTo (dest) ? dest : f;
+    }
+    if (dest.existsAsFile() && dest.getSize() == f.getSize() && dest.hasIdenticalContentTo (f)) return dest;
+    return f.copyFileTo (dest) ? dest : f;
+}
+
+juce::AudioPluginFormat* PluginHost::formatForFile (const juce::File& f)
+{
+    const juce::String name = f.hasFileExtension (".vst3") ? "VST3" : f.hasFileExtension (".clap") ? "CLAP"
+                            : (f.hasFileExtension (".dll") || f.hasFileExtension (".so")) ? "VST" : juce::String();
+    for (auto* format : formats.getFormats())
+        if (format->getName() == name) return format;
+    return nullptr;
+}
+
+class PluginHost::FolderScanThread : public juce::Thread
+{
+public:
+    FolderScanThread (PluginHost& h, std::function<void (int)> done) : juce::Thread ("Plugin folder scan"), host (h), onDone (std::move (done)) {}
+    ~FolderScanThread() override { stopThread (15000); }
+
+    void run() override
+    {
+        juce::Array<juce::File> files;
+        for (auto& dir : pluginFolders())
+        {
+            for (auto& f : dir.findChildFiles (juce::File::findFiles, true, "*.dll;*.clap;*.so"))
+                if (! f.getFullPathName().containsIgnoreCase (".vst3")) files.add (f);   // not a binary inside a VST3 bundle
+            for (auto& f : dir.findChildFiles (juce::File::findFilesAndDirectories, true, "*.vst3"))
+                if (! f.getParentDirectory().getFullPathName().containsIgnoreCase (".vst3")) files.add (f);
+        }
+        int added = 0;
+        for (auto& f : files)
+        {
+            if (threadShouldExit()) return;
+            auto* format = host.formatForFile (f);
+            if (format == nullptr) continue;
+            const auto id = f.getFullPathName();
+            if (host.known.getBlacklistedFiles().contains (id) || host.known.isListingUpToDate (id, *format)) continue;
+            juce::OwnedArray<juce::PluginDescription> found;
+            host.known.scanAndAddFile (id, false, found, *format);
+            added += found.size();
+        }
+        if (! threadShouldExit())
+            juce::MessageManager::callAsync ([cb = onDone, added] { if (cb) cb (added); });
+    }
+
+private:
+    PluginHost& host;
+    std::function<void (int)> onDone;
+};
+
+void PluginHost::scanPluginFoldersAsync (std::function<void (int)> onDone)
+{
+    useOutOfProcessScanning();
+    folderScan.reset();
+    folderScan = std::make_unique<FolderScanThread> (*this, std::move (onDone));
+    folderScan->startThread (juce::Thread::Priority::low);
 }
 
 juce::File PluginHost::listFile() const
@@ -163,6 +251,9 @@ namespace
 
 void PluginHost::useOutOfProcessScanning()
 {
+    // installed once: replacing it could pull the scanner out from under a scan running on another thread
+    if (outOfProcessInstalled) return;
+    outOfProcessInstalled = true;
     known.setCustomScanner (std::make_unique<OutOfProcessScanner>());
 }
 

@@ -334,7 +334,7 @@ MainComponent::MainComponent (juce::PropertiesFile& s) : settings (s)
     addAndMakeVisible (rigPanel);
     addChildComponent (keysPanel);
     keysPanel.onBack = [this] { showKeys (false); };
-    keysButton.setTooltip ("Play keys along with the song: a real piano in a room, the singing yeti, synths... from a MIDI keyboard or your computer keys (Ctrl+K)");
+    keysButton.setTooltip ("Play keys along with the song: a real piano in a room, Delay Lama, synths... from a MIDI keyboard or your computer keys (Ctrl+K)");
     keysButton.setColour (juce::TextButton::buttonColourId, theme::accent2.withAlpha (0.35f));
     keysButton.onClick = [this] { showKeys (true); };
     addAndMakeVisible (keysButton);
@@ -811,7 +811,7 @@ void MainComponent::showHelp()
       << "3. Pick your input in the rig's INPUT box and a preset (e.g. 'Bass - Vintage Tube').\n"
       << "4. Open Song (or drop an MP3/FLAC on the window). The first time, the AI model (55 MB) downloads.\n"
       << "5. Choose 'I'm playing: Bass' to mute the original bass, press Space and play along.\n\n"
-      << "Playing keys? Click KEYS (Ctrl+K): a real piano in a room (or the singing yeti, synths...) from a MIDI keyboard or your computer keys.\n\n"
+      << "Playing keys? Click KEYS (Ctrl+K): a real piano in a room (or Delay Lama, synths...) from a MIDI keyboard or your computer keys.\n\n"
       << "Shortcuts: Space play/pause, Home restart, Left/Right skip 5 s, L loop, R record, Ctrl+O open, Ctrl+K keys, Ctrl+Shift+O scope.\n"
       << "Drag across the waveform to loop a section; double-click to clear it. Slow tricky parts down with Speed.\n\n"
       << "Amp captures: load any .nam file (free at tone3000.com) in the AMP section. "
