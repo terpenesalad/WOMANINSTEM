@@ -154,6 +154,56 @@ int main (int argc, char** argv)
         std::cout << "bpm " << est.bpm << "  first beat " << est.firstBeatSeconds << " s  confidence " << est.confidence << std::endl;
         return 0;
     }
+    // dawtest --render-homekeys <preset> <out.wav>: plays a slow chord progression on a HomeKeys 20 preset (for listening)
+    if (argc > 3 && juce::String (argv[1]) == "--render-homekeys")
+    {
+        HomeKeys k;
+        k.setCurrentProgram (juce::String (argv[2]).getIntValue());
+        k.setParam ("rhythmOn", 0.0f);
+        k.setParam ("abc", 0.0f);
+        k.prepareToPlay (sr, 512);
+        // slow chords, two bars each, with a little top line: D, Bm, G, A
+        const int chords[4][4] = { { 50, 57, 62, 66 }, { 47, 54, 62, 66 }, { 43, 55, 59, 62 }, { 45, 57, 61, 64 } };
+        const int tops[8] = { 69, 71, 74, 71, 67, 66, 64, 61 };
+        const double chordLen = 3.2;
+        juce::MidiBuffer all;
+        auto at = [] (double s) { return (int) (s * sr); };
+        for (int c = 0; c < 4; ++c)
+        {
+            for (int nn : chords[c])
+            {
+                all.addEvent (juce::MidiMessage::noteOn (1, nn, (juce::uint8) 90), at (c * chordLen));
+                all.addEvent (juce::MidiMessage::noteOff (1, nn), at ((c + 1) * chordLen - 0.08));
+            }
+            for (int h = 0; h < 2; ++h)
+            {
+                all.addEvent (juce::MidiMessage::noteOn (1, tops[c * 2 + h], (juce::uint8) 100), at (c * chordLen + h * chordLen * 0.5 + 0.02));
+                all.addEvent (juce::MidiMessage::noteOff (1, tops[c * 2 + h]), at (c * chordLen + (h + 1) * chordLen * 0.5 - 0.1));
+            }
+        }
+        const int total = at (4 * chordLen + 3.0);
+        juce::AudioBuffer<float> out (2, total);
+        for (int pos = 0; pos < total; pos += 512)
+        {
+            const int n = std::min (512, total - pos);
+            juce::AudioBuffer<float> blockBuf (out.getArrayOfWritePointers(), 2, pos, n);
+            blockBuf.clear();
+            juce::MidiBuffer mb;
+            for (const auto meta : all)
+                if (meta.samplePosition >= pos && meta.samplePosition < pos + n)
+                    mb.addEvent (meta.getMessage(), meta.samplePosition - pos);
+            k.processBlock (blockBuf, mb);
+        }
+        const juce::File f { juce::String (juce::CharPointer_UTF8 (argv[3])) };
+        f.deleteFile();
+        std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+        auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (24);
+        if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
+            w->writeFromAudioSampleBuffer (out, 0, total);
+        std::cout << k.getProgramName (k.getCurrentProgram()) << ": peak " << out.getMagnitude (0, total)
+                  << "  rms " << juce::Decibels::gainToDecibels (out.getRMSLevel (0, 0, total)) << " dB" << std::endl;
+        return 0;
+    }
     // dawtest --make-demo <file.wisproj>: builds a demo song (used for the README screenshots)
     if (argc > 2 && juce::String (argv[1]) == "--make-demo")
     {
@@ -835,6 +885,37 @@ int main (int argc, char** argv)
             project.addNote (hc, 69, 0.0, 2.0, 100);
             auto voice = renderRange (engine, project, 0.0, 2.0);
             check (allFinite (voice) && rms (voice, (int) (0.1 * sr), (int) (0.9 * sr)) > 0.01f, "HomeKeys plays a note");
+
+            // the digital organs (tones 17, 18): in tune, and dry when the effects are off
+            for (int organ : { 16, 17 })
+            {
+                keys->setParam ("tone", (float) organ);
+                for (auto* id : { "ensemble", "vibrato", "vintage", "wobble", "reverb", "drive" }) keys->setParam (id, 0.0f);
+                auto o = renderRange (engine, project, 0.0, 2.0);
+                // autocorrelation pitch (the stepped square-wave footages fool a zero-crossing count)
+                const int from = (int) (0.4 * sr), len = (int) (0.4 * sr);
+                const float* x = o.getReadPointer (0);
+                int bestLag = 0; double best = -1.0;
+                for (int lag = (int) (sr / 600.0); lag <= (int) (sr / 300.0); ++lag)
+                {
+                    double c = 0.0;
+                    for (int i = 0; i < len; ++i) c += (double) x[from + i] * x[from + i + lag];
+                    if (c > best) { best = c; bestLag = lag; }
+                }
+                const double hz = bestLag > 0 ? sr / bestLag : 0.0;
+                check (allFinite (o) && rms (o, from, from + len) > 0.02f && std::abs (hz - 440.0) < 6.0,
+                       HomeKeys::toneNames()[organ] + " plays A4 in tune (" + juce::String (hz, 1) + " Hz)");
+            }
+            // the Teen Dream preset: wobble, amp and a reverb that rings on after the note
+            keys->setCurrentProgram (0);
+            keys->setParam ("rhythmOn", 0.0f);
+            hc.v.removeAllChildren (nullptr);
+            project.addNote (hc, 69, 0.0, 1.0, 100);
+            auto dream = renderRange (engine, project, 0.0, 3.0);
+            const double spb = 60.0 / project.tempo();
+            const int noteEnd = (int) (1.0 * spb * sr);
+            check (allFinite (dream) && rms (dream, (int) (0.1 * sr), noteEnd) > 0.02f && rms (dream, noteEnd + (int) (0.3 * sr), noteEnd + (int) (0.6 * sr)) > 0.003f,
+                   "Teen Dream Organ preset plays with a reverb tail");
             hc.v.removeAllChildren (nullptr);
             keys->setParam ("rhythmOn", 1.0f);
             keys->setParam ("abc", 1.0f);   // single finger

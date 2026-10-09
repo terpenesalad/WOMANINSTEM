@@ -45,8 +45,8 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    std::function<void()> onProjectMenu, onToggleBrowser, onToggleEditor, onToggleMixer, onToggleKeys, onToggleTyping;
-    void setPanelStates (bool browser, bool editor, bool mixer, bool keys, bool typing);
+    std::function<void()> onProjectMenu, onToggleBrowser, onToggleEditor, onToggleMixer, onToggleKeys, onTogglePlugins, onToggleTyping;
+    void setPanelStates (bool browser, bool editor, bool mixer, bool keys, bool plugins, bool typing);
 
     juce::TextButton projectButton { "Project" };
     std::function<double()> cpuUsage;
@@ -68,7 +68,7 @@ private:
                     countB  { TransportButton::Kind::countIn, "Count-in: 1 bar of clicks before recording" },
                     typingB { TransportButton::Kind::typing, "Musical Typing: play notes with your computer keyboard (Ctrl+K)" };
     Lcd lcd;
-    juce::TextButton browserB { "Library" }, editorB { "Editor" }, mixerB { "Mixer" }, keysB { "Keys" };
+    juce::TextButton browserB { "Library" }, editorB { "Editor" }, mixerB { "Mixer" }, keysB { "Keys" }, pluginsB { "Plugin" };
     juce::Slider master { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     LevelMeter meterL { false }, meterR { false };
     juce::Label cpu;

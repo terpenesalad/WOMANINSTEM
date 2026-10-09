@@ -48,7 +48,7 @@ private:
     void timerCallback() override;
 
     // panels
-    void setBottomPanel (int which);   // 0 none, 1 editor, 2 mixer, 3 keys
+    void setBottomPanel (int which);   // 0 none, 1 editor, 2 mixer, 3 keys, 4 plugins
     void toggleBrowser();
     void updatePanelButtons();
 
@@ -58,6 +58,10 @@ private:
     void trackMenu (int trackId, juce::Point<int> screenPos);
     void openEditor (int clipId);
     void openPluginWindow (const juce::ValueTree& pluginNode);
+    void openFloatingPluginWindow (const juce::String& slotId);
+    void dockPlugin (const juce::String& slotId);
+    juce::String pluginTitle (const juce::String& slotId);
+    bool canDock (const juce::String& slotId);
     void closePluginWindow (const juce::String& slotId);
     void applyBrowserItem (const juce::String& item, int trackId, double beat);
     void importFiles (const juce::StringArray& files, int trackId, double beat);
@@ -103,6 +107,7 @@ private:
     PianoRoll pianoRoll { ctx };
     AudioClipEditor audioEditor { ctx };
     MixerView mixer { ctx };
+    PluginDock dock;
     juce::MidiKeyboardComponent keyboard { engine.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard };
     juce::Label keysHint, status;
     juce::StretchableLayoutResizerBar splitter { &layout, 1, false };
@@ -110,6 +115,8 @@ private:
 
     bool showBrowser = true;
     int bottomPanel = 1;
+    int panelBeforeDock = 2;        // where to go back to when the last docked plugin closes
+    bool dockPlugins = true;        // open built-in plugins in the bottom panel (false: floating windows)
     bool typing = false;
     int typingOctave = 5;      // C5 = middle C (MIDI 60)
     int typingVelocity = 100;

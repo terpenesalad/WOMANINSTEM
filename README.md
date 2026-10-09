@@ -70,6 +70,14 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.6
+
+- **Plugins open in the bottom panel**: instrument and effect controls (Amp & Pedals, HomeKeys, Piano Room, every built-in effect) now open docked under the song, next to Editor / Mixer / Keys, instead of floating over it. Several can be open as tabs; the panel grows to fit. Press **P** or click **Plugin** to show / hide it. *Pop out* puts one in its own window; *Dock in the Studio* brings it back. Other makers' VST / CLAP plugins still open in their own windows.
+
+<p align="center"><img src="docs/studio-dock.png" width="900" alt="Amp & Pedals docked in the Studio's bottom panel"></p>
+
+- **HomeKeys 20 dream organ**: two new tones, *Dream Organ 1* and *Dream Organ 2*, modelled on the cheap early-80s digital home-keyboard organs that Beach House built their sound on (stepped digital waveforms through an analogue filter; Organ 2 has the percussive bite). HomeKeys also gets the effects that organ was always played through: **Amp Drive**, a vibrato **Wobble** and a big soft **Reverb**. New presets, first in the list: *Teen Dream Organ*, *Gila Organ (Devotion)*, *Thrift Store Organ + Slow Rock ('06)* and *Dream Organ, Dry*.
+
 ### New in 3.5
 
 - **Old 32-bit VST plugins** (Delay Lama and friends) run through a built-in 32-bit bridge. *Project → Add a Plugin File...* picks a `.dll`, keeps a copy in WOMANINSTEM's own plugins folder, tests it in a separate process and puts it on a track with its window open. Anything in that folder (`%APPDATA%\WOMANINSTEM\Plugins`, or a `Plugins` folder next to the exe) loads automatically. Plugin instruments can be played from Play Along's KEYS too.
@@ -104,7 +112,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 - **Aux buses, sends and routing**: shared reverbs and delays (pre/post-fader sends), group buses, **side-chain** for the compressor, gate and vocoder.
 - **Time stretching**: `Ctrl`+drag an audio clip's edge, or let it **follow the song tempo** (tempo detected). Transpose audio, reverse, normalize.
 - **Vocal Tune** (automatic pitch correction, natural to robotic), **De-Esser**, **Vocoder**.
-- **HomeKeys 20**: an 80s home keyboard with 16 lo-fi tones, a **rhythm box with 20 rhythms**, fills and auto accompaniment. Plus a **Vintage Rhythm Box** and all 20 rhythms as drum loops.
+- **HomeKeys 20**: an 80s home keyboard with 18 lo-fi tones (including a Beach House-style dream organ), amp drive, wobble and reverb, a **rhythm box with 20 rhythms**, fills and auto accompaniment. Plus a **Vintage Rhythm Box** and all 20 rhythms as drum loops.
 - **Arpeggiator** and MIDI effects (Chord Trigger, Scale Lock, Note Echo, Randomizer) before any instrument.
 - **Sampler** (keyboard / one-shot / slices), **Drum Pads**, **Convert to Sampler Track**, and a **Loop Station** looper pedal.
 - **Creative effects**: Shimmer Reverb, Tape Warble, Grain Cloud, Beat Repeat, Pitch Shifter, Auto Filter, Flanger, Ring Mod, Bitcrusher, Stereo Width.
@@ -116,7 +124,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 - **Software Instrument** tracks, played from a **USB MIDI keyboard** (any class-compliant keyboard works, plug it in and go) or your computer keyboard (**Musical Typing**, `Ctrl+K`).
 - **Sound Library**: 287 built-in instruments and drum kits (GeneralUser GS): grand & electric pianos, organs, guitars, basses, strings, choirs, brass, woodwinds, synths, percussion and 13 drum kits. Load any other `.sf2` SoundFont too.
 - **Studio Synth**: a 16-voice analog-style synth (2 oscillators + sub + noise, resonant filter with envelope, LFO, glide / mono legato) with 16 presets.
-- **HomeKeys 20**: an 80s portable home keyboard. 16 tones (organs, electric piano, toy strings, vibes, glockenspiel, music box, choir, synth brass...), ensemble, vibrato, sustain and a *Vintage* knob (tape wobble, hiss, lo-fi). Its **rhythm box** has 20 rhythms (Slow Rock, Waltz, Bossa Nova, Rhumba, Beguine, Disco, Rock, 16 Beat, Soft Rock, Ballad, Swing, Shuffle, March, Tango, Samba, Reggae, Country, Polka, Cha-Cha, Mambo) on 4 drum-machine sounds, with fills, START / SYNC START, and **auto accompaniment**: hold a chord (or one key) in the left hand and it plays bass and chords in the rhythm. It follows the song's tempo while the song plays.
+- **HomeKeys 20**: an 80s portable home keyboard. 18 tones (two early-80s digital dream organs, organs, electric piano, toy strings, vibes, glockenspiel, music box, choir, synth brass...), ensemble, vibrato, sustain, a *Vintage* knob (tape wobble, hiss, lo-fi), and an effects section: amp drive, a vibrato wobble and a big reverb. Its **rhythm box** has 20 rhythms (Slow Rock, Waltz, Bossa Nova, Rhumba, Beguine, Disco, Rock, 16 Beat, Soft Rock, Ballad, Swing, Shuffle, March, Tango, Samba, Reggae, Country, Polka, Cha-Cha, Mambo) on 4 drum-machine sounds, with fills, START / SYNC START, and **auto accompaniment**: hold a chord (or one key) in the left hand and it plays bass and chords in the rhythm. It follows the song's tempo while the song plays.
 - **Vintage Rhythm Box**: the same 20 rhythms and 4 kits as a drum machine. Drop any rhythm in as an editable 8-bar loop from *Library → Drums*.
 - **Sampler**: drop in any audio file. *Classic* plays it across the keys, *One Shot* plays it to the end, *Slice* chops it by transients (or 4/8/16/32 equal slices), one slice per key from C2. Start/end and loop markers (with crossfade), ADSR, filter with envelope, velocity, glide, mono/legato, reverse.
 - **Drum Pads**: 16 pads (the standard drum notes, so drum grooves play them) with your own samples or four synthesized kits. Per pad: tune, gain, pan, decay, filter, reverse, choke group.

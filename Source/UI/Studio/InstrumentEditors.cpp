@@ -416,6 +416,7 @@ public:
     explicit HomeKeysEditor (HomeKeys& k)
         : AudioProcessorEditor (k), keys (k), header (k, "HomeKeys 20"),
           knobs (k, { "volume", "tempo", "rhythmVol", "bassVol", "chordVol", "vintage", "bright", "split" }, retro::orange),
+          fx (k, { "drive", "wobble", "wobbleRate", "reverb", "reverbSize" }, retro::cream),
           switches (k, { "abc", "kit", "chordTone", "ensemble", "vibrato", "sustain", "rhythmOn" }, retro::orange)
     {
         addAndMakeVisible (header);
@@ -438,8 +439,10 @@ public:
         fillButton.onClick = [this] { keys.requestFill(); };
         for (auto* b : { &startButton, &syncButton, &fillButton }) addAndMakeVisible (b);
         addAndMakeVisible (knobs);
+        addAndMakeVisible (fx);
         addAndMakeVisible (switches);
-        setSize (1000, 640);
+        setSize (1000, 720);
+        timerCallback();   // light the current tone and rhythm straight away
         startTimerHz (20);
     }
 
@@ -512,13 +515,14 @@ public:
 
         toneLabel = r.removeFromTop (16);
         auto toneArea = r.removeFromTop (88);
-        layoutGrid (toneButtons, toneArea, 8);
+        layoutGrid (toneButtons, toneArea, 9);
         rhythmLabel = r.removeFromTop (16);
         auto rhythmArea = r.removeFromTop (88);
         layoutGrid (rhythmButtons, rhythmArea, 10);
         r.removeFromTop (6);
         brandArea = r.removeFromBottom (16);
         switches.setBounds (r.removeFromTop (switches.heightFor (r.getWidth())));
+        fx.setBounds (r.removeFromRight (r.getWidth() * 5 / 13));
         knobs.setBounds (r);
     }
 
@@ -545,7 +549,7 @@ private:
     EditorHeader header;
     juce::OwnedArray<RetroButton> toneButtons, rhythmButtons;
     juce::TextButton startButton { "START" }, syncButton { "SYNC START" }, fillButton { "FILL IN" };
-    ParamPanel knobs, switches;
+    ParamPanel knobs, fx, switches;
     juce::Rectangle<int> lcdArea, toneLabel, rhythmLabel, brandArea;
     juce::Rectangle<float> grilleL, grilleR;
 };

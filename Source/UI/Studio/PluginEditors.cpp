@@ -459,14 +459,59 @@ void installBuiltinEditors()
 // =====================================================================================================
 //  PluginWindow
 // =====================================================================================================
-PluginWindow::PluginWindow (const juce::String& title, juce::AudioProcessor& p, std::function<void()> onClose)
+namespace
+{
+    /** The floating window's content: a thin strip with a "Dock" button over the plugin's editor. */
+    class DockableContent : public juce::Component
+    {
+    public:
+        DockableContent (juce::AudioProcessorEditor* ed, std::function<void()> onDock) : editor (ed)
+        {
+            dock.setTooltip ("Put this plugin back in the Studio's bottom panel (P shows / hides it)");
+            dock.onClick = [cb = std::move (onDock)] { if (cb) juce::MessageManager::callAsync (cb); };   // deletes this window
+            addAndMakeVisible (dock);
+            addAndMakeVisible (editor.get());
+            setSize (editor->getWidth(), editor->getHeight() + strip);
+        }
+        ~DockableContent() override { if (editor != nullptr) editor->processor.editorBeingDeleted (editor.get()); editor.reset(); }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (theme::panel);
+            g.setColour (theme::textFaint);
+            g.setFont (uiFont (11.5f));
+            g.drawText ("Floating window", getLocalBounds().removeFromTop (strip).reduced (10, 0), juce::Justification::centredLeft);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds();
+            auto top = r.removeFromTop (strip);
+            dock.setBounds (top.removeFromRight (150).reduced (4, 3));
+            if (editor != nullptr && editor->getBounds() != r) editor->setBounds (r);
+        }
+        void childBoundsChanged (juce::Component* c) override
+        {
+            if (c == editor.get() && (editor->getWidth() != getWidth() || editor->getHeight() + strip != getHeight()))
+                setSize (editor->getWidth(), editor->getHeight() + strip);
+        }
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+    private:
+        static constexpr int strip = 28;
+        juce::TextButton dock { "Dock in the Studio" };
+    };
+}
+
+PluginWindow::PluginWindow (const juce::String& title, juce::AudioProcessor& p, std::function<void()> onClose, std::function<void()> onDock)
     : DocumentWindow (title, theme::panel, DocumentWindow::closeButton | DocumentWindow::minimiseButton), processor (p), onCloseCallback (std::move (onClose))
 {
     setUsingNativeTitleBar (true);
     juce::AudioProcessorEditor* editor = p.createEditorIfNeeded();
     if (editor == nullptr) editor = new juce::GenericAudioProcessorEditor (p);
-    setContentOwned (editor, true);
-    setResizable (editor->isResizable(), false);
+    const bool resizable = editor->isResizable();
+    if (onDock)
+        setContentOwned (new DockableContent (editor, std::move (onDock)), true);
+    else
+        setContentOwned (editor, true);
+    setResizable (resizable, false);
     centreWithSize (getWidth(), getHeight());
     setVisible (true);
     toFront (true);
@@ -480,6 +525,183 @@ PluginWindow::~PluginWindow()
 void PluginWindow::closeButtonPressed()
 {
     if (onCloseCallback) onCloseCallback();   // deletes this window
+}
+
+// =====================================================================================================
+//  PluginDock
+// =====================================================================================================
+PluginDock::PluginDock()
+{
+    viewport.setViewedComponent (&holder, false);
+    viewport.setScrollBarsShown (true, true, true, true);
+    addAndMakeVisible (viewport);
+    popOutButton.setTooltip ("Open this plugin in its own window");
+    closeButton.setTooltip ("Close this plugin's controls");
+    popOutButton.onClick = [this]
+    {
+        const auto id = activeSlot();
+        if (id.isEmpty()) return;
+        remove (id);
+        if (onPopOut) onPopOut (id);
+    };
+    closeButton.onClick = [this] { if (active >= 0) remove (activeSlot()); };
+    addAndMakeVisible (popOutButton);
+    addAndMakeVisible (closeButton);
+    rebuildTabs();
+}
+
+PluginDock::~PluginDock() { destroyEditor(); }
+
+bool PluginDock::contains (const juce::String& slotId) const
+{
+    for (auto& e : entries) if (e.slotId == slotId) return true;
+    return false;
+}
+
+void PluginDock::show (const juce::String& slotId, const juce::String& title)
+{
+    for (size_t i = 0; i < entries.size(); ++i)
+        if (entries[i].slotId == slotId)
+        {
+            entries[i].title = title;
+            rebuildTabs();
+            if ((int) i != active || editor == nullptr) select ((int) i);
+            return;
+        }
+    entries.push_back ({ slotId, title });
+    rebuildTabs();
+    select ((int) entries.size() - 1);
+}
+
+void PluginDock::remove (const juce::String& slotId)
+{
+    for (size_t i = 0; i < entries.size(); ++i)
+        if (entries[i].slotId == slotId)
+        {
+            const bool wasActive = (int) i == active;
+            if (wasActive) destroyEditor();
+            entries.erase (entries.begin() + (std::ptrdiff_t) i);
+            if (active > (int) i) --active;
+            rebuildTabs();
+            if (entries.empty()) { active = -1; repaint(); if (onEmpty) onEmpty(); return; }
+            if (wasActive) select (juce::jmin ((int) i, (int) entries.size() - 1));
+            return;
+        }
+}
+
+void PluginDock::clear()
+{
+    destroyEditor();
+    entries.clear();
+    active = -1;
+    rebuildTabs();
+    repaint();
+}
+
+void PluginDock::destroyEditor()
+{
+    if (editor != nullptr)
+    {
+        editor->removeComponentListener (this);
+        holder.removeChildComponent (editor.get());
+        if (editorProcessor != nullptr) editorProcessor->editorBeingDeleted (editor.get());
+        editor.reset();
+    }
+    editorProcessor = nullptr;
+}
+
+void PluginDock::select (int index)
+{
+    destroyEditor();
+    active = juce::jlimit (-1, (int) entries.size() - 1, index);
+    if (active >= 0 && getProcessor)
+    {
+        if (auto* proc = getProcessor (entries[(size_t) active].slotId))
+        {
+            juce::AudioProcessorEditor* ed = proc->createEditorIfNeeded();
+            if (ed == nullptr) ed = new juce::GenericAudioProcessorEditor (*proc);
+            editor.reset (ed);
+            editorProcessor = proc;
+            editorDefaultWidth = editor->getWidth();
+            holder.addAndMakeVisible (editor.get());
+            editor->addComponentListener (this);
+        }
+    }
+    for (int i = 0; i < tabs.size(); ++i) tabs[i]->setToggleState (i == active, juce::dontSendNotification);
+    layoutEditor();
+    repaint();
+    if (editor != nullptr && onWantsHeight) onWantsHeight (preferredHeight());
+}
+
+void PluginDock::rebuildTabs()
+{
+    tabs.clear();
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+        auto* b = tabs.add (new juce::TextButton (entries[i].title));
+        b->setClickingTogglesState (false);
+        b->setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.8f));
+        b->setToggleState ((int) i == active, juce::dontSendNotification);
+        b->setTooltip (entries[i].title);
+        const auto id = entries[i].slotId;
+        b->onClick = [this, id]
+        {
+            for (size_t k = 0; k < entries.size(); ++k) if (entries[k].slotId == id && (int) k != active) { select ((int) k); return; }
+        };
+        addAndMakeVisible (b);
+    }
+    popOutButton.setEnabled (! entries.empty());
+    closeButton.setEnabled (! entries.empty());
+    resized();
+}
+
+int PluginDock::preferredHeight() const
+{
+    return tabBarHeight + (editor != nullptr ? editor->getHeight() + 4 : 0);
+}
+
+void PluginDock::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::panel);
+    g.setColour (theme::outline);
+    g.drawHorizontalLine (tabBarHeight - 1, 0.0f, (float) getWidth());
+    if (entries.empty())
+    {
+        g.setColour (theme::textDim);
+        g.setFont (uiFont (13.0f));
+        g.drawFittedText ("Instruments and effects open here. Double-click a plugin in the mixer, or choose an instrument for a track.\n"
+                          "Pop out puts one in its own window; Dock in the Studio brings it back.",
+                          getLocalBounds().withTrimmedTop (tabBarHeight).reduced (20), juce::Justification::centred, 3);
+    }
+}
+
+void PluginDock::resized()
+{
+    auto r = getLocalBounds();
+    auto bar = r.removeFromTop (tabBarHeight).reduced (6, 4);
+    closeButton.setBounds (bar.removeFromRight (64)); bar.removeFromRight (4);
+    popOutButton.setBounds (bar.removeFromRight (76)); bar.removeFromRight (12);
+    const int w = tabs.isEmpty() ? 0 : juce::jlimit (90, 240, bar.getWidth() / tabs.size());
+    for (auto* t : tabs) { t->setBounds (bar.removeFromLeft (w).withTrimmedRight (4)); }
+    viewport.setBounds (r);
+    layoutEditor();
+}
+
+void PluginDock::layoutEditor()
+{
+    if (editor == nullptr) { holder.setSize (viewport.getMaximumVisibleWidth(), 1); return; }
+    const juce::ScopedValueSetter<bool> svs (layingOut, true);
+    const int viewW = juce::jmax (1, viewport.getWidth() - 2), viewH = juce::jmax (1, viewport.getHeight());
+    if (editor->isResizable())
+    {
+        // stretch a resizable editor (like Amp & Pedals) across the panel, within reason
+        int w = juce::jmax (editorDefaultWidth, juce::jmin (viewW, editorDefaultWidth * 3 / 2));
+        if (auto* c = editor->getConstrainer()) w = juce::jlimit (c->getMinimumWidth(), juce::jmax (c->getMinimumWidth(), c->getMaximumWidth()), w);
+        if (editor->getWidth() != w) editor->setSize (w, editor->getHeight());
+    }
+    const int ew = editor->getWidth(), eh = editor->getHeight();
+    holder.setSize (juce::jmax (viewW, ew), juce::jmax (viewH - (ew > viewW ? viewport.getScrollBarThickness() : 0), eh));
+    editor->setTopLeftPosition (juce::jmax (0, (holder.getWidth() - ew) / 2), 0);
 }
 
 } // namespace wis::daw

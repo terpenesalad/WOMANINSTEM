@@ -106,10 +106,66 @@ public:
             if (! ok) ++failures;
             std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio instrument menu lists Piano Room" << std::endl;
         }
+        failures += runPluginDockSelfTest();
         failures += runScopeSelfTest();
         failures += runPedalboardSelfTest();
         std::cout << (failures == 0 ? "UI SELF-TEST PASSED" : "UI SELF-TEST FAILED") << std::endl;
         return failures == 0 ? 0 : 1;
+    }
+
+    /** The Studio's bottom-panel plugin dock: tabs, editors in and out, Pop out (WIS_UI_SNAPSHOTS saves studio-dock.png). */
+    static int runPluginDockSelfTest()
+    {
+        int failures = 0;
+        std::map<juce::String, std::unique_ptr<daw::BuiltinProcessor>> procs;
+        for (auto id : { "amprig", "homekeys" })
+        {
+            auto p = daw::createBuiltin (id);
+            p->setPlayConfigDetails (2, 2, 48000.0, 512);
+            p->prepareToPlay (48000.0, 512);
+            procs[id] = std::move (p);
+        }
+        {
+            daw::PluginDock dock;
+            dock.getProcessor = [&] (const juce::String& id) -> juce::AudioProcessor* { auto it = procs.find (id); return it != procs.end() ? it->second.get() : nullptr; };
+            int wanted = 0, emptied = 0;
+            juce::String poppedOut;
+            dock.onWantsHeight = [&] (int h) { wanted = h; };
+            dock.onEmpty = [&] { ++emptied; };
+            dock.onPopOut = [&] (const juce::String& id) { poppedOut = id; };
+            dock.setSize (1660, 420);
+            dock.setVisible (true);
+            dock.show ("amprig", "Guitar  -  Amp & Pedals");
+            bool ok = dock.activeSlot() == "amprig" && procs["amprig"]->getActiveEditor() != nullptr && wanted > daw::PluginDock::tabBarHeight + 300;
+            auto paint = [&] (const juce::String& name)
+            {
+                juce::Image img (juce::Image::ARGB, dock.getWidth(), dock.getHeight(), true);
+                juce::Graphics g (img);
+                dock.paintEntireComponent (g, true);
+                const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {});
+                if (snapDir.isNotEmpty())
+                {
+                    juce::FileOutputStream out (juce::File (snapDir).getChildFile (name));
+                    if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (img, out); }
+                }
+            };
+            paint ("studio-dock.png");
+            dock.show ("homekeys", "Keys  -  HomeKeys 20");
+            ok = ok && dock.activeSlot() == "homekeys" && procs["amprig"]->getActiveEditor() == nullptr && procs["homekeys"]->getActiveEditor() != nullptr;
+            dock.setSize (900, 300);   // smaller than the editor: it scrolls
+            paint ("studio-dock-small.png");
+            dock.show ("amprig", "Guitar  -  Amp & Pedals");   // back to the first tab
+            ok = ok && procs["homekeys"]->getActiveEditor() == nullptr && procs["amprig"]->getActiveEditor() != nullptr;
+            dock.remove ("amprig");
+            ok = ok && dock.activeSlot() == "homekeys" && procs["amprig"]->getActiveEditor() == nullptr && emptied == 0;
+            dock.remove ("homekeys");
+            ok = ok && dock.isEmpty() && emptied == 1 && procs["homekeys"]->getActiveEditor() == nullptr;
+            paint ("studio-dock-empty.png");
+            if (! ok) ++failures;
+            std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio plugin dock: tabs swap editors, sizes to fit, closes cleanly" << std::endl;
+        }
+        for (auto& [id, p] : procs) p->releaseResources();
+        return failures;
     }
 
     /** The rig panel with an edited pedalboard lays out and paints (WIS_UI_SNAPSHOTS saves rig-pedalboard.png). */

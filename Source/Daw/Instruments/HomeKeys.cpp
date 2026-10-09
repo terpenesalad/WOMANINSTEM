@@ -26,6 +26,7 @@ namespace
         float a, d, s, r;
         float vibDepth, vibRate, vibDelay, tremolo;
         float breath, octave, level;
+        int digitalOrgan = 0;                    // 1, 2: an early-80s digital organ (stepped wavetable + analogue filter)
     };
 
     // name, additive, ratios, amps, decays, wave, pw, mix2, det2, cutoff, keytrack, envAmt, envDec, reso, formant, A D S R, vib depth rate delay, trem, breath, octave, level
@@ -49,9 +50,102 @@ namespace
         { "Human Voice",  false, {}, {}, {}, 0, 0.5f, 0.5f, 0.1f, 0, 0, 0, 0, 0, true, 0.15f, 0.3f, 0.9f, 0.35f, 0.15f, 5.2f, 0.25f, 0, 0.02f, 0, 0.75f },
         // internal: accompaniment bass
         { "Synth Bass",   false, {}, {}, {}, 0, 0.5f, 0.5f, -12.0f, 700, 0.3f, 1400, 0.12f, 0.3f, false, 0.002f, 0.5f, 0.55f, 0.07f, 0, 0, 0, 0, 0, 0, 0.9f },
+        // 3.6: the cheap early-80s portable organ sound (Beach House's thrift-store keyboard): square-wave footages
+        // read from a coarse digital wavetable, then a warm analogue low-pass. Organ 2 has the percussive "bite".
+        { "Dream Organ 1", false, {}, {}, {}, 0, 0.5f, 0, 0, 3400, 0.25f, 0, 0.1f, 0.15f, false, 0.006f, 0.2f, 1.0f, 0.06f, 0, 0, 0, 0, 0, 0, 0.62f, 1 },
+        { "Dream Organ 2", false, {}, {}, {}, 0, 0.5f, 0, 0, 3000, 0.25f, 2600, 0.09f, 0.2f, false, 0.003f, 0.35f, 0.82f, 0.06f, 0, 0, 0, 0, 0, 0, 0.62f, 2 },
     };
-    constexpr int numPublicTones = 16;
+    constexpr int numPublicTones = 18;
     constexpr int bassTone = 16;
+
+    /** Public tone number (the TONE buttons) -> index into tones[] (the accompaniment bass sits in the middle). */
+    int toneIndex (int publicTone)
+    {
+        publicTone = juce::jlimit (0, numPublicTones - 1, publicTone);
+        return publicTone < bassTone ? publicTone : publicTone + 1;
+    }
+
+    /** The digital organ waveforms. The chip stores one cycle in 64 steps of 32 levels and plays it through a DAC;
+        that stepped wave (with its zero-order-hold images) is what reaches the filter. We rebuild exactly that
+        spectrum, band-limited per octave, so high notes keep the hardware's harmonics without aliasing hash. */
+    struct OrganTables
+    {
+        static constexpr int steps = 64, size = 2048, levels = 11;   // level L holds harmonics up to 2^L
+        std::vector<float> table[3][levels];
+        OrganTables()
+        {
+            // footage mixes of square waves: 8' + 4' + 2' (hollow, reedy) and 8' + 4' + 2 2/3' + 2' + 1' (brighter, nasal)
+            const float mixes[3][5] = { {}, { 1.0f, 0.55f, 0.0f, 0.24f, 0.0f }, { 1.0f, 0.45f, 0.38f, 0.2f, 0.08f } };
+            const float ratios[5] = { 1.0f, 2.0f, 3.0f, 4.0f, 8.0f };
+            const double pi = juce::MathConstants<double>::pi;
+            for (int t = 1; t <= 2; ++t)
+            {
+                float stepped[steps] {};
+                float peak = 0.0f;
+                for (int i = 0; i < steps; ++i)
+                {
+                    float v = 0.0f;
+                    for (int k = 0; k < 5; ++k)
+                    {
+                        float ph = (float) i / (float) steps * ratios[k];
+                        ph -= std::floor (ph);
+                        v += mixes[t][k] * (ph < 0.5f ? 1.0f : -1.0f);
+                    }
+                    stepped[i] = v;
+                    peak = juce::jmax (peak, std::abs (v));
+                }
+                for (auto& v : stepped) v = std::round (v / peak * 15.5f) / 15.5f;   // 5-bit levels
+                // Fourier series of the held staircase: harmonic h = DFT bin (h mod 64) x sinc, with the hold's half-step delay
+                const int maxH = 1 << (levels - 1);
+                std::vector<double> re ((size_t) maxH + 1), im ((size_t) maxH + 1);
+                for (int h = 1; h <= maxH; ++h)
+                {
+                    double cr = 0, ci = 0;
+                    for (int i = 0; i < steps; ++i) { const double w = -2.0 * pi * h * i / steps; cr += stepped[i] * std::cos (w); ci += stepped[i] * std::sin (w); }
+                    const double x = pi * h / steps, sinc = std::sin (x) / x;
+                    const double dr = std::cos (-x), di = std::sin (-x);   // e^{-i pi h / 64}
+                    re[(size_t) h] = (cr * dr - ci * di) * sinc * 2.0 / steps;
+                    im[(size_t) h] = (cr * di + ci * dr) * sinc * 2.0 / steps;
+                }
+                for (int L = 0; L < levels; ++L)
+                {
+                    auto& tab = table[t][L];
+                    tab.assign ((size_t) size + 1, 0.0f);
+                    const int hMax = 1 << L;
+                    for (int h = 1; h <= hMax; ++h)
+                    {
+                        if (std::abs (re[(size_t) h]) + std::abs (im[(size_t) h]) < 1.0e-6) continue;
+                        for (int i = 0; i < size; ++i)
+                        {
+                            const double w = 2.0 * pi * h * i / size;
+                            tab[(size_t) i] += (float) (re[(size_t) h] * std::cos (w) - im[(size_t) h] * std::sin (w));
+                        }
+                    }
+                    tab[(size_t) size] = tab[0];
+                }
+            }
+        }
+        /** One sample at phase 0..1 for a note at freq (harmonics kept below ~0.45 * sr). */
+        float read (int t, float phase, float freq, float sr) const
+        {
+            const float hAllowed = sr * 0.45f / juce::jmax (1.0f, freq);
+            int L = juce::jlimit (0, levels - 1, (int) std::floor (std::log2 (juce::jmax (1.0f, hAllowed))));
+            const auto& tab = table[t][L];
+            const float x = phase * (float) size;
+            const int i = juce::jlimit (0, size - 1, (int) x);
+            const float fr = x - (float) i;
+            return tab[(size_t) i] + (tab[(size_t) i + 1] - tab[(size_t) i]) * fr;
+        }
+    };
+    const OrganTables& organTables() { static const OrganTables t; return t; }
+
+    /** The keyboard's tone generator tunes each note by a small, fixed amount (cents). */
+    float dividerDetune (int note)
+    {
+        juce::uint32 h = (juce::uint32) note * 2654435761u;
+        h ^= h >> 15;
+        return ((float) (h & 1023) / 1023.0f - 0.5f) * 5.0f;
+    }
 
     struct Svf
     {
@@ -117,7 +211,38 @@ namespace
             const float freq = 440.0f * std::pow (2.0f, (semis - 69.0f) / 12.0f);
 
             float out = 0.0f;
-            if (d.additive)
+            if (d.digitalOrgan > 0)
+            {
+                const float f = freq * std::pow (2.0f, dividerDetune (note) / 1200.0f);
+                phase[0] += f * dt;
+                phase[0] -= std::floor (phase[0]);
+                out = organTables().read (d.digitalOrgan, phase[0], f, sr);
+                if (d.digitalOrgan == 2)
+                {
+                    // the "bite": a 2 2/3' and 2' flash at the start of each note
+                    auto square = [] (float& ph, float inc)
+                    {
+                        ph += inc; ph -= std::floor (ph);
+                        float half = ph + 0.5f; half -= std::floor (half);
+                        return (ph < 0.5f ? 1.0f : -1.0f) + polyBlep (ph, inc) - polyBlep (half, inc);
+                    };
+                    const float perc = std::exp (-t / 0.11f);
+                    if (perc > 1.0e-4f)
+                        out += perc * (0.45f * square (phase[1], juce::jmin (0.45f, f * 3.0f * dt)) + 0.25f * square (phase[2], juce::jmin (0.45f, f * 4.0f * dt)));
+                }
+                // the analogue filter after the chip (a little brighter when the key is hit hard)
+                float cutoff = d.cutoff * std::pow (2.0f, d.keyTrack * (semis - 60.0f) / 12.0f) + d.envAmt * std::exp (-t / juce::jmax (0.01f, d.envDecay));
+                cutoff *= std::pow (2.0f, brightness) * (0.75f + 0.25f * vel);
+                filter.set (cutoff, 0.6f + d.reso * 3.0f, sr);
+                out = filter.lp (out) * 0.5f;
+                // key click
+                if (t < 0.004f)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    out += (float) (int) seed * (1.0f / 2147483648.0f) * 0.05f * (1.0f - t / 0.004f);
+                }
+            }
+            else if (d.additive)
             {
                 for (int i = 0; i < 6; ++i)
                 {
@@ -210,7 +335,11 @@ struct HomeKeys::Impl
     double sr = 48000.0;
     std::array<Voice, 24> voices;
     DrumSynth drums;
-    ModDelay ensL, ensR, wowL, wowR;
+    ModDelay ensL, ensR, wowL, wowR, wobL, wobR;
+    float wobblePhase = 0.0f;
+    Svf driveToneL, driveToneR;
+    juce::Reverb reverb;
+    std::vector<float> revL, revR;
     float lfo = 0.0f, wowPhase = 0.0f, flutterPhase = 0.0f;
     Svf ageL, ageR;
     juce::uint32 hiss = 12345;
@@ -300,7 +429,7 @@ struct HomeKeys::Impl
 juce::StringArray HomeKeys::toneNames()
 {
     juce::StringArray s;
-    for (int i = 0; i < numPublicTones; ++i) s.add (tones[i].name);
+    for (int i = 0; i < numPublicTones; ++i) s.add (tones[toneIndex (i)].name);
     return s;
 }
 
@@ -340,22 +469,41 @@ static prm::Layout homeKeysLayout()
     prm::addChoice (l, "chordTone", "Chord Voice", HomeKeys::toneNames(), 3);
     prm::addDb (l, "chordVol", "Chord Volume", -30.0f, 6.0f, -10.0f);
     prm::addDb (l, "bassVol", "Bass Volume", -30.0f, 6.0f, -6.0f);
+    // 3.6: the effects it was always played through
+    prm::addPercent (l, "drive", "Amp Drive", 0.0f);
+    prm::addPercent (l, "wobble", "Wobble", 0.0f);
+    prm::addFloat (l, "wobbleRate", "Wobble Speed", 0.3f, 9.0f, 5.0f, "Hz", 2.5f, 1);
+    prm::addPercent (l, "reverb", "Reverb", 0.0f);
+    prm::addPercent (l, "reverbSize", "Reverb Size", 0.8f);
     return l;
 }
 
 HomeKeys::HomeKeys() : BuiltinProcessor ("homekeys", "HomeKeys 20", true, homeKeysLayout()), impl (std::make_unique<Impl>()) {}
 HomeKeys::~HomeKeys() = default;
 
-juce::StringArray HomeKeys::getProgramNames()
+juce::StringArray HomeKeys::presetNames()
 {
-    return { "Dream Pop Organ (Slow Rock)", "Bedroom Waltz", "Tropical Bossa", "Haunted Music Box", "Cassette Strings",
+    return { "Teen Dream Organ", "Gila Organ (Devotion)", "Thrift Store Organ + Slow Rock ('06)", "Dream Organ, Dry",
+             "Dream Pop Organ (Slow Rock)", "Bedroom Waltz", "Tropical Bossa", "Haunted Music Box", "Cassette Strings",
              "Disco Brass", "Choir in the Attic", "Vibes Lounge" };
 }
 
+juce::StringArray HomeKeys::getProgramNames() { return presetNames(); }
+
 void HomeKeys::loadProgram (int index)
 {
-    struct P { int tone, rhythm; float tempo, vintage; bool ens, vib, sus; int abc, chordTone, kit; };
+    struct P { int tone, rhythm; float tempo, vintage; bool ens, vib, sus; int abc, chordTone, kit;
+               bool rhythmOn = true; float drive = 0, wobble = 0, wobbleRate = 5.0f, reverb = 0, reverbSize = 0.8f, bright = 0; };
     static const P presets[] = {
+        // Beach House-style organ: the digital organ, warbling, through a small amp, drenched in reverb (no drums)
+        { 16, 0, 72, 0.3f, true, false, false, 0, 16, 0, false, 0.3f, 0.32f, 5.4f, 0.55f, 0.88f, -0.25f },
+        // Devotion: the biting organ, slower and deeper wobble, longer notes, a bit more worn
+        { 17, 0, 66, 0.45f, true, false, true, 0, 17, 0, false, 0.4f, 0.48f, 4.4f, 0.45f, 0.8f, -0.35f },
+        // the first album: the organ with the keyboard's own slow rock rhythm and one-finger chords
+        { 16, 0, 68, 0.55f, true, false, false, 1, 16, 0, true, 0.35f, 0.26f, 5.2f, 0.4f, 0.75f, -0.3f },
+        // the bare organ: no wobble, no reverb (add your own)
+        { 16, 0, 96, 0.15f, false, false, false, 0, 16, 0, false, 0.0f, 0.0f, 5.0f, 0.0f, 0.8f, 0.0f },
+
         { 3, 0, 64, 0.45f, true, true, false, 1, 3, 0 },      // organ + slow rock
         { 1, 1, 132, 0.4f, true, false, true, 1, 1, 1 },      // EP + waltz
         { 6, 2, 128, 0.3f, true, true, false, 2, 1, 1 },      // flute + bossa
@@ -376,9 +524,16 @@ void HomeKeys::loadProgram (int index)
     setParam ("abc", (float) p.abc);
     setParam ("chordTone", (float) p.chordTone);
     setParam ("kit", (float) p.kit);
+    setParam ("rhythmOn", p.rhythmOn ? 1.0f : 0.0f);
+    setParam ("drive", p.drive);
+    setParam ("wobble", p.wobble);
+    setParam ("wobbleRate", p.wobbleRate);
+    setParam ("reverb", p.reverb);
+    setParam ("reverbSize", p.reverbSize);
+    setParam ("bright", p.bright);
 }
 
-void HomeKeys::prepareToPlay (double sr, int)
+void HomeKeys::prepareToPlay (double sr, int block)
 {
     auto& m = *impl;
     m.sr = sr;
@@ -387,8 +542,14 @@ void HomeKeys::prepareToPlay (double sr, int)
     const int maxDelay = (int) (sr * 0.05) + 4;
     m.ensL.prepare (maxDelay); m.ensR.prepare (maxDelay);
     m.wowL.prepare (maxDelay); m.wowR.prepare (maxDelay);
+    m.wobL.prepare (maxDelay); m.wobR.prepare (maxDelay);
+    m.driveToneL.reset(); m.driveToneR.reset();
+    m.reverb.setSampleRate (sr);
+    m.reverb.reset();
     m.ageL.reset(); m.ageR.reset();
     m.lastGlobalStep = -1;
+    m.revL.assign ((size_t) juce::jmax (16, block) * 2, 0.0f);
+    m.revR.assign ((size_t) juce::jmax (16, block) * 2, 0.0f);
 }
 
 void HomeKeys::startStop()
@@ -407,8 +568,8 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     float* R = buffer.getWritePointer (buffer.getNumChannels() > 1 ? 1 : 0);
     const float sr = (float) m.sr;
 
-    const int tone = (int) param ("tone");
-    const int chordTone = (int) param ("chordTone");
+    const int tone = toneIndex ((int) param ("tone"));
+    const int chordTone = toneIndex ((int) param ("chordTone"));
     const int abc = (int) param ("abc");
     const int split = (int) param ("split");
     const bool sustain = param ("sustain") > 0.5f;
@@ -483,7 +644,7 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             int bassRoot = 36 + m.root;
             if (bassRoot > 43) bassRoot -= 12;
             m.bassNote = bassRoot + bassInterval (b, minor);
-            m.noteOn (m.bassNote, (stepInBar == 0 ? 0.95f : 0.8f) * juce::Decibels::decibelsToGain (param ("bassVol")), bassTone, 2);
+            m.noteOn (m.bassNote, (stepInBar == 0 ? 0.95f : 0.8f) * juce::Decibels::decibelsToGain (param ("bassVol")), bassTone, 2);   // internal index
         }
         // chord
         const auto c = stepInBar < rhythm.chord.length() ? rhythm.chord[stepInBar] : '.';
@@ -591,9 +752,21 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     m.ageR.set (16000.0f * std::pow (0.22f, vintage), 0.6f, sr);
     const float hissLevel = vintage * vintage * 0.012f;
     const float bits = std::pow (2.0f, 15.0f - vintage * 7.0f);
+    const float drive = param ("drive"), wobble = param ("wobble"), wobbleRate = param ("wobbleRate");
+    const float driveGain = 1.0f + drive * 9.0f, bias = 0.08f * drive, biasOut = std::tanh (bias * driveGain);
+    m.driveToneL.set (6500.0f - 3500.0f * drive, 0.7f, sr);   // a small amp's speaker
+    m.driveToneR.set (6500.0f - 3500.0f * drive, 0.7f, sr);
     for (int i = 0; i < n; ++i)
     {
         float l = L[i], r = R[i];
+        if (drive > 0.001f)
+        {
+            // played through a small valve amp: soft, slightly asymmetric clipping and a rolled-off top
+            // (unity gain for quiet playing, so turning it up adds grit rather than volume)
+            auto amp = [&] (float x) { return (std::tanh ((x + bias) * driveGain) - biasOut) / driveGain * (1.0f + drive); };
+            l = m.driveToneL.lp (l * (1.0f - drive) + amp (l) * drive);
+            r = m.driveToneR.lp (r * (1.0f - drive) + amp (r) * drive);
+        }
         if (ensemble)
         {
             m.lfo += 0.6f / sr; if (m.lfo >= 1.0f) m.lfo -= 1.0f;
@@ -603,6 +776,16 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             const float dr = (0.007f + 0.0025f * std::sin (twoPi * (m.lfo + 0.33f))) * sr;
             l = 0.65f * l + 0.55f * m.ensL.read (dl);
             r = 0.65f * r + 0.55f * m.ensR.read (dr);
+        }
+        if (wobble > 0.001f)
+        {
+            // a vibrato pedal: pure pitch wobble (all wet), with a slower drift on top so it never sounds mechanical
+            m.wobblePhase += wobbleRate / sr; if (m.wobblePhase >= 1.0f) m.wobblePhase -= 1.0f;
+            const float lfo = std::sin (twoPi * m.wobblePhase) + 0.25f * std::sin (twoPi * m.wobblePhase * 0.37f + 1.0f);
+            const float base = 0.0045f * sr, depth = wobble * 0.0032f * sr * 5.0f / juce::jmax (1.5f, wobbleRate);
+            m.wobL.write (l); m.wobR.write (r);
+            l = m.wobL.read (base + depth * lfo);
+            r = m.wobR.read (base + depth * (0.9f * lfo + 0.1f * std::sin (twoPi * m.wobblePhase + 0.8f)));
         }
         if (vintage > 0.001f)
         {
@@ -618,8 +801,35 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             l = std::round ((l + h) * bits) / bits;
             r = std::round ((r + h) * bits) / bits;
         }
-        L[i] = std::tanh (l * vol);
-        if (R != L) R[i] = std::tanh (r * vol);
+        L[i] = l;
+        if (R != L) R[i] = r;
+    }
+
+    // a big, soft reverb: the sound is half room
+    const float rev = param ("reverb");
+    if (rev > 0.001f && (int) m.revL.size() >= n)
+    {
+        juce::Reverb::Parameters rp;
+        rp.roomSize = 0.55f + 0.44f * param ("reverbSize");
+        rp.damping = 0.55f;
+        rp.width = 1.0f;
+        rp.wetLevel = 1.0f;
+        rp.dryLevel = 0.0f;
+        m.reverb.setParameters (rp);
+        std::copy (L, L + n, m.revL.begin());
+        std::copy (R, R + n, m.revR.begin());
+        m.reverb.processStereo (m.revL.data(), m.revR.data(), n);
+        const float dry = std::cos (rev * juce::MathConstants<float>::halfPi * 0.6f), wet = std::sin (rev * juce::MathConstants<float>::halfPi) * 0.42f;
+        for (int i = 0; i < n; ++i)
+        {
+            L[i] = L[i] * dry + m.revL[(size_t) i] * wet;
+            if (R != L) R[i] = R[i] * dry + m.revR[(size_t) i] * wet;
+        }
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        L[i] = std::tanh (L[i] * vol);
+        if (R != L) R[i] = std::tanh (R[i] * vol);
     }
 }
 

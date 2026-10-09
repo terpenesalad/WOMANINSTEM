@@ -229,7 +229,7 @@ ControlBar::ControlBar (StudioContext& c) : ctx (c), lcd (c)
     addAndMakeVisible (lcd);
 
     for (auto [b, cb] : { std::pair<juce::TextButton*, std::function<void()>*> { &browserB, &onToggleBrowser }, { &editorB, &onToggleEditor },
-                          { &mixerB, &onToggleMixer }, { &keysB, &onToggleKeys } })
+                          { &mixerB, &onToggleMixer }, { &keysB, &onToggleKeys }, { &pluginsB, &onTogglePlugins } })
     {
         b->setClickingTogglesState (false);
         b->setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.8f));
@@ -241,6 +241,7 @@ ControlBar::ControlBar (StudioContext& c) : ctx (c), lcd (c)
     editorB.setTooltip ("Show / hide the editor (E)");
     mixerB.setTooltip ("Show / hide the mixer (X)");
     keysB.setTooltip ("Show / hide the on-screen keyboard");
+    pluginsB.setTooltip ("Show / hide the open instruments and effects (P)");
 
     master.setRange (-40.0, 6.0, 0.1);
     master.setSkewFactorFromMidPoint (-10.0);
@@ -274,12 +275,13 @@ void ControlBar::syncToggles()
     for (auto* b : { &cycleB, &metroB, &countB }) b->repaint();
 }
 
-void ControlBar::setPanelStates (bool browser, bool editor, bool mixer, bool keys, bool typing)
+void ControlBar::setPanelStates (bool browser, bool editor, bool mixer, bool keys, bool plugins, bool typing)
 {
     browserB.setToggleState (browser, juce::dontSendNotification);
     editorB.setToggleState (editor, juce::dontSendNotification);
     mixerB.setToggleState (mixer, juce::dontSendNotification);
     keysB.setToggleState (keys, juce::dontSendNotification);
+    pluginsB.setToggleState (plugins, juce::dontSendNotification);
     typingB.lit = typing;
     typingB.repaint();
 }
@@ -310,7 +312,8 @@ void ControlBar::resized()
     browserB.setBounds (r.removeFromLeft (70)); r.removeFromLeft (6);
     projectButton.setBounds (r.removeFromLeft (80)); r.removeFromLeft (14);
 
-    auto right = r.removeFromRight (310);
+    auto right = r.removeFromRight (374);
+    pluginsB.setBounds (right.removeFromRight (60)); right.removeFromRight (4);
     keysB.setBounds (right.removeFromRight (52)); right.removeFromRight (4);
     mixerB.setBounds (right.removeFromRight (58)); right.removeFromRight (4);
     editorB.setBounds (right.removeFromRight (60)); right.removeFromRight (10);

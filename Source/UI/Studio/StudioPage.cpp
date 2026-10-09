@@ -62,6 +62,25 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
 
     engine.onSlotRemoved = [this] (const juce::String& id) { closePluginWindow (id); };
 
+    // plugins open in the bottom panel ("Plugin"), like GarageBand's Smart Controls; Pop out floats one
+    dock.getProcessor = [this] (const juce::String& id) { return engine.getProcessor (id); };
+    dock.onPopOut = [this] (const juce::String& id)
+    {
+        dockPlugins = false;
+        openFloatingPluginWindow (id);
+        if (dock.isEmpty()) setBottomPanel (panelBeforeDock == 4 ? 2 : panelBeforeDock);
+    };
+    dock.onEmpty = [this] { if (bottomPanel == 4) setBottomPanel (panelBeforeDock == 4 ? 2 : panelBeforeDock); };
+    dock.onWantsHeight = [this] (int h)
+    {
+        // grow the bottom panel so the whole editor shows (up to most of the window); never shrink it
+        if (bottomPanel != 4 || dock.getHeight() >= h) return;
+        const int total = dock.getBottom() - arrangement.getY();
+        if (total <= 0) return;
+        layout.setItemPosition (1, juce::jmax (140, total - h - 6));
+        resized();
+    };
+
     // samples used by the samplers are copied into the song folder, so songs stay self-contained
     BuiltinProcessor::fileToRef = [this] (const juce::File& f) { return project.makeRef (project.importIntoProject (f)); };
     BuiltinProcessor::refToFile = [this] (const juce::String& r) { return project.resolve (r); };
@@ -75,6 +94,7 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     controlBar.onToggleEditor = [this] { setBottomPanel (bottomPanel == 1 ? 0 : 1); };
     controlBar.onToggleMixer = [this] { setBottomPanel (bottomPanel == 2 ? 0 : 2); };
     controlBar.onToggleKeys = [this] { setBottomPanel (bottomPanel == 3 ? 0 : 3); };
+    controlBar.onTogglePlugins = [this] { setBottomPanel (bottomPanel == 4 ? 0 : 4); };
     controlBar.onToggleTyping = [this]
     {
         typing = ! typing;
@@ -106,7 +126,7 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     status.setFont (uiFont (12.0f));
     status.setColour (juce::Label::textColourId, theme::textDim);
 
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &controlBar, &browser, &arrangement, &pianoRoll, &audioEditor, &mixer, &keyboard, &keysHint, &status, &splitter })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &controlBar, &browser, &arrangement, &pianoRoll, &audioEditor, &mixer, &dock, &keyboard, &keysHint, &status, &splitter })
         addChildComponent (c);
     for (juce::Component* c : std::initializer_list<juce::Component*> { &controlBar, &browser, &arrangement, &status, &splitter })
         c->setVisible (true);
@@ -117,6 +137,8 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
 
     showBrowser = settings.getBoolValue ("studioBrowser", true);
     bottomPanel = settings.getIntValue ("studioBottom", 1);
+    if (bottomPanel == 4) bottomPanel = 2;   // nothing is docked yet
+    dockPlugins = settings.getBoolValue ("studioDockPlugins", true);
     lastFolder = juce::File (settings.getValue ("studioLastFolder", juce::File::getSpecialLocation (juce::File::userMusicDirectory).getFullPathName()));
 
     project.onLoaded = [this]
@@ -131,6 +153,9 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
         engine.setPositionBeats ((double) project.tree().getProperty (ids::playhead, 0.0));
         for (auto& [id, w] : pluginWindows) juce::ignoreUnused (id, w);
         pluginWindows.clear();
+        dock.clear();
+        if (bottomPanel == 4) bottomPanel = panelBeforeDock == 4 ? 2 : panelBeforeDock;
+        updatePanelButtons();
         updateTitle();
         resized();
     };
@@ -160,6 +185,7 @@ StudioPage::~StudioPage()
     stopTimer();
     releaseTypingKeys (true);
     pluginWindows.clear();
+    dock.clear();
     pluginManagerWindow.reset();
     engine.onSlotRemoved = nullptr;
     BuiltinProcessor::onAudioToTrack = nullptr;
@@ -189,6 +215,7 @@ void StudioPage::saveSettings()
 {
     settings.setValue ("studioBrowser", showBrowser);
     settings.setValue ("studioBottom", bottomPanel);
+    settings.setValue ("studioDockPlugins", dockPlugins);
     settings.setValue ("studioLastFolder", lastFolder.getFullPathName());
     if (project.hasBeenSaved()) settings.setValue ("lastProject", project.getFile().getFullPathName());
     project.tree().setProperty (ids::zoom, ctx.pixelsPerBeat, nullptr);
@@ -233,6 +260,7 @@ void StudioPage::timerCallback()
 
 void StudioPage::setBottomPanel (int which)
 {
+    if (which == 4 && bottomPanel != 4) panelBeforeDock = bottomPanel == 0 ? 2 : bottomPanel;
     bottomPanel = which;
     updatePanelButtons();
     resized();
@@ -247,7 +275,7 @@ void StudioPage::toggleBrowser()
 
 void StudioPage::updatePanelButtons()
 {
-    controlBar.setPanelStates (showBrowser, bottomPanel == 1, bottomPanel == 2, bottomPanel == 3, typing);
+    controlBar.setPanelStates (showBrowser, bottomPanel == 1, bottomPanel == 2, bottomPanel == 3, bottomPanel == 4, typing);
 }
 
 void StudioPage::paint (juce::Graphics& g)
@@ -268,6 +296,7 @@ void StudioPage::resized()
     pianoRoll.setVisible (bottomPanel == 1 && (editorClipIsMidi || ! audioEditor.isVisible()));
     audioEditor.setVisible (bottomPanel == 1 && ! pianoRoll.isVisible());
     mixer.setVisible (bottomPanel == 2);
+    dock.setVisible (bottomPanel == 4);
     keyboard.setVisible (bottomPanel == 3);
     keysHint.setVisible (bottomPanel == 3);
     splitter.setVisible (bottomPanel != 0);
@@ -279,7 +308,8 @@ void StudioPage::resized()
     }
 
     juce::Component* bottom = bottomPanel == 1 ? (pianoRoll.isVisible() ? (juce::Component*) &pianoRoll : (juce::Component*) &audioEditor)
-                            : bottomPanel == 2 ? (juce::Component*) &mixer : nullptr;
+                            : bottomPanel == 2 ? (juce::Component*) &mixer
+                            : bottomPanel == 4 ? (juce::Component*) &dock : nullptr;
     juce::Component dummy;
     juce::Component* comps[] = { &arrangement, &splitter, bottom != nullptr ? bottom : &dummy };
     layout.layOutComponents (comps, 3, r.getX(), r.getY(), r.getWidth(), r.getHeight(), true, true);
@@ -319,6 +349,49 @@ void StudioPage::openEditor (int clipId)
 void StudioPage::openPluginWindow (const juce::ValueTree& node)
 {
     const auto slotId = node[ids::id].toString();
+    // keep the slot's display name in sync with the instrument's preset
+    if (auto* bp = dynamic_cast<BuiltinProcessor*> (engine.getProcessor (slotId)))
+    {
+        juce::ValueTree n (node);
+        bp->onDisplayNameChanged = [n] (const juce::String& name) mutable { n.setProperty (ids::name, name, nullptr); };
+    }
+    if (pluginWindows.count (slotId) == 0 && dockPlugins && canDock (slotId))
+        dockPlugin (slotId);
+    else
+        openFloatingPluginWindow (slotId);
+}
+
+bool StudioPage::canDock (const juce::String& slotId)
+{
+    // built-in plugins dock; other makers' plugins draw into their own native windows, so they float
+    return dynamic_cast<BuiltinProcessor*> (engine.getProcessor (slotId)) != nullptr;
+}
+
+juce::String StudioPage::pluginTitle (const juce::String& slotId)
+{
+    std::function<juce::ValueTree (juce::ValueTree)> find = [&] (juce::ValueTree t) -> juce::ValueTree
+    {
+        if (t.hasType (ids::PLUGIN) && t[ids::id].toString() == slotId) return t;
+        for (auto c : t) if (auto f = find (c); f.isValid()) return f;
+        return {};
+    };
+    auto node = find (project.tree());
+    if (! node.isValid()) return "Plugin";
+    auto track = Track (node.getParent().getParent());
+    return (track.isValid() && track.v.hasType (ids::TRACK) ? track.name() + "  -  " : juce::String ("Master  -  ")) + node[ids::name].toString();
+}
+
+void StudioPage::dockPlugin (const juce::String& slotId)
+{
+    if (engine.getProcessor (slotId) == nullptr) { openFloatingPluginWindow (slotId); return; }   // shows why
+    closePluginWindow (slotId);   // an editor can only be in one place
+    dockPlugins = true;
+    setBottomPanel (4);
+    dock.show (slotId, pluginTitle (slotId));
+}
+
+void StudioPage::openFloatingPluginWindow (const juce::String& slotId)
+{
     if (auto it = pluginWindows.find (slotId); it != pluginWindows.end())
     {
         it->second->setVisible (true);
@@ -333,21 +406,15 @@ void StudioPage::openPluginWindow (const juce::ValueTree& node)
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin", err.isNotEmpty() ? err : juce::String ("The plugin is still loading."));
         return;
     }
-
-    // keep the slot's display name in sync with the instrument's preset
-    if (auto* bp = dynamic_cast<BuiltinProcessor*> (proc))
-    {
-        juce::ValueTree n (node);
-        bp->onDisplayNameChanged = [n] (const juce::String& name) mutable { n.setProperty (ids::name, name, nullptr); };
-    }
-
-    auto track = Track (node.getParent().getParent());
-    const auto title = (track.isValid() && track.v.hasType (ids::TRACK) ? track.name() + "  -  " : juce::String ("Master  -  ")) + node[ids::name].toString();
-    pluginWindows[slotId] = std::make_unique<PluginWindow> (title, *proc, [this, slotId] { closePluginWindow (slotId); });
+    dock.remove (slotId);
+    std::function<void()> onDock;
+    if (canDock (slotId)) onDock = [this, slotId] { dockPlugin (slotId); };
+    pluginWindows[slotId] = std::make_unique<PluginWindow> (pluginTitle (slotId), *proc, [this, slotId] { closePluginWindow (slotId); }, onDock);
 }
 
 void StudioPage::closePluginWindow (const juce::String& slotId)
 {
+    dock.remove (slotId);
     if (auto it = pluginWindows.find (slotId); it != pluginWindows.end())
     {
         auto w = std::move (it->second);
@@ -1057,6 +1124,7 @@ bool StudioPage::keyPressed (const juce::KeyPress& k)
         case '.': engine.setPositionBeats (std::floor (engine.getPositionBeats() / bpb + 1.0001) * bpb); return true;
         case 'x': setBottomPanel (bottomPanel == 2 ? 0 : 2); return true;
         case 'e': setBottomPanel (bottomPanel == 1 ? 0 : 1); return true;
+        case 'p': setBottomPanel (bottomPanel == 4 ? 0 : 4); return true;
         case 'b': toggleBrowser(); return true;
         case 'm': if (auto t = project.trackById (ctx.selectedTrack); t.isValid()) { ctx.beginEdit ("Mute"); t.v.setProperty (ids::mute, ! (bool) t.v[ids::mute], project.um()); } return true;
         case 's': if (auto t = project.trackById (ctx.selectedTrack); t.isValid()) { ctx.beginEdit ("Solo"); t.v.setProperty (ids::solo, ! (bool) t.v[ids::solo], project.um()); } return true;
@@ -1306,7 +1374,7 @@ void StudioPage::showShortcuts()
                     "Ctrl+Z / Ctrl+Y  undo / redo          Ctrl+S  save          Ctrl+E  export\n"
                     "Ctrl+T  split at playhead          Ctrl+D  duplicate          Ctrl+C / V  copy / paste\n"
                     "Del  delete          M / S  mute / solo track          Up / Down  select track\n"
-                    "E  editor          X  mixer          B  library          Z  zoom to fit\n\n"
+                    "E  editor          X  mixer          P  plugin panel     B  library          Z  zoom to fit\n\n"
                     "Arrangement: drag clips to move (Alt = copy, Shift = no snap), drag edges to trim, top corners of audio clips for fades. "
                     "Double-click a clip to edit it, or double-click empty space on an instrument track for a new MIDI clip. "
                     "Drag in the ruler's top strip to set the cycle. Ctrl + mouse wheel zooms.\n"

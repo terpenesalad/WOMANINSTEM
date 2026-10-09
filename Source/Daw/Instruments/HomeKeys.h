@@ -7,7 +7,8 @@
 namespace wis::daw
 {
 
-/** "HomeKeys 20": a 1980s-style portable home keyboard. Sixteen preset voices, preset rhythms on an analogue
+/** "HomeKeys 20": a 1980s-style portable home keyboard. Eighteen preset voices (including two early-80s digital
+    organs), amp drive, a vibrato "wobble" and a big reverb, preset rhythms on an analogue
     rhythm section, Auto accompaniment (single-finger or fingered chords in the left hand), ensemble, vibrato,
     sustain and a "Vintage" knob for the worn-cassette sound. Rhythm follows the song when it's playing,
     or runs on its own (START / SYNC START) when it isn't. */
@@ -24,6 +25,7 @@ public:
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     double getTailLengthSeconds() const override { return 3.0; }
     juce::StringArray getProgramNames() override;
+    static juce::StringArray presetNames();
     void loadProgram (int index) override;
     juce::AudioProcessorEditor* createCustomEditor() override { return editorFactory ? editorFactory (*this) : nullptr; }
     static std::function<juce::AudioProcessorEditor* (HomeKeys&)> editorFactory;
