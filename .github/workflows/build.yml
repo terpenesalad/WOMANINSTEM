@@ -130,7 +130,7 @@ jobs:
       - name: Build the bridge smoke test (64-bit)
         shell: pwsh
         run: |
-          cl /nologo /O2 /EHsc /MT /std:c++17 Tools\Bridge32\BridgeSmokeTest.cpp /Fe:build\BridgeSmokeTest.exe /Fo:build\ 2>&1 | Tee-Object -FilePath bridge64.log
+          cl /nologo /O2 /EHsc /MT /std:c++17 Tools\Bridge32\BridgeSmokeTest.cpp /Fe:build\BridgeSmokeTest.exe /Fo:build\ /link user32.lib 2>&1 | Tee-Object -FilePath bridge64.log
           if ($LASTEXITCODE -ne 0) { $msg = ((Get-Content bridge64.log) -replace '%','%25') -join '%0A'; Write-Host "::error title=Bridge smoke test build failed::$msg"; exit 1 }
 
       - uses: ilammy/msvc-dev-cmd@v1
