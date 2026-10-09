@@ -440,6 +440,21 @@ juce::StringArray HomeKeys::rhythmNames()
     return s;
 }
 
+juce::StringArray HomeKeys::kitNames()
+{
+    auto k = DrumSynth::kitNames();
+    k.add ("Portable '81");
+    return k;
+}
+
+juce::String HomeKeys::currentRhythmName() const
+{
+    const int r = (int) param ("rhythm");
+    if (param ("bank") > 0.5f)
+        return portableRhythmNames()[juce::jlimit (0, 7, r)] + (param ("variation") > 0.5f ? " II" : " I");
+    return rhythmNames()[juce::jlimit (0, rhythmNames().size() - 1, r)];
+}
+
 juce::String HomeKeys::chordName (int r, int t)
 {
     if (r < 0) return "-";
@@ -463,7 +478,7 @@ static prm::Layout homeKeysLayout()
     prm::addBool (l, "syncStart", "Sync Start", false);
     prm::addFloat (l, "tempo", "Tempo", 40.0f, 220.0f, 96.0f, "bpm", 0.0f, 0);
     prm::addDb (l, "rhythmVol", "Rhythm Volume", -30.0f, 6.0f, -6.0f);
-    prm::addChoice (l, "kit", "Rhythm Sound", DrumSynth::kitNames(), 0);
+    prm::addChoice (l, "kit", "Rhythm Sound", HomeKeys::kitNames(), 0);
     prm::addChoice (l, "abc", "Auto Accompaniment", { "Off", "Single Finger", "Fingered" }, 0);
     prm::addFloat (l, "split", "Split", 36.0f, 72.0f, 54.0f, "", 0.0f, 0);
     prm::addChoice (l, "chordTone", "Chord Voice", HomeKeys::toneNames(), 3);
@@ -475,6 +490,10 @@ static prm::Layout homeKeysLayout()
     prm::addFloat (l, "wobbleRate", "Wobble Speed", 0.3f, 9.0f, 5.0f, "Hz", 2.5f, 1);
     prm::addPercent (l, "reverb", "Reverb", 0.0f);
     prm::addPercent (l, "reverbSize", "Reverb Size", 0.8f);
+    // 3.6.1: the early-80s portable's own rhythm section (8 rhythms with variation I / II, a fill every 8 bars)
+    prm::addChoice (l, "bank", "Rhythm Bank", { "HomeKeys 20", "Portable '81" }, 0);
+    prm::addBool (l, "variation", "Variation II", false);
+    prm::addBool (l, "autoFill", "8-Bar Variation", false);
     return l;
 }
 
@@ -484,6 +503,7 @@ HomeKeys::~HomeKeys() = default;
 juce::StringArray HomeKeys::presetNames()
 {
     return { "Teen Dream Organ", "Gila Organ (Devotion)", "Thrift Store Organ + Slow Rock ('06)", "Dream Organ, Dry",
+             "Dream Organ + '81 Rock Beat", "Dream Organ + '81 Waltz", "Dream Organ + '81 Rhumba",
              "Dream Pop Organ (Slow Rock)", "Bedroom Waltz", "Tropical Bossa", "Haunted Music Box", "Cassette Strings",
              "Disco Brass", "Choir in the Attic", "Vibes Lounge" };
 }
@@ -493,16 +513,24 @@ juce::StringArray HomeKeys::getProgramNames() { return presetNames(); }
 void HomeKeys::loadProgram (int index)
 {
     struct P { int tone, rhythm; float tempo, vintage; bool ens, vib, sus; int abc, chordTone, kit;
-               bool rhythmOn = true; float drive = 0, wobble = 0, wobbleRate = 5.0f, reverb = 0, reverbSize = 0.8f, bright = 0; };
+               bool rhythmOn = true; float drive = 0, wobble = 0, wobbleRate = 5.0f, reverb = 0, reverbSize = 0.8f, bright = 0;
+               int bank = 0; bool variation = false, autoFill = false; float rhythmVol = -6.0f; };
+    const int ps = DrumSynth::numKits;   // the "Portable '81" kit choice
     static const P presets[] = {
         // Beach House-style organ: the digital organ, warbling, through a small amp, drenched in reverb (no drums)
-        { 16, 0, 72, 0.3f, true, false, false, 0, 16, 0, false, 0.3f, 0.32f, 5.4f, 0.55f, 0.88f, -0.25f },
+        // (START plays the portable's Rock I)
+        { 16, 3, 92, 0.3f, true, false, false, 0, 16, ps, false, 0.3f, 0.32f, 5.4f, 0.55f, 0.88f, -0.25f, 1, false, true, -9.0f },
         // Devotion: the biting organ, slower and deeper wobble, longer notes, a bit more worn
-        { 17, 0, 66, 0.45f, true, false, true, 0, 17, 0, false, 0.4f, 0.48f, 4.4f, 0.45f, 0.8f, -0.35f },
+        { 17, 3, 84, 0.45f, true, false, true, 0, 17, ps, false, 0.4f, 0.48f, 4.4f, 0.45f, 0.8f, -0.35f, 1, true, true, -9.0f },
         // the first album: the organ with the keyboard's own slow rock rhythm and one-finger chords
-        { 16, 0, 68, 0.55f, true, false, false, 1, 16, 0, true, 0.35f, 0.26f, 5.2f, 0.4f, 0.75f, -0.3f },
+        // (slow rock comes from the old organs' rhythm units: the '81 portable has no slow rock)
+        { 16, 0, 68, 0.55f, true, false, false, 1, 16, 1, true, 0.35f, 0.26f, 5.2f, 0.4f, 0.75f, -0.3f, 0, false, false, -8.0f },
         // the bare organ: no wobble, no reverb (add your own)
-        { 16, 0, 96, 0.15f, false, false, false, 0, 16, 0, false, 0.0f, 0.0f, 5.0f, 0.0f, 0.8f, 0.0f },
+        { 16, 3, 96, 0.15f, false, false, false, 0, 16, ps, false, 0.0f, 0.0f, 5.0f, 0.0f, 0.8f, 0.0f, 1, false, false, -6.0f },
+        // the organ on top of the portable's own rhythm section, one-finger chords in the left hand
+        { 16, 3, 96, 0.35f, true, false, false, 1, 16, ps, true, 0.3f, 0.3f, 5.2f, 0.45f, 0.82f, -0.25f, 1, false, true, -8.0f },
+        { 17, 2, 108, 0.4f, true, false, true, 1, 16, ps, true, 0.35f, 0.4f, 4.6f, 0.5f, 0.85f, -0.3f, 1, true, true, -8.0f },
+        { 16, 6, 100, 0.4f, true, false, false, 1, 16, ps, true, 0.3f, 0.3f, 5.0f, 0.45f, 0.8f, -0.25f, 1, false, true, -8.0f },
 
         { 3, 0, 64, 0.45f, true, true, false, 1, 3, 0 },      // organ + slow rock
         { 1, 1, 132, 0.4f, true, false, true, 1, 1, 1 },      // EP + waltz
@@ -531,6 +559,10 @@ void HomeKeys::loadProgram (int index)
     setParam ("reverb", p.reverb);
     setParam ("reverbSize", p.reverbSize);
     setParam ("bright", p.bright);
+    setParam ("bank", (float) p.bank);
+    setParam ("variation", p.variation ? 1.0f : 0.0f);
+    setParam ("autoFill", p.autoFill ? 1.0f : 0.0f);
+    setParam ("rhythmVol", p.rhythmVol);
 }
 
 void HomeKeys::prepareToPlay (double sr, int block)
@@ -576,9 +608,14 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     const bool vibrato = param ("vibrato") > 0.5f;
     const float bright = param ("bright");
     const float releaseScale = sustain ? 5.0f : 1.0f;
-    m.drums.setKit ((int) param ("kit"));
-    const auto& rhythms = vintageRhythms();
-    const auto& rhythm = rhythms[(size_t) juce::jlimit (0, (int) rhythms.size() - 1, (int) param ("rhythm"))];
+    const int kitChoice = (int) param ("kit");
+    m.drums.setKit (kitChoice == DrumSynth::numKits ? (int) DrumSynth::portable81 : kitChoice);
+    const bool portable = param ("bank") > 0.5f;
+    const auto& rhythms = portable ? portableRhythms() : vintageRhythms();
+    const int rhythmIndex = portable ? juce::jlimit (0, 7, (int) param ("rhythm")) * 2 + (param ("variation") > 0.5f ? 1 : 0)
+                                     : juce::jlimit (0, (int) rhythms.size() - 1, (int) param ("rhythm"));
+    const auto& rhythm = rhythms[(size_t) rhythmIndex];
+    const bool autoFill = param ("autoFill") > 0.5f;
 
     // ---- time: the song's transport when it's rolling, otherwise our own clock ----
     double ppq = m.internalPpq, bpm = param ("tempo");
@@ -624,6 +661,7 @@ void HomeKeys::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             if (m.fillBar >= 0 && m.fillBar < bar) m.fillBar = -1;
         }
         if (fillRequested.exchange (false)) m.fillBar = bar;
+        if (autoFill && stepInBar == 0 && bar % 8 == 7) m.fillBar = bar;   // the variation fill every 8th bar
         const bool fill = m.fillBar == bar;
         if (fill) m.fillPlayed = true;
 

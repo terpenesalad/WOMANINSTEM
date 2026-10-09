@@ -1,4 +1,4 @@
-## WOMANINSTEM 3.6 for Windows (64-bit): the dream organ, plugins in the bottom panel, old 32-bit plugins (Delay Lama!)
+## WOMANINSTEM 3.6.1 for Windows (64-bit): the dream organ and its drum machine, plugins in the bottom panel, old 32-bit plugins (Delay Lama!)
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
@@ -6,6 +6,14 @@
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
 Songs and rig presets from 2.0 to 3.5 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.6.1
+
+**HomeKeys 20: the '81 portable keyboard's own rhythm section**
+- New **Rhythm Bank: Portable '81**, laid out like the rhythm section of the early-80s portable keyboard the dream organ comes from: its **8 rhythms (March, Disco, Waltz, Rock, Tango, Swing, Rhumba, Samba)**, each with **Variation I / II**, and the **8-Bar Variation** switch that drops in a fill every eighth bar.
+- New **Rhythm Sound: Portable '81**: that keyboard's simple analogue drums (a soft, boomy bass drum, a thin hissy snare, hi-hats and cymbal made of noise, nearly mono).
+- New presets: **Dream Organ + '81 Rock Beat**, **Dream Organ + '81 Waltz**, **Dream Organ + '81 Rhumba** (one-finger chords in the left hand). *Teen Dream Organ* and *Gila Organ* now start the '81 Rock rhythm when you press START.
+- The keyboard's exact factory patterns aren't documented anywhere, so these are written in its style rather than copied note for note. *Thrift Store Organ + Slow Rock* keeps the old organ rhythm unit's slow rock (the '81 portable doesn't have one).
 
 ### New in 3.6
 

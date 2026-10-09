@@ -70,6 +70,10 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.6.1
+
+- **HomeKeys 20 Portable '81 rhythms**: the early-80s portable keyboard's rhythm section: 8 rhythms (March, Disco, Waltz, Rock, Tango, Swing, Rhumba, Samba) with Variation I / II, a fill every 8 bars, and its simple analogue drum sound. New presets put the dream organ on top of it.
+
 ### New in 3.6
 
 - **Plugins open in the bottom panel**: instrument and effect controls (Amp & Pedals, HomeKeys, Piano Room, every built-in effect) now open docked under the song, next to Editor / Mixer / Keys, instead of floating over it. Several can be open as tabs; the panel grows to fit. Press **P** or click **Plugin** to show / hide it. *Pop out* puts one in its own window; *Dock in the Studio* brings it back. Other makers' VST / CLAP plugins still open in their own windows.

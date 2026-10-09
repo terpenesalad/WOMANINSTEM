@@ -20,6 +20,10 @@ public:
 
     static juce::StringArray toneNames();
     static juce::StringArray rhythmNames();
+    /** Rhythm Sound choices: the shared drum kits plus "Portable '81" (choice index DrumSynth::numKits). */
+    static juce::StringArray kitNames();
+    /** The selected rhythm as shown on the display ("Rock II" in the Portable '81 bank). */
+    juce::String currentRhythmName() const;
 
     void prepareToPlay (double sr, int block) override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;

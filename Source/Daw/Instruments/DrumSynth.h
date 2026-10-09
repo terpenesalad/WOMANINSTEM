@@ -11,7 +11,8 @@ namespace wis::daw
 class DrumSynth
 {
 public:
-    enum Kit { homeKeyboard, rhythmUnit, eightOhEight, toyBox, numKits };
+    enum Kit { homeKeyboard, rhythmUnit, eightOhEight, toyBox, numKits,
+               portable81 = numKits + 1 };   // HomeKeys only (numKits is Beat Lab's Glitch kit)
     static juce::StringArray kitNames() { return { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" }; }
 
     enum Voice
@@ -25,7 +26,7 @@ public:
     static int noteForVoice (Voice v);
 
     void prepare (double sampleRate);
-    void setKit (int k)            { kit = juce::jlimit (0, (int) numKits - 1, k); }
+    void setKit (int k)            { kit = k == portable81 ? k : juce::jlimit (0, (int) numKits - 1, k); }
     int getKit() const             { return kit; }
     /** Global character: tune in semitones, decay multiplier, tone -1 (dark) .. +1 (bright). */
     void setShape (float tuneSemis, float decayScale, float tone) { tune = tuneSemis; decayMul = decayScale; brightness = tone; }

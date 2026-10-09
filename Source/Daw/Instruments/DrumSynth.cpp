@@ -84,7 +84,8 @@ void DrumSynth::setupVoice (Active& a)
 {
     const float tuneF = std::pow (2.0f, tune / 12.0f);
     const float bright = std::pow (2.0f, brightness);
-    const bool k808 = kit == eightOhEight, cr = kit == rhythmUnit, home = kit == homeKeyboard, toy = kit == toyBox;
+    const bool ps = kit == portable81;
+    const bool k808 = kit == eightOhEight, cr = kit == rhythmUnit, home = kit == homeKeyboard || ps, toy = kit == toyBox;
     a.gain = 1.0f;
     a.pan = 0.0f;
     switch (a.type)
@@ -174,6 +175,22 @@ void DrumSynth::setupVoice (Active& a)
         }
         default: break;
     }
+    if (ps)
+    {
+        // the early-80s portable's analogue rhythm circuits: a soft, boomy bass drum, a thin hissy snare,
+        // hi-hats and cymbal made from noise only, everything short and a little lo-fi
+        switch (a.type)
+        {
+            case kick:      a.pitch = 57.0f * tuneF; a.decay = 0.16f; a.gain = 1.15f; break;
+            case snare:     a.pitch = 205.0f * tuneF; a.decay = 0.12f; a.f1.set (1500.0f * bright, 0.9f, sr); a.gain = 0.62f; break;
+            case closedHat: a.decay = 0.022f; a.f1.set (8000.0f * bright, 0.8f, sr); a.f2.set (6000.0f, 0.7f, sr); a.gain = 0.34f; a.pan = 0.0f; break;
+            case pedalHat:  a.decay = 0.05f; a.f1.set (8000.0f * bright, 0.8f, sr); a.f2.set (6000.0f, 0.7f, sr); a.gain = 0.22f; a.pan = 0.0f; break;
+            case openHat:   a.decay = 0.16f; a.f1.set (8000.0f * bright, 0.8f, sr); a.f2.set (6000.0f, 0.7f, sr); a.gain = 0.3f; a.pan = 0.0f; break;
+            case crash: case ride: a.decay = a.type == crash ? 0.55f : 0.45f; a.f1.set (7000.0f * bright, 0.7f, sr); a.f2.set (4500.0f, 0.7f, sr); a.gain = 0.32f; a.pan = 0.0f; break;
+            case clave:     a.pitch = 2000.0f * tuneF; a.decay = 0.03f; a.gain = 0.45f; a.pan = 0.0f; break;
+            default: a.pan *= 0.3f; break;   // a mono speaker, more or less
+        }
+    }
     a.decay *= decayMul;
 }
 
@@ -211,19 +228,21 @@ float DrumSynth::renderVoice (Active& a)
     {
         case kick:
         {
-            const float bend = kit == eightOhEight ? 2.6f : kit == rhythmUnit ? 1.3f : 1.0f;
+            const float bend = kit == eightOhEight ? 2.6f : kit == rhythmUnit ? 1.3f : kit == portable81 ? 0.7f : 1.0f;
             const float f = a.pitch * (1.0f + bend * env (t, 0.012f));
             out = osc (0, f) * env (t, a.decay);
-            out += noise() * env (t, 0.0018f) * 0.25f;                  // beater click
+            out += noise() * env (t, 0.0018f) * (kit == portable81 ? 0.08f : 0.25f);   // beater click
             if (kit == toyBox) out = std::tanh (out * 3.0f) * 0.6f;
+            if (kit == portable81) out = std::tanh (out * 1.8f) * 0.72f;            // the little amp and speaker
             break;
         }
         case snare:
         {
             const float tone = (osc (0, a.pitch) + 0.55f * osc (1, a.pitch * 1.78f)) * env (t, 0.045f);
             a.f1.process (noise(), lp, bp, hp);
-            const float noiseAmt = kit == rhythmUnit ? 1.1f : kit == homeKeyboard ? 0.9f : 0.8f;
-            out = tone * (kit == eightOhEight ? 0.6f : 0.35f) + hp * noiseAmt * env (t, a.decay);
+            const float noiseAmt = kit == rhythmUnit ? 1.1f : kit == homeKeyboard ? 0.9f : kit == portable81 ? 1.0f : 0.8f;
+            out = tone * (kit == eightOhEight ? 0.6f : kit == portable81 ? 0.22f : 0.35f)
+                + (kit == portable81 ? bp * 1.6f : hp * noiseAmt) * env (t, a.decay);
             break;
         }
         case rim:
@@ -244,7 +263,7 @@ float DrumSynth::renderVoice (Active& a)
         }
         case closedHat: case pedalHat: case openHat:
         {
-            const float src = (kit == eightOhEight) ? metal (a.pitch) : 0.35f * metal (a.pitch) + 0.65f * noise();
+            const float src = (kit == eightOhEight) ? metal (a.pitch) : kit == portable81 ? noise() : 0.35f * metal (a.pitch) + 0.65f * noise();
             a.f1.process (src, lp, bp, hp);
             float lp2, bp2, hp2;
             a.f2.process (bp, lp2, bp2, hp2);
@@ -253,7 +272,7 @@ float DrumSynth::renderVoice (Active& a)
         }
         case crash: case ride:
         {
-            const float src = metal (a.pitch) * 0.6f + noise() * (a.type == crash ? 0.5f : 0.2f);
+            const float src = kit == portable81 ? noise() : metal (a.pitch) * 0.6f + noise() * (a.type == crash ? 0.5f : 0.2f);
             a.f1.process (src, lp, bp, hp);
             float lp2, bp2, hp2;
             a.f2.process (bp, lp2, bp2, hp2);

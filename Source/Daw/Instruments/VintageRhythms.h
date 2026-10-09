@@ -27,6 +27,13 @@ struct VintageRhythm
 
 const std::vector<VintageRhythm>& vintageRhythms();
 
+/** The early-80s Yamaha portable keyboard rhythm section (the PS-20's eight rhythms: March, Disco, Waltz,
+    Rock, Tango, Swing, Rhumba, Samba), each with variation I and II: index = rhythm * 2 + variation.
+    The keyboard's real patterns aren't published anywhere, so these are written in the style of the
+    preset patterns of that generation of portables (plain, mostly bass drum / snare / hi-hat). */
+const std::vector<VintageRhythm>& portableRhythms();
+juce::StringArray portableRhythmNames();
+
 /** A one-bar fill for a rhythm (snare/tom run in the second half, crash handled by the caller). */
 std::vector<std::pair<int, juce::String>> vintageFill (const VintageRhythm& r);
 

@@ -15,6 +15,7 @@
 #include "Daw/Instruments/HomeKeys.h"
 #include "Daw/Instruments/BeatLab.h"
 #include "Daw/Instruments/VintageRhythms.h"
+#include "Daw/Instruments/DrumSynth.h"
 #include "Daw/Model/MidiLoops.h"
 #include <tuple>
 #include "Daw/Instruments/InstrumentRefs.h"
@@ -162,6 +163,17 @@ int main (int argc, char** argv)
         k.setParam ("rhythmOn", 0.0f);
         k.setParam ("abc", 0.0f);
         k.prepareToPlay (sr, 512);
+        // dawtest --render-homekeys <preset> <out.wav> rhythm [<rhythm> <variation> <tempo>]: with the rhythm section running
+        if (argc > 4 && juce::String (argv[4]) == "rhythm")
+        {
+            if (argc > 7)
+            {
+                k.setParam ("rhythm", (float) juce::String (argv[5]).getIntValue());
+                k.setParam ("variation", (float) juce::String (argv[6]).getIntValue());
+                k.setParam ("tempo", (float) juce::String (argv[7]).getDoubleValue());
+            }
+            k.startStop();
+        }
         // slow chords, two bars each, with a little top line: D, Bm, G, A
         const int chords[4][4] = { { 50, 57, 62, 66 }, { 47, 54, 62, 66 }, { 43, 55, 59, 62 }, { 45, 57, 61, 64 } };
         const int tops[8] = { 69, 71, 74, 71, 67, 66, 64, 61 };
@@ -923,6 +935,27 @@ int main (int argc, char** argv)
             auto rhythm = renderRange (engine, project, 0.0, 8.0);
             check (allFinite (rhythm) && rms (rhythm, 0, rhythm.getNumSamples()) > 0.01f && keys->currentStep.load() >= 0, "Rhythm section runs with the song");
             check (keys->chordRoot.load() == 7, "Auto accompaniment recognises the single-finger chord (" + HomeKeys::chordName (keys->chordRoot.load(), keys->chordType.load()) + ")");
+            // the Portable '81 rhythm bank: every rhythm, both variations, with its own drum sound
+            {
+                keys->setParam ("bank", 1.0f);
+                keys->setParam ("kit", (float) DrumSynth::numKits);
+                keys->setParam ("autoFill", 1.0f);
+                keys->setParam ("abc", 0.0f);
+                bool allPlay = true;
+                juce::String quiet;
+                for (int r = 0; r < 8; ++r)
+                    for (int v = 0; v < 2; ++v)
+                    {
+                        keys->setParam ("rhythm", (float) r);
+                        keys->setParam ("variation", (float) v);
+                        auto beat = renderRange (engine, project, 0.0, 4.0);
+                        if (! allFinite (beat) || rms (beat, 0, beat.getNumSamples()) < 0.005f) { allPlay = false; quiet << keys->currentRhythmName() << " "; }
+                    }
+                check (allPlay && portableRhythms().size() == 16, "Portable '81 rhythms: all 8 rhythms x 2 variations play " + quiet);
+                keys->setParam ("bank", 0.0f);
+                keys->setParam ("kit", 0.0f);
+                keys->setParam ("autoFill", 0.0f);
+            }
         }
         project.removeTrack (hk);
 

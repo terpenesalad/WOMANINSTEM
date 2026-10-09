@@ -76,6 +76,74 @@ const std::vector<VintageRhythm>& vintageRhythms()
     return list;
 }
 
+const std::vector<VintageRhythm>& portableRhythms()
+{
+    static const std::vector<VintageRhythm> list = {
+        // ---- March ----
+        { "March I", 116.0f, 4, 16,
+          { { K, "X.......X......." }, { SN, "....X.......X..." }, { CH, "x.x.x.x.x.x.x.x." } },
+          "R.......5.......", "....X.......X..." },
+        { "March II", 116.0f, 4, 16,
+          { { K, "X.......X......." }, { SN, "..o.X.o...o.X.xx" }, { CH, "x...x...x...x..." } },
+          "R...5...R...5...", "..X...X...X...X." },
+        // ---- Disco ----
+        { "Disco I", 120.0f, 4, 16,
+          { { K, "X...X...X...X..." }, { SN, "....X.......X..." }, { CH, "x...x...x...x..." }, { OH, "..x...x...x...x." } },
+          "R.8.R.8.R.8.R.8.", "..X...X...X...X." },
+        { "Disco II", 120.0f, 4, 16,
+          { { K, "X...X...X...X..." }, { SN, "....X..o....X..." }, { CH, "xoxoxoxoxoxoxoxo" } },
+          "R..8R..8R..8R..8", ".x.x.x.x.x.x.x.x" },
+        // ---- Waltz (3/4) ----
+        { "Waltz I", 132.0f, 3, 12,
+          { { K, "X..........." }, { SN, "....x...x..." }, { CH, "x...x...x..." } },
+          "R.......5...", "....X...X..." },
+        { "Waltz II", 132.0f, 3, 12,
+          { { K, "X.......o..." }, { SN, "....x...x.o." }, { CH, "x.o.x.o.x.o." } },
+          "R...3...5...", "....X...X..." },
+        // ---- Rock ----
+        { "Rock I", 112.0f, 4, 16,
+          { { K, "X.......X......." }, { SN, "....X.......X..." }, { CH, "x.x.x.x.x.x.x.x." } },
+          "R.......R.5.....", "X.......X......." },
+        { "Rock II", 112.0f, 4, 16,
+          { { K, "X......xX.x....." }, { SN, "....X.......X..o" }, { CH, "xoxoxoxoxoxoxoxo" } },
+          "R.R.R.R.R.R.5.5.", "X...x...X...x..." },
+        // ---- Tango ----
+        { "Tango I", 120.0f, 4, 16,
+          { { K, "X...X...X...X..." }, { SN, "..........x.x..." }, { CH, "x...x...x...x..." } },
+          "R...5...R...5...", "X...X...X..XX..." },
+        { "Tango II", 120.0f, 4, 16,
+          { { K, "X..xX...X..xX..." }, { SN, "........x.x.x..." }, { CLV, "x...x...x..x...." } },
+          "R..5R...R..5R...", "X..XX...X..XX..." },
+        // ---- Swing (triplets) ----
+        { "Swing I", 140.0f, 4, 12,
+          { { RD, "X..x.xX..x.x" }, { PH, "...x.....x.." }, { K, "o.....o....." } },
+          "R..3..5..6..", "...x.....x.." },
+        { "Swing II", 140.0f, 4, 12,
+          { { RD, "X..x.xX..x.x" }, { PH, "...x.....x.." }, { K, "o..o..o..o.." }, { SN, ".....o.....o" } },
+          "R..3..5..3..", "...x..x..x.." },
+        // ---- Rhumba ----
+        { "Rhumba I", 108.0f, 4, 16,
+          { { K, "X.....X.X......." }, { CLV, "x..x..x...x.x..." }, { MAR, "xoxoxoxoxoxoxoxo" } },
+          "R..5...R..5.....", "..X...X...X..X.." },
+        { "Rhumba II", 108.0f, 4, 16,
+          { { K, "X.....X.X......." }, { CLV, "x..x..x...x.x..." }, { HB, "..x.....x.x...x." }, { LB, "......x.......x." } },
+          "R..5..R...5..R..", "..X..X....X..X.." },
+        // ---- Samba ----
+        { "Samba I", 104.0f, 4, 16,
+          { { K, "X..xX..xX..xX..x" }, { RIM, "x..x..x...x..x.." }, { CH, "xoxoxoxoxoxoxoxo" } },
+          "R..5R..5R..5R..5", ".X.X..X.X.X..X.." },
+        { "Samba II", 104.0f, 4, 16,
+          { { K, "X..xX..xX..xX..x" }, { SN, "..x..x.x..x..x.x" }, { CH, "xoxoxoxoxoxoxoxo" } },
+          "R..5R..5R..5R.5.", "X..X..X...X..X.." },
+    };
+    return list;
+}
+
+juce::StringArray portableRhythmNames()
+{
+    return { "March", "Disco", "Waltz", "Rock", "Tango", "Swing", "Rhumba", "Samba" };
+}
+
 std::vector<std::pair<int, juce::String>> vintageFill (const VintageRhythm& r)
 {
     const int half = r.steps / 2;

@@ -2,6 +2,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "Daw/Instruments/Sampler.h"
 #include "Daw/Instruments/HomeKeys.h"
+#include "Daw/Instruments/VintageRhythms.h"
 #include "Daw/Plugins/Looper.h"
 #include "Daw/Plugins/VocalTune.h"
 #include "Daw/Plugins/MidiEffects.h"
@@ -385,6 +386,7 @@ public:
     RetroButton (juce::String num, juce::String label, juce::Colour c) : number (std::move (num)), text (std::move (label)), colour (c) {}
     std::function<void()> onClick;
     bool lit = false;
+    void setText (const juce::String& t) { if (t != text) { text = t; repaint(); } }
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
@@ -417,7 +419,7 @@ public:
         : AudioProcessorEditor (k), keys (k), header (k, "HomeKeys 20"),
           knobs (k, { "volume", "tempo", "rhythmVol", "bassVol", "chordVol", "vintage", "bright", "split" }, retro::orange),
           fx (k, { "drive", "wobble", "wobbleRate", "reverb", "reverbSize" }, retro::cream),
-          switches (k, { "abc", "kit", "chordTone", "ensemble", "vibrato", "sustain", "rhythmOn" }, retro::orange)
+          switches (k, { "abc", "kit", "chordTone", "bank", "ensemble", "vibrato", "sustain", "variation", "autoFill", "rhythmOn" }, retro::orange)
     {
         addAndMakeVisible (header);
         const auto tones = HomeKeys::toneNames();
@@ -474,7 +476,7 @@ public:
         const int tone = (int) keys.param ("tone"), rhythm = (int) keys.param ("rhythm");
         auto line = [&] (int i, const juce::String& s) { g.drawText (s, l.reduced (10, 6).withHeight (22).translated (0, i * 22.0f), juce::Justification::centredLeft); };
         line (0, "TONE   " + juce::String (tone + 1).paddedLeft ('0', 2) + "  " + HomeKeys::toneNames()[tone].toUpperCase());
-        line (1, "RHYTHM " + juce::String (rhythm + 1).paddedLeft ('0', 2) + "  " + HomeKeys::rhythmNames()[rhythm].toUpperCase());
+        line (1, "RHYTHM " + juce::String (rhythm + 1).paddedLeft ('0', 2) + "  " + keys.currentRhythmName().toUpperCase());
         const auto chord = HomeKeys::chordName (keys.chordRoot.load(), keys.chordType.load());
         line (2, "TEMPO  " + juce::String ((int) keys.param ("tempo")) + "     ACC " + (keys.param ("abc") > 0.5f ? (chord.isNotEmpty() ? chord : juce::String ("--")) : juce::String ("OFF")));
         // beat lights
@@ -494,7 +496,8 @@ public:
         g.setFont (uiFont (11.0f, true));
         g.drawText ("TONE SELECT", toneLabel, juce::Justification::centredLeft);
         g.drawText ("RHYTHM SELECT", rhythmLabel, juce::Justification::centredLeft);
-        g.drawText ("HomeKeys 20  -  20 RHYTHMS  -  AUTO ACCOMPANIMENT", brandArea, juce::Justification::centredRight);
+        g.drawText (keys.param ("bank") > 0.5f ? "PORTABLE '81  -  8 RHYTHMS  -  VARIATION I / II" : "HomeKeys 20  -  20 RHYTHMS  -  AUTO ACCOMPANIMENT",
+                    brandArea, juce::Justification::centredRight);
     }
 
     void resized() override
@@ -537,6 +540,18 @@ private:
 
     void timerCallback() override
     {
+        const bool portable = keys.param ("bank") > 0.5f;
+        if (portable != showingPortable || rhythmButtons.size() == 0)
+        {
+            showingPortable = portable;
+            const auto names = portable ? portableRhythmNames() : HomeKeys::rhythmNames();
+            for (int i = 0; i < rhythmButtons.size(); ++i)
+            {
+                rhythmButtons[i]->setVisible (i < names.size());
+                if (i < names.size()) rhythmButtons[i]->setText (names[i]);
+            }
+            repaint();
+        }
         const int tone = (int) keys.param ("tone"), rhythm = (int) keys.param ("rhythm");
         for (int i = 0; i < toneButtons.size(); ++i) if (toneButtons[i]->lit != (i == tone)) { toneButtons[i]->lit = i == tone; toneButtons[i]->repaint(); }
         for (int i = 0; i < rhythmButtons.size(); ++i) if (rhythmButtons[i]->lit != (i == rhythm)) { rhythmButtons[i]->lit = i == rhythm; rhythmButtons[i]->repaint(); }
@@ -550,6 +565,7 @@ private:
     juce::OwnedArray<RetroButton> toneButtons, rhythmButtons;
     juce::TextButton startButton { "START" }, syncButton { "SYNC START" }, fillButton { "FILL IN" };
     ParamPanel knobs, fx, switches;
+    bool showingPortable = false;
     juce::Rectangle<int> lcdArea, toneLabel, rhythmLabel, brandArea;
     juce::Rectangle<float> grilleL, grilleR;
 };
