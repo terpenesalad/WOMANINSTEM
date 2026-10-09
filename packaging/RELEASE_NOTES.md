@@ -1,11 +1,25 @@
-## WOMANINSTEM 3.5 for Windows (64-bit): old 32-bit plugins (Delay Lama!), Piano Room, KEYS
+## WOMANINSTEM 3.6 for Windows (64-bit): the dream organ, plugins in the bottom panel, old 32-bit plugins (Delay Lama!)
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.4 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.5 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.6
+
+**HomeKeys 20: the dream organ** (Studio: *+ Track → HomeKeys 20*, or Library → HomeKeys 20)
+- Two new tones, **Dream Organ 1** and **Dream Organ 2**, modelled on the cheap early-80s digital home-keyboard organs that Beach House built *Teen Dream*, *Devotion* and their first album on: square-wave organ stops stored as coarse, stepped digital waveforms, smoothed by a warm analogue filter. Organ 1 is the hollow, reedy one; Organ 2 adds the percussive "bite" at the start of each note.
+- New effects on the keyboard: **Amp Drive** (a small valve amp), **Wobble** (a vibrato pedal, with speed) and a big, soft **Reverb** (with size).
+- New presets, first in the list: **Teen Dream Organ**, **Gila Organ (Devotion)**, **Thrift Store Organ + Slow Rock ('06)** (the keyboard's own drum machine and one-finger chords, like the first album) and **Dream Organ, Dry** (no effects, add your own).
+- A new HomeKeys track now starts on *Teen Dream Organ*. Your saved songs keep their sounds.
+
+**Plugins open in the bottom panel**
+- Instrument and effect controls (Amp & Pedals, HomeKeys, Piano Room, Beat Lab and every built-in effect) now open **under the song**, next to Editor / Mixer / Keys, instead of in a window floating over it. The panel grows to fit.
+- Open several and they sit side by side as tabs. Click **Plugin** at the top right (or press **P**) to show or hide it.
+- **Pop out** puts one in its own window (and later ones follow, until you dock again); **Dock in the Studio** at the top of that window brings it back.
+- Plugins from other makers (VST, VST3, CLAP, 32-bit) still open in their own windows.
 
 ### New in 3.5
 
