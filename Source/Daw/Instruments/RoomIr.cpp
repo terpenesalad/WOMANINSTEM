@@ -43,6 +43,11 @@ namespace
             { "Car Park", "An underground car park: hard concrete, a metallic flutter and a long grey tail", 2.4f, 2.6f, 1.8f, 30, 6.0f, 120, 0.7f, 0.9f, 12000, 15, 0.95f, {}, 23.0f },
             { "Plate", "A studio plate reverb: dense, bright and smooth, no room at all", 2.0f, 2.3f, 2.1f, 0, 0.5f, 0, 0.0f, 1.0f, 16000, 3, 1.0f, {} },
             { "Spring Tank", "A guitar-amp spring reverb: boingy, drippy and very 60s", 1.6f, 2.0f, 1.2f, 0, 0.5f, 0, 0.0f, 0.5f, 6000, 2, 0.7f, {}, 0.0f, true },
+            // 3.7: spaces for junk percussion and game sound design
+            { "Concrete Storeroom", "A bare concrete storeroom with a hard floor: close, boxy and ringing (where junkyard percussion lives)", 0.9f, 1.0f, 0.75f, 22, 2.2f, 28, 1.0f, 0.7f, 12000, 5, 0.85f, {}, 9.0f },
+            { "Tin Shed", "A corrugated-iron shed: tinny, metallic and bright, with a flutter between the walls", 0.6f, 0.8f, 0.9f, 20, 2.5f, 30, 1.0f, 0.6f, 15000, 4, 0.8f, {}, 13.0f },
+            { "Cave", "A deep limestone cave: dark, enormous and dripping, with far walls answering", 3.5f, 4.2f, 1.6f, 26, 12.0f, 160, 0.6f, 0.95f, 5000, 60, 1.0f, { { 260.0f, 0.3f }, { 610.0f, 0.18f } } },
+            { "Stairwell", "A tall concrete stairwell: a long, bright flutter climbing up the floors", 2.2f, 2.8f, 2.0f, 24, 3.0f, 90, 0.8f, 0.85f, 12000, 12, 0.9f, {}, 31.0f },
         };
         return s;
     }

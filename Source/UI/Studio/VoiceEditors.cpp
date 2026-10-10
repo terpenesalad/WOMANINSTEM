@@ -318,6 +318,71 @@ private:
                 g.fillRect (x0, floorY, w, h);
                 break;
             }
+            case concreteRoom:
+            case stairwell:
+            {
+                gradient (0xff55585a, 0xff3c3f41);
+                g.setColour (juce::Colour (0xff6a6d70).withAlpha (0.5f));
+                for (int b = 0; b < 30; ++b)   // shuttering marks in the concrete
+                    g.fillRect (x0 + w * rnd.nextFloat(), y0 + (floorY - y0) * rnd.nextFloat(), 24.0f + 30.0f * rnd.nextFloat(), 2.0f);
+                if (space == stairwell)
+                {
+                    g.setColour (juce::Colour (0xff8a8d90));
+                    for (int st = 0; st < 9; ++st)
+                        g.fillRect (x0 + w * (0.55f + 0.05f * st), floorY - (floorY - y0) * 0.1f * (st + 1), w * 0.05f, 4.0f);
+                }
+                else
+                {
+                    g.setColour (juce::Colour (0xff7a5a3a));   // a stack of junk: crates, a drum, a pipe
+                    g.fillRect (x0 + w * 0.06f, floorY - h * 0.18f, w * 0.1f, h * 0.18f);
+                    g.setColour (juce::Colour (0xff6a3a2a));
+                    g.fillRoundedRectangle (x0 + w * 0.82f, floorY - h * 0.26f, w * 0.08f, h * 0.26f, 4.0f);
+                    g.setColour (juce::Colour (0xffb0b4b8));
+                    g.fillRect (x0 + w * 0.7f, y0 + h * 0.2f, 3.0f, floorY - y0 - h * 0.2f);
+                }
+                g.setColour (juce::Colour (0xff2e3032));
+                g.fillRect (x0, floorY, w, h);
+                break;
+            }
+            case tinShed:
+            {
+                gradient (0xff6d7a80, 0xff4a555a);
+                for (float tx = x0; tx < x0 + w; tx += 10.0f)
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.12f));
+                    g.drawVerticalLine ((int) tx, y0, floorY);
+                }
+                g.setColour (juce::Colour (0xffa0522d).withAlpha (0.4f));
+                for (int r2 = 0; r2 < 12; ++r2) g.fillEllipse (x0 + w * rnd.nextFloat(), y0 + (floorY - y0) * rnd.nextFloat(), 14.0f, 8.0f);   // rust
+                g.setColour (juce::Colour (0xff3a3226));
+                g.fillRect (x0, floorY, w, h);
+                break;
+            }
+            case cave:
+            {
+                gradient (0xff0c0c10, 0xff1c1a1e);
+                juce::Path roof;
+                roof.startNewSubPath (x0, y0);
+                for (int i = 0; i <= 16; ++i)
+                    roof.lineTo (x0 + w * i / 16.0f, y0 + h * (0.12f + 0.12f * rnd.nextFloat()));
+                roof.lineTo (x0 + w, y0);
+                roof.closeSubPath();
+                g.setColour (juce::Colour (0xff2c2a30));
+                g.fillPath (roof);
+                g.setColour (juce::Colour (0xff3a3842));
+                for (int st = 0; st < 10; ++st)   // stalactites
+                {
+                    const float sx = x0 + w * rnd.nextFloat(), sl = h * (0.08f + 0.15f * rnd.nextFloat());
+                    juce::Path tri;
+                    tri.addTriangle (sx - 6.0f, y0 + h * 0.15f, sx + 6.0f, y0 + h * 0.15f, sx, y0 + h * 0.15f + sl);
+                    g.fillPath (tri);
+                }
+                g.setColour (juce::Colour (0xff6fb3c8).withAlpha (0.15f));
+                g.fillEllipse (x0 + w * 0.3f, floorY - 4.0f, w * 0.4f, h * 0.1f);   // pool
+                g.setColour (juce::Colour (0xff1a181c));
+                g.fillRect (x0, floorY + h * 0.04f, w, h);
+                break;
+            }
             case plate:
             case spring:
             {

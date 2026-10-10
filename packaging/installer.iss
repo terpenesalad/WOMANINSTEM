@@ -1,8 +1,8 @@
 ; Inno Setup script for WOMANINSTEM
-; Built by CI:  ISCC /DAppVersion=3.6.1 /DSourceDir=dist\WOMANINSTEM /Odist packaging\installer.iss
+; Built by CI:  ISCC /DAppVersion=3.7.0 /DSourceDir=dist\WOMANINSTEM /Odist packaging\installer.iss
 
 #ifndef AppVersion
-  #define AppVersion "3.6.1"
+  #define AppVersion "3.7.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\WOMANINSTEM"

@@ -1,11 +1,47 @@
-## WOMANINSTEM 3.6.1 for Windows (64-bit): the dream organ and its drum machine, plugins in the bottom panel, old 32-bit plugins (Delay Lama!)
+## WOMANINSTEM 3.7.0 for Windows (64-bit): junkyard percussion and finger snaps, a whistler, psych-pop bass, vocal sounds for your mic
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.5 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.6 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.7
+
+**Junkyard Percussion** (Studio: *+ Track → Junkyard Percussion*, or Library → Sounds → Junkyard Percussion)
+- A new instrument for clanging metal, knocking wood, scraped strings and atmospheres, in the spirit of *Swordfishtrombones* and *Bone Machine*. Nothing is sampled: every sound is built from resonating metal and wood, plucked and bowed strings and filtered noise, so no two hits are quite the same (**Humanize**).
+- **The Junk Kit** puts a different thing on every key, from C2 up:
+  - *body percussion*: finger snaps (tight, fat, bright, soft), finger clicks, hand claps, a room of claps, knee and thigh slaps, a tongue click, a chest thump, a foot stomp on floorboards,
+  - *wood*: a crate, a chair knock, a plank, low and high log drums, a wood block, bones, a door knock, a cajon-like box, a cello struck *col legno*, a slap on the double bass's body, a double bass pizzicato,
+  - *metal*: brake drums (open and hand-muted), a scaffold pipe, an anvil, a bell plate, a tin can, a pot lid, an oil drum, a jail-door clang, a chain rattle, a spring boing, a glass bottle,
+  - *sound-space textures* that keep going while you hold the key: bowed saw, bowed metal, bowed double bass and cello, wind, a distant rumble, rain on a tin roof, creaking wood, cave drips, mains hum, a thunder sheet, a waterphone and a deep gong.
+- Or play **one source across the keyboard**, in tune: marimba, bass marimba, brake drums, pipes, bell plates, glass bottles, log drums, wood blocks, double bass and cello pizzicato, col legno, bowed double bass, bowed cello, bowed saw, bowed metal, waterphone, wind (low keys moan, high keys whistle), deep gongs, oil drums, tin cans, pot lids.
+- Knobs: Tune, Decay, Tone, Humanize, **Loose Junk Rattle**, Width, Grit, and a **Space** to put it all in.
+- Four new spaces (also in Piano Room): **Concrete Storeroom**, **Tin Shed**, **Cave** and **Stairwell**.
+- 24 presets: *Junkyard (concrete storeroom)*, *Swordfish Parade*, *Snaps & Claps*, *Tin Shed Clatter*, *Cave Sound Space*, *Night Forest Space*, *Bowed Saw (ghostly)*, *Bowed Metal (horror)*, *Waterphone Drift*, *Double Bass Pizzicato*, *Dusty Marimba* and more.
+
+**Finger-snap loops, junk grooves and sound spaces** (Library → Drums)
+- **Finger Snaps & Body Percussion**: snaps on 2 & 4, on every beat, doo-wop, swung jazz-club snaps, a finger-click shuffle, busy 16ths, half-time, snaps & knee slaps, the hand jive, gospel stomp & clap, tongue clicks & snaps.
+- **Junkyard Grooves**: *Bone Machine Stomp*, *Swordfish March*, *Junkyard Shuffle*, *Clanking Machinery*, *Funeral Procession*, *Kitchen Sink Polka*, *Rattle & Bones*, *Col Legno Pulse*.
+- **Sound Spaces**: 8-bar atmospheres for games and film: *Haunted Basement*, *Storm Shelter*, *Abandoned Factory*, *Night Forest*, *Underwater Cave*, *Ghost Ship*, *Bone Machine Room*. Each lands on its own track in its own room; loop the clip for as long as the level lasts, and export it as WAV.
+- They're MIDI, so **change the song's tempo and they follow**: no stretching, no artefacts. Double-click one to drop 8 bars at the playhead (it makes a Junkyard track if you don't have one).
+
+**Whistler** (Studio: *+ Track → Whistler*)
+- Someone whistling. Play **legato** (hold one key while you press the next) and it **glides** from note to note; it keeps sliding on from the last note after a short gap too, and **scoops up** into the first note of every phrase. Breath, air, a vibrato that comes in after a moment, a human wobble, a fall-off at the end, echo and reverb. Pitch bend bends it; the mod wheel adds vibrato.
+- Presets: *Lonesome Whistle*, *Happy-Go-Lucky*, *Close & Breathy*, *Two-Finger Whistle*, *Old Man on the Porch*, *Ghost Whistle*, *Bird Trills*, *Slide Whistle*, *Dry*.
+
+**Psych-pop bass** (Play Along rig and *Amp & Pedals*)
+- New amp: **Bass: Psych Pop (rubbery DI)**: a 60s hollow-body bass DI'd into a hot valve preamp that compresses itself, low end kept tight, the mids pushed into a round honk, the fizz rolled off.
+- Two new presets (approximations, not endorsements): **Bass - Is It True** (round, bouncy, squashed flat, mostly DI) and **Bass - Feels Like We Only Go Backwards** (woollier: a warm fuzz, compressed harder, darker, a slow phaser, saturated tape). Best with a short-scale or violin-style bass and flatwounds, played with the fingers near the neck.
+
+**Vocal sounds for your mic**
+- *+ Track → Audio: Microphone / Vocals* now asks which sound you want; right-click any audio track → **Vocal Sound** to change it later, or double-click one in Library → Effects → *Vocal Chains*. 25 chains, all made from the Studio's own effects, so every knob stays editable:
+  - *Studio & Pop*: Clean Studio Vocal (now the default), Warm Radio Voice, Hard-Tune Pop, Soul Ballad, Garage Rock Shout,
+  - *Folk & Roots*: Folk Room (live take), Old Folk Record (60s), Laurel Canyon Double, Campfire, Back-Porch Blues,
+  - *Psychedelic*: Psych ADT (60s double tracking), Rotating Speaker Voice, Phaser Haze, Shoegaze Wash, Space Echo Dub, Lo-Fi Bedroom Tape, Cosmic Flanged Choir,
+  - *Weird & Extreme*: Telephone / Megaphone, Haunted Whisper, Demon Voice, Helium Chipmunk, Robot (vocoder), Ring-Mod Alien, Extreme Metal Scream, Cathedral Ambience.
+- Play Along's rig gets ten of them as presets too (*Vocal - Clean Studio*, *Vocal - Psych ADT Double*, *Vocal - Demon*...), for singing along with a song.
 
 ### New in 3.6.1
 

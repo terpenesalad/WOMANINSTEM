@@ -5,6 +5,8 @@
 #include "Daw/Instruments/BeatLab.h"
 #include "Daw/Instruments/PianoRoom.h"
 #include "Daw/Instruments/HomeKeys.h"
+#include "Daw/Instruments/Junkyard.h"
+#include "Daw/Instruments/Whistler.h"
 
 namespace wis::daw
 {
@@ -150,6 +152,8 @@ struct PluginMenu
         static const juce::StringArray kitNames { "Home Keyboard '84", "Rhythm Unit '78", "Eight-Oh-Eight", "Toy Box Lo-Fi" };
         m.menu.addSubMenu ("Rhythm Box (vintage drums)", presetMenu ("rhythmbox", kitNames, "Rhythm Box: "));
         m.menu.addSubMenu ("Beat Lab (groovebox: beats, loops, glitch)", presetMenu ("beatlab", BeatLab::presetNames(), "Beat Lab: "));
+        m.menu.addSubMenu ("Junkyard Percussion (junk, snaps, sound spaces)", presetMenu ("junkyard", Junkyard::presetNames(), "Junkyard: "));
+        m.menu.addSubMenu ("Whistler", presetMenu ("whistle", Whistler::presetNames(), "Whistler: "));
         juce::PopupMenu samplers;
         samplers.addItem (id, "Sampler (load any sound)");
         m.refs[id++] = builtinRef ("sampler");

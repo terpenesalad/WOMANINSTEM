@@ -6,6 +6,10 @@
 #include "Daw/Instruments/VintageRhythms.h"
 #include "Daw/Instruments/BeatLab.h"
 #include "Daw/Instruments/PianoRoom.h"
+#include "Daw/Instruments/Junkyard.h"
+#include "Daw/Instruments/Whistler.h"
+#include "Daw/Model/JunkLoops.h"
+#include "Daw/Model/VocalChains.h"
 #include "Library/SongLibrary.h"
 
 namespace wis::daw
@@ -145,6 +149,15 @@ void BrowserPanel::populate()
         };
         addBuiltinGroup ("piano", PianoRoom::presetNames(), "Piano Room (real pianos in rooms)", "Piano Room: grands and uprights, from a living room to a forest or a canyon");
 
+        {
+            auto* junk = addGroup ("Junkyard Percussion (junk, snaps, bowed strings, sound spaces)");
+            const auto names = Junkyard::presetNames();
+            for (int i = 0; i < names.size(); ++i) addLeaf (junk, names[i], "inst:junkyard:" + juce::String (i), Junkyard::presetDescription (i));
+            auto* whistle = addGroup ("Whistler (whistling that glides)");
+            const auto wn = Whistler::presetNames();
+            for (int i = 0; i < wn.size(); ++i) addLeaf (whistle, wn[i], "inst:whistle:" + juce::String (i), "glides between notes: play legato");
+        }
+
         auto* homeKeys = addGroup ("HomeKeys 20 (80s Keyboard)");
         for (int i = 0; i < homeKeysPresets().size(); ++i)
             addLeaf (homeKeys, homeKeysPresets()[i], "inst:homekeys:" + juce::String (i), "with a built-in rhythm box and auto accompaniment");
@@ -195,7 +208,21 @@ void BrowserPanel::populate()
     }
     else if (currentTab == 1)
     {
-        hint.setText ("Double-click a groove to drop 8 bars (with fills) at the playhead on a drum track. Drag to place it anywhere.", juce::dontSendNotification);
+        hint.setText ("Double-click a groove to drop 8 bars at the playhead (drum grooves go on a drum track, finger snaps and junk on a Junkyard track). They are MIDI: change the tempo and they follow.", juce::dontSendNotification);
+        {
+            // Junkyard kit loops: MIDI, so they follow the tempo
+            std::map<juce::String, juce::TreeViewItem*> junkGroups;
+            const auto& jl = junkLoops();
+            for (int i = 0; i < (int) jl.size(); ++i)
+            {
+                const auto& lp = jl[(size_t) i];
+                const auto title = lp.group == "Finger Snaps" ? juce::String ("Finger Snaps & Body Percussion")
+                                 : lp.group == "Sound Spaces" ? juce::String ("Sound Spaces (8-bar atmospheres)") : lp.group;
+                if (junkGroups.count (title) == 0) junkGroups[title] = addGroup (title);
+                addLeaf (junkGroups[title], lp.name, "junk:" + juce::String (i),
+                         lp.events.empty() ? lp.description + " (" + juce::String ((int) lp.suggestedTempo) + " bpm feel, follows the tempo)" : lp.description);
+            }
+        }
         auto* vintage = addGroup ("Vintage Rhythm Box (80s keyboard)");
         const auto& rhythms = vintageRhythms();
         for (int i = 0; i < (int) rhythms.size(); ++i)
@@ -224,8 +251,18 @@ void BrowserPanel::populate()
     }
     else if (currentTab == 3)
     {
-        hint.setText ("Double-click an effect to add it to the selected track (MIDI effects go before the instrument). Drag onto any track.", juce::dontSendNotification);
+        hint.setText ("Double-click an effect to add it to the selected track (MIDI effects go before the instrument). Drag onto any track. "
+                      "A vocal chain replaces the track's effects.", juce::dontSendNotification);
         std::map<juce::String, juce::TreeViewItem*> groups;
+        {
+            const auto& chains = vocalChains();
+            for (int i = 0; i < (int) chains.size(); ++i)
+            {
+                const auto title = "Vocal Chains: " + chains[(size_t) i].group;
+                if (groups.count (title) == 0) groups[title] = addGroup (title);
+                addLeaf (groups[title], chains[(size_t) i].name, "vchain:" + juce::String (i), chains[(size_t) i].description);
+            }
+        }
         for (auto& b : builtinPlugins())
         {
             if (b.category == "Hidden") continue;

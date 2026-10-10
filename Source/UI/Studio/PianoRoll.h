@@ -30,6 +30,7 @@ public:
     double grid = 0.25;
     bool drawMode = false;
     bool drumMode = false;
+    bool junkMode = false;   // a Junkyard kit: keys named after what they hit
     double lastLength = 0.25;
     int lastVelocity = 100;
     juce::Array<juce::ValueTree> selected;

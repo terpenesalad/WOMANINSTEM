@@ -13,6 +13,8 @@
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Instruments/StudioSynth.h"
 #include "Daw/Instruments/PianoRoom.h"
+#include "Daw/Instruments/Junkyard.h"
+#include "Daw/Instruments/Whistler.h"
 
 namespace wis::daw
 {
@@ -39,6 +41,9 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         add ("sampler", "Sampler", "Instrument", "Play any sample across the keyboard, as a one-shot or chopped into slices; loops, envelopes, filter, glide", true, make<Sampler>());
         add ("drumpads", "Drum Pads", "Instrument", "16 pads of your own samples (or synth drums) with tune, decay, filter, reverse and choke groups", true, make<DrumPads>());
         add ("beatlab", "Beat Lab", "Instrument", "Groovebox for beats and loops: 8 lanes of synth drums, your samples or chopped loops; ratchets, probability, polymeter, stutter and tape-stop, plus a glitch / IDM section", true, make<BeatLab>());
+
+        add ("junkyard", "Junkyard Percussion", "Instrument", "Junk and body percussion, all synthesized: finger snaps, claps and slaps, crates, chairs and log drums, brake drums, pipes, an anvil and a jail-door clang, plucked and bowed basses and cellos, and sound-space textures (wind, rain on tin, creaks, cave drips, bowed metal, a waterphone) in a concrete storeroom, a tin shed, a cave or a forest", true, make<Junkyard>());
+        add ("whistle", "Whistler", "Instrument", "A person whistling: glides between the notes you play, scoops up into each phrase, breath, a delayed vibrato, a human wobble, echo and reverb", true, make<Whistler>());
 
         add ("arp", "Arpeggiator", "MIDI FX", "Up/down/random/chord arpeggios synced to the song, with octaves, swing, latch, rhythms, probability and ratchets", false, make<Arpeggiator>());
         add ("chordtrig", "Chord Trigger", "MIDI FX", "Play whole chords from a single key", false, make<ChordTrigger>());

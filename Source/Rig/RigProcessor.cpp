@@ -1,6 +1,7 @@
 #include "RigProcessor.h"
 #include "Separation/ModelManager.h"
 #include "Daw/Plugins/BuiltinProcessor.h"
+#include "Daw/Model/VocalChains.h"
 
 namespace wis
 {
@@ -924,7 +925,20 @@ juce::StringArray RigProcessor::factoryPresetNames()
         "Guitar - 12-String Jangle (Beatles, George-ish)",
         "Guitar - Casino Crunch (Beatles, John-ish)",
         "Guitar - Doom Sludge (Hell 'HEVY'-ish)",
-        "Bass - Doom Sludge Bass"
+        "Bass - Doom Sludge Bass",
+        // 3.7
+        "Bass - Is It True (Tame Impala-ish)",
+        "Bass - Feels Like We Only Go Backwards (Tame Impala-ish)",
+        "Vocal - Clean Studio",
+        "Vocal - Folk Room",
+        "Vocal - Old Folk Record (60s)",
+        "Vocal - Psych ADT Double",
+        "Vocal - Phaser Haze",
+        "Vocal - Lo-Fi Bedroom Tape",
+        "Vocal - Telephone / Megaphone",
+        "Vocal - Haunted Whisper",
+        "Vocal - Demon",
+        "Vocal - Extreme Metal Scream"
     };
 }
 
@@ -1242,6 +1256,46 @@ void RigProcessor::loadFactoryPreset (int index)
             set (pid::gateThresh, -60);
             set (pid::outLevel, -4.9f);   // loudness-matched (rigtest --calibrate)
             break;
+        case 31: // Is It True: a 60s violin bass DI'd into a hot valve preamp, squashed flat, round and bouncy, mostly DI
+            chr (CharacterType::violinBass, 6);
+            comp (-30, 6.0f, 8, 110, 6);
+            amp (AmpType::bassPsychPop, 3.5f, 6.0f, 6.0f, 4.5f, 4.5f, 6.0f);
+            cabSet (CabType::bass1x15Vintage, MicType::dynamic, 4, 1, 35, 5500);
+            set (pid::cabDiBlend, 0.6f);
+            tapeSet (4);
+            bassBasics();
+            set (pid::outLevel, 1.35f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 32: // Feels Like We Only Go Backwards: the same bass woollier - a warm fuzz, compressed harder, darker, a slow phaser, saturated tape
+            chr (CharacterType::violinBass, 8);
+            comp (-34, 10.0f, 4, 140, 8);
+            driveSet (DriveType::bassDrive, 4.5f, 3.5f, 5.5f);
+            amp (AmpType::bassPsychPop, 6.0f, 6.5f, 6.5f, 3.5f, 3.5f, 5.8f);
+            cabSet (CabType::bass2x15Sixties, MicType::dynamic, 5, 2, 40, 4500);
+            set (pid::cabDiBlend, 0.35f);
+            pedal ("phaser", { { "rate", 0.2f }, { "depth", 0.6f }, { "centre", 600.0f }, { "feedback", 0.4f }, { "mix", 0.25f } }, true);
+            tapeSet (7);
+            bassBasics();
+            set (pid::outLevel, 2.2f);   // loudness-matched (rigtest --calibrate)
+            break;
+        case 33: case 34: case 35: case 36: case 37: case 38: case 39: case 40: case 41: case 42:
+        {
+            // a microphone through one of the Studio's vocal chains, built from pedals (no amp, no cabinet)
+            static const char* chainNames[] = { "Clean Studio Vocal", "Folk Room (live take)", "Old Folk Record (60s)", "Psych ADT (60s double tracking)",
+                                                "Phaser Haze", "Lo-Fi Bedroom Tape", "Telephone / Megaphone", "Haunted Whisper", "Demon Voice",
+                                                "Extreme Metal Scream" };
+            set (pid::ampOn, 0); set (pid::cabOn, 0); set (pid::reverbOn, 0);   // the chain brings its own space
+            set (pid::gateThresh, -56); set (pid::gateRelease, 150);
+            const auto& chains = daw::vocalChains();
+            for (int c = 0; c < (int) chains.size(); ++c)
+                if (chains[(size_t) c].name == chainNames[index - 33])
+                    for (auto& ref : daw::vocalChainRefs (c))
+                        if (pedalIds().contains (ref.uid)) addPedal (ref.uid, -1, ref.state);
+            // roughly level with each other (rigtest --calibrate, plucked input)
+            static const float levels[] = { 6.1f, 6.7f, -2.2f, 0.9f, 2.1f, -1.4f, 9.1f, 9.9f, 6.2f, 8.6f };
+            set (pid::outLevel, levels[index - 33]);
+            break;
+        }
         default: break;
     }
 }

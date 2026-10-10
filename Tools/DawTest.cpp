@@ -22,6 +22,10 @@
 #include "Daw/Instruments/SoundFontInstrument.h"
 #include "Daw/Instruments/PianoRoom.h"
 #include "Daw/Instruments/RoomIr.h"
+#include "Daw/Instruments/Junkyard.h"
+#include "Daw/Instruments/Whistler.h"
+#include "Daw/Model/JunkLoops.h"
+#include "Daw/Model/VocalChains.h"
 #include <iostream>
 
 using namespace wis::daw;
@@ -214,6 +218,107 @@ int main (int argc, char** argv)
             w->writeFromAudioSampleBuffer (out, 0, total);
         std::cout << k.getProgramName (k.getCurrentProgram()) << ": peak " << out.getMagnitude (0, total)
                   << "  rms " << juce::Decibels::gainToDecibels (out.getRMSLevel (0, 0, total)) << " dB" << std::endl;
+        return 0;
+    }
+    // dawtest --render-junkyard <folder>: Junkyard Percussion, its loops and sound spaces, and the Whistler (for listening)
+    if (argc > 2 && juce::String (argv[1]) == "--render-junkyard")
+    {
+        const juce::File dir { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        dir.createDirectory();
+        struct Ev { int note; double on, off; int vel; };
+        auto render = [] (BuiltinProcessor& p, const std::vector<Ev>& evs, double seconds, const juce::File& f)
+        {
+            p.setPlayConfigDetails (0, 2, sr, 512);
+            p.setNonRealtime (true);
+            p.prepareToPlay (sr, 512);
+            if (auto* j = dynamic_cast<Junkyard*> (&p)) j->waitUntilReady();
+            juce::MidiBuffer all;
+            for (auto& e : evs)
+            {
+                all.addEvent (juce::MidiMessage::noteOn (1, e.note, (juce::uint8) e.vel), (int) (e.on * sr));
+                all.addEvent (juce::MidiMessage::noteOff (1, e.note), (int) (e.off * sr));
+            }
+            const int total = (int) (seconds * sr);
+            juce::AudioBuffer<float> out (2, total);
+            for (int pos = 0; pos < total; pos += 512)
+            {
+                const int n = std::min (512, total - pos);
+                juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+                view.clear();
+                juce::MidiBuffer mb;
+                for (const auto meta : all)
+                    if (meta.samplePosition >= pos && meta.samplePosition < pos + n) mb.addEvent (meta.getMessage(), meta.samplePosition - pos);
+                p.processBlock (view, mb);
+            }
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+            auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (16);
+            if (auto w = juce::WavAudioFormat().createWriterFor (os, opts)) w->writeFromAudioSampleBuffer (out, 0, total);
+            std::cout << f.getFileName() << ": peak " << out.getMagnitude (0, total) << "  rms "
+                      << juce::Decibels::gainToDecibels (out.getRMSLevel (0, 0, total)) << " dB" << std::endl;
+        };
+        auto loopEvents = [] (int index, double bpm, int bars)
+        {
+            Project p;
+            auto t = p.addTrack (kindInstrument, "x");
+            auto c = insertJunkLoop (p, t, index, 0.0, bars);
+            std::vector<Ev> evs;
+            for (auto n : c.v)
+            {
+                const double s0 = (double) n[ids::s] * 60.0 / bpm, len = (double) n[ids::l] * 60.0 / bpm;
+                evs.push_back ({ (int) n[ids::p], s0, s0 + len, (int) n[ids::v] });
+            }
+            return evs;
+        };
+        auto findLoop = [] (const juce::String& name) { for (int i = 0; i < (int) junkLoops().size(); ++i) if (junkLoops()[(size_t) i].name == name) return i; return 0; };
+
+        {
+            Junkyard j;
+            j.setCurrentProgram (0);
+            std::vector<Ev> tour;
+            double t = 0.2;
+            for (int key = Junkyard::kitLow; key <= Junkyard::kitHigh; ++key)
+            {
+                if (Junkyard::kitKeyName (key).isEmpty()) continue;
+                const bool held = key >= Junkyard::bowedSaw;
+                tour.push_back ({ key, t, t + (held ? 2.5 : 0.3), 100 });
+                t += held ? 3.2 : 0.7;
+            }
+            render (j, tour, t + 3.0, dir.getChildFile ("01 Junk Kit tour (Junkyard preset).wav"));
+        }
+        for (auto [name, bpm] : { std::pair<const char*, double> { "Snaps on 2 & 4", 100.0 }, { "Snaps on 2 & 4", 150.0 }, { "Jazz Club Snaps (swing)", 132.0 },
+                                  { "Gospel Stomp & Clap", 88.0 }, { "Bone Machine Stomp", 92.0 }, { "Swordfish March", 104.0 }, { "Clanking Machinery", 116.0 },
+                                  { "Haunted Basement", 80.0 }, { "Storm Shelter", 80.0 }, { "Underwater Cave", 80.0 }, { "Ghost Ship", 80.0 } })
+        {
+            const int li = findLoop (name);
+            Junkyard j;
+            j.setCurrentProgram (junkLoops()[(size_t) li].preset);
+            const double seconds = 8 * 4 * 60.0 / bpm + 3.0;
+            render (j, loopEvents (li, bpm, 8), seconds, dir.getChildFile ("02 " + juce::String (name).replace ("&", "and") + " @ " + juce::String ((int) bpm) + " bpm.wav"));
+        }
+        for (auto [preset, notes] : { std::pair<int, std::vector<int>> { 9, { 57, 60, 64, 67, 69, 67, 64, 60 } }, { 15, { 33, 40, 45, 43, 41, 40, 36, 38 } },
+                                      { 19, { 64, 67, 71, 69, 67 } }, { 16, { 48, 55, 60, 55, 48, 43 } } })
+        {
+            Junkyard j;
+            j.setCurrentProgram (preset);
+            std::vector<Ev> evs;
+            const bool slow = preset == 19;
+            double t = 0.2;
+            for (int n : notes) { evs.push_back ({ n, t, t + (slow ? 1.4 : 0.4), 96 }); t += slow ? 1.5 : 0.45; }
+            render (j, evs, t + 3.0, dir.getChildFile ("03 " + juce::File::createLegalFileName (j.getProgramName (preset)) + ".wav"));
+        }
+        for (int preset : { 0, 5, 3 })
+        {
+            Whistler w;
+            w.setCurrentProgram (preset);
+            // a little tune: legato phrases (overlapping notes glide), then a gap and a new phrase
+            const std::vector<std::tuple<int, double, double>> tune { { 67, 0.2, 0.75 }, { 72, 0.7, 1.25 }, { 74, 1.2, 1.75 }, { 76, 1.7, 2.6 },
+                                                                     { 74, 2.9, 3.35 }, { 72, 3.3, 3.75 }, { 69, 3.7, 4.2 }, { 67, 4.15, 5.2 },
+                                                                     { 72, 5.8, 6.6 }, { 79, 6.55, 7.6 } };
+            std::vector<Ev> evs;
+            for (auto [n, on, off] : tune) evs.push_back ({ n, on, off, 100 });
+            render (w, evs, 10.0, dir.getChildFile ("04 Whistler - " + juce::File::createLegalFileName (w.getProgramName (preset)) + ".wav"));
+        }
         return 0;
     }
     // dawtest --make-demo <file.wisproj>: builds a demo song (used for the README screenshots)
@@ -1421,6 +1526,162 @@ int main (int argc, char** argv)
             }
             check (bad.isEmpty(), juce::String (piano.getNumPrograms()) + " piano presets play cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
         }
+
+        // ---- Junkyard Percussion ----
+        std::cout << "Junkyard Percussion:" << std::endl;
+        {
+            Junkyard junk;
+            junk.setNonRealtime (true);
+            junk.setParam ("spaceMix", 0.0f);
+            juce::StringArray bad;
+            int sounding = 0;
+            for (int key = Junkyard::kitLow; key <= Junkyard::kitHigh; ++key)
+            {
+                if (Junkyard::kitKeyName (key).isEmpty()) continue;
+                auto out = play (junk, { { key, 0.8f, 0.02, 1.0 } }, 1.4);
+                const float pk = out.getMagnitude (0, out.getNumSamples());
+                if (! allFinite (out) || pk < 0.02f || pk > 1.0f) bad.add (Junkyard::kitKeyName (key) + " (peak " + juce::String (pk, 3) + ")");
+                else ++sounding;
+            }
+            check (bad.isEmpty(), juce::String (sounding) + " junk kit sounds play (finite, audible, not clipping)" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+
+            auto tail = play (junk, { { Junkyard::wind, 0.8f, 0.0, 0.5 }, { Junkyard::brakeDrum, 0.8f, 0.0, 0.1 }, { Junkyard::bowedBass, 0.8f, 0.0, 1.0 } }, 12.0);
+            check (junk.getActiveVoices() == 0 && rms (tail, (int) (11.0 * sr), (int) (12.0 * sr)) < 1.0e-4f,
+                   "Junkyard voices die away after their release (" + juce::String (junk.getActiveVoices()) + " left)");
+
+            // played as one instrument across the keyboard: in tune
+            const auto sources = Junkyard::sourceNames();
+            for (auto [name, note, hz] : { std::tuple<const char*, int, double> { "Marimba", 69, 440.0 }, { "Bowed Cello", 57, 220.0 },
+                                           { "Double Bass Pizzicato", 40, 82.41 }, { "Bowed Saw", 72, 523.25 } })
+            {
+                junk.setParam ("source", (float) sources.indexOf (name));
+                junk.setParam ("humanize", 0.0f);
+                auto out = play (junk, { { note, 0.8f, 0.02, 1.0 } }, 1.0);
+                const double f = pitchOf (out, (int) (0.4 * sr), (int) (0.12 * sr));
+                check (allFinite (out) && std::abs (f / hz - 1.0) < 0.03, juce::String (name) + " plays in tune (" + juce::String (f, 1) + " Hz, wanted " + juce::String (hz, 1) + ")");
+            }
+
+            juce::StringArray badPresets;
+            for (int pr = 0; pr < junk.getNumPrograms(); ++pr)
+            {
+                junk.setCurrentProgram (pr);
+                junk.waitUntilReady();
+                const bool kit = (int) junk.param ("source") == 0;
+                auto out = kit ? play (junk, { { Junkyard::snapFat, 0.8f, 0.02, 0.3 }, { Junkyard::brakeDrum, 0.8f, 0.3, 0.6 }, { Junkyard::wind, 0.8f, 0.1, 1.0 } }, 1.5)
+                               : play (junk, { { 48, 0.8f, 0.02, 0.8 }, { 60, 0.8f, 0.3, 0.9 }, { 67, 0.7f, 0.5, 1.0 } }, 1.5);
+                const float r = rms (out, 0, out.getNumSamples()), pk = out.getMagnitude (0, out.getNumSamples());
+                if (! allFinite (out) || r < 0.002f || pk > 1.2f)
+                    badPresets.add (junk.getProgramName (pr) + " (rms " + juce::String (juce::Decibels::gainToDecibels (r), 1) + " dB, peak " + juce::String (pk, 2) + ")");
+            }
+            check (badPresets.isEmpty(), juce::String (junk.getNumPrograms()) + " Junkyard presets play cleanly" + (badPresets.isEmpty() ? juce::String() : ": " + badPresets.joinIntoString (", ")));
+        }
+
+        // ---- Whistler ----
+        std::cout << "Whistler:" << std::endl;
+        {
+            Whistler w;
+            w.setCurrentProgram (w.getNumPrograms() - 1);   // dry
+            for (auto [id, v] : { std::pair<const char*, float> { "octave", 1.0f }, { "vibrato", 0.0f }, { "wobble", 0.0f }, { "scoop", 0.0f }, { "glide", 300.0f } })
+                w.setParam (id, v);
+            auto one = play (w, { { 69, 0.8f, 0.05, 1.0 } }, 1.2);
+            const double a4 = pitchOf (one, (int) (0.5 * sr), (int) (0.12 * sr));
+            check (allFinite (one) && rms (one, (int) (0.4 * sr), (int) (0.9 * sr)) > 0.01f && std::abs (a4 - 440.0) < 440.0 * 0.02,
+                   "Whistles A4 in tune (" + juce::String (a4, 1) + " Hz)");
+
+            // legato: it glides from one note to the next
+            auto g = play (w, { { 69, 0.8f, 0.05, 1.5 }, { 76, 0.8f, 0.6, 1.5 } }, 1.6);
+            const double before = pitchOf (g, (int) (0.45 * sr), (int) (0.1 * sr));
+            const double during = pitchOf (g, (int) (0.70 * sr), (int) (0.04 * sr));
+            const double after = pitchOf (g, (int) (1.1 * sr), (int) (0.12 * sr));
+            check (std::abs (before - 440.0) < 9.0 && std::abs (after - 659.26) < 13.0 && during > 455.0 && during < 640.0,
+                   "Glides between legato notes (" + juce::String (before, 0) + " -> " + juce::String (during, 0) + " -> " + juce::String (after, 0) + " Hz)");
+
+            // and still slides after a short gap
+            w.setParam ("fall", 0.0f);
+            auto gap = play (w, { { 69, 0.8f, 0.05, 0.5 }, { 76, 0.8f, 0.6, 1.2 } }, 1.9);
+            const double mid = pitchOf (gap, (int) (0.66 * sr), (int) (0.04 * sr));
+            check (mid > 445.0 && mid < 645.0, "...and slides on from the last note after a short gap (" + juce::String (mid, 0) + " Hz)");
+            check (rms (gap, (int) (1.8 * sr), (int) (1.9 * sr)) < 0.005f, "Stops when the keys come up");
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Junkyard loops and vocal chains:" << std::endl;
+    {
+        while (project.numTracks() > 0) project.removeTrack (project.track (0));   // start clean
+        auto jt = project.addTrack (kindInstrument, "Finger Snaps");
+        project.setInstrument (jt, builtinPresetRef ("junkyard", 2));
+        int notes = 0, empty = 0;
+        for (int i = 0; i < (int) junkLoops().size(); ++i)
+        {
+            auto c = insertJunkLoop (project, jt, i, 0.0, 8);
+            notes += c.v.getNumChildren();
+            if (c.v.getNumChildren() == 0) ++empty;
+        }
+        check (empty == 0 && notes > 300, juce::String ((int) junkLoops().size()) + " finger-snap / junk / sound-space loops write notes (" + juce::String (notes) + ")");
+
+        // MIDI loops follow the tempo: the first snap ("Snaps on 2 & 4") is on beat 2 at any tempo
+        jt.clips().removeAllChildren (nullptr);
+        insertJunkLoop (project, jt, 0, 0.0, 8);
+        engine.rebuildNow();
+        const double oldTempo = project.tempo();
+        bool follows = true;
+        juce::String got;
+        for (double bpm : { 100.0, 150.0 })
+        {
+            project.setTempo (bpm);
+            auto out = renderRange (engine, project, 0.0, 3.0);
+            const double t = firstSampleAbove (out, 0.01f) / sr, want = 60.0 / bpm;
+            got << juce::String (t, 3) << " s @ " << (int) bpm << "  ";
+            follows = follows && allFinite (out) && std::abs (t - want) < 0.02;
+        }
+        check (follows, "Snap loop follows the tempo (" + got.trim() + ")");
+        project.setTempo (oldTempo);
+        project.removeTrack (jt);
+        engine.rebuildNow();
+
+        // every vocal chain builds and runs a voice-like signal cleanly
+        juce::StringArray bad;
+        auto vt = project.addTrack (kindAudio, "Vocals");
+        for (int ci = 0; ci < (int) vocalChains().size(); ++ci)
+        {
+            applyVocalChain (project, vt, ci);
+            const auto& chain = vocalChains()[(size_t) ci];
+            if (vt.inserts().getNumChildren() != (int) chain.fx.size()) { bad.add (chain.name + " (inserts)"); continue; }
+            std::vector<std::unique_ptr<BuiltinProcessor>> procs;
+            for (auto& ref : vocalChainRefs (ci))
+            {
+                auto p = createBuiltin (ref.uid);
+                decodeState (*p, ref.state);
+                p->setPlayConfigDetails (2, 2, sr, block);
+                p->prepareToPlay (sr, block);
+                procs.push_back (std::move (p));
+            }
+            juce::Random rng (5);
+            float pk = 0.0f; double energy = 0.0;
+            bool finite = true;
+            for (int b = 0; b < (int) (1.5 * sr / block); ++b)
+            {
+                juce::AudioBuffer<float> buf (2, block);
+                for (int i = 0; i < block; ++i)
+                {
+                    const double t = (b * block + i) / sr;
+                    // a sung vowel: a 200 Hz buzz with a syllable envelope and some breath
+                    const float env = (float) (0.5 + 0.5 * std::sin (juce::MathConstants<double>::twoPi * 2.0 * t));
+                    const float x = env * (0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 200.0 * t)
+                                           + 0.1f * (float) std::sin (juce::MathConstants<double>::twoPi * 400.0 * t) + 0.02f * (rng.nextFloat() - 0.5f));
+                    buf.setSample (0, i, x); buf.setSample (1, i, x);
+                }
+                juce::MidiBuffer midi;
+                for (auto& p : procs) p->processBlock (buf, midi);
+                finite = finite && allFinite (buf);
+                pk = juce::jmax (pk, buf.getMagnitude (0, block));
+                if (b * block > (int) (0.5 * sr)) energy += (double) buf.getRMSLevel (0, 0, block);
+            }
+            if (! finite || pk > 4.0f || energy < 0.01) bad.add (chain.name + " (peak " + juce::String (pk, 2) + ")");
+        }
+        project.removeTrack (vt);
+        check (bad.isEmpty(), juce::String ((int) vocalChains().size()) + " vocal chains build and run cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
     }
 
     // -------------------------------------------------------------------------------------------

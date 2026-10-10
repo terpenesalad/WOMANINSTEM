@@ -70,6 +70,14 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.7
+
+- **Junkyard Percussion**: synthesized junk and body percussion in the spirit of *Swordfishtrombones* / *Bone Machine*: finger snaps, claps and slaps, crates, chairs, planks, log drums and bones, brake drums, pipes, an anvil, pot lids, oil drums, a jail-door clang, chains, double bass and cello (pizzicato, col legno, bowed), plus held sound-space textures (bowed saw, bowed metal, wind, rain on tin, creaks, cave drips, hum, thunder sheet, waterphone, gongs), all in a space you pick (new: concrete storeroom, tin shed, cave, stairwell). Play the whole kit, or one source chromatically across the keyboard.
+- **Finger-snap loops, junk grooves and 8-bar sound spaces** in Library → Drums. They're MIDI, so they follow the song's tempo.
+- **Whistler**: whistling that glides between legato notes, scoops into phrases, breathes and wobbles.
+- **Psych-pop bass**: a new *Bass: Psych Pop (rubbery DI)* amp, and *Is It True* / *Feels Like We Only Go Backwards* bass presets (Tame Impala-ish).
+- **Vocal sounds for your mic**: 25 vocal chains, from a clean studio vocal and folk rooms to 60s double tracking, phaser haze, demons, robots and extreme-metal screams. Pick one when you add a vocal track, or right-click a track → *Vocal Sound*.
+
 ### New in 3.6.1
 
 - **HomeKeys 20 Portable '81 rhythms**: the early-80s portable keyboard's rhythm section: 8 rhythms (March, Disco, Waltz, Rock, Tango, Swing, Rhumba, Samba) with Variation I / II, a fill every 8 bars, and its simple analogue drum sound. New presets put the dream organ on top of it.
@@ -268,10 +276,11 @@ Source/
   Engine/       real-time audio callback, stem player (loop, time-stretch), recorder, scope feed
   Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
   Daw/
-    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, MIDI files, tempo detection
+    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
     Plugins/    built-in effects, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
-    Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer)
+    Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer),
+                 Junkyard Percussion (modal / string / noise synthesis), Whistler
   UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays
     Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors

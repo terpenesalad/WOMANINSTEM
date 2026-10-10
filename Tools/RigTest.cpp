@@ -182,8 +182,9 @@ int main (int argc, char** argv)
         check (hi.magnitudeAt (80, 192000.0) > lo.magnitudeAt (80, 192000.0) * 1.5, "Bass knob works (" + juce::String (juce::Decibels::gainToDecibels (hi.magnitudeAt (80, 192000.0) / lo.magnitudeAt (80, 192000.0)), 1) + " dB at 80 Hz)");
     }
 
-    for (int m = 0; m < (int) AmpType::namCapture; ++m)
+    for (int m = 0; m < (int) AmpType::count; ++m)
     {
+        if (m == (int) AmpType::flatDi || m == (int) AmpType::namCapture) continue;
         if (calibrate)
         {
             BuiltInAmp amp;

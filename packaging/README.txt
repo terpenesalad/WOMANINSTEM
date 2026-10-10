@@ -36,9 +36,12 @@ Studio quick start
    Ctrl+K (Musical Typing) and use A S D F G H J K L (white keys) / W E T Y U O P (black keys).
 2. "+ Track": Drummer (a kit plus 8 bars of groove), Software Instrument (piano, keys,
    strings, synths...), HomeKeys 20 (80s keyboard with a 20-rhythm rhythm box), Vintage Rhythm
-   Box, Sampler, Drum Pads, Loop Station, Beat Lab (groovebox), Audio: Guitar or Bass (records through Amp & Pedals),
-   Microphone, and Aux Buses (a shared reverb or delay your tracks send to).
-3. Library (left): Sounds = instruments and drum kits, Drums = 18 grooves + 20 vintage rhythms,
+   Box, Sampler, Drum Pads, Loop Station, Beat Lab (groovebox), Junkyard Percussion (junk, finger
+   snaps, bowed strings, sound spaces), Whistler, Audio: Guitar or Bass (records through Amp & Pedals),
+   Microphone / Vocals (pick a vocal sound: studio, folk, psych, weird...), and Aux Buses (a shared
+   reverb or delay your tracks send to). Right-click an audio track > Vocal Sound to change it.
+3. Library (left): Sounds = instruments and drum kits, Drums = finger-snap loops, junkyard grooves,
+   8-bar sound spaces, 18 grooves + 20 vintage rhythms (all MIDI: they follow the tempo),
    Loops = chords / bass lines / arpeggios in your song's key, FX = effects and MIDI effects,
    Songs = your split songs. Double-click an item, or drag it onto a track.
 4. Arm a track (R button on the track), press R to record (1 bar count-in), Space to stop.

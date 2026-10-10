@@ -1,6 +1,7 @@
 #include "PianoRoll.h"
 #include "Daw/Model/TempoDetect.h"
 #include "Daw/Instruments/InstrumentRefs.h"
+#include "Daw/Instruments/Junkyard.h"
 
 namespace wis::daw
 {
@@ -401,7 +402,7 @@ public:
             if (y > getHeight() || y + r.rowH < headerHeight) continue;
             if (r.drumMode)
             {
-                const auto name = gmDrumName (p);
+                const auto name = r.junkMode ? Junkyard::kitKeyName (p) : gmDrumName (p);
                 g.setColour (name.isNotEmpty() ? juce::Colour (0xff1d212a) : juce::Colour (0xff15181e));
                 g.fillRect (0.0f, y, (float) getWidth(), r.rowH - 0.5f);
                 g.setColour (name.isNotEmpty() ? theme::text : theme::textFaint);
@@ -609,6 +610,14 @@ void PianoRoll::setClip (int clipId)
         if (inst.isValid() && inst[ids::uid].toString() == "soundfont" && inst[ids::name].toString().containsIgnoreCase ("drum"))
             drumMode = true;
         if (t.name().containsIgnoreCase ("drum")) drumMode = true;
+        junkMode = false;
+        if (inst.isValid() && inst[ids::uid].toString() == "junkyard")
+        {
+            junkMode = true;
+            if (auto* p = dynamic_cast<BuiltinProcessor*> (ctx.engine.getProcessor (inst[ids::id].toString())))
+                junkMode = (int) p->param ("source") == 0;
+            drumMode = drumMode || junkMode;
+        }
         title.setText (t.name() + "  -  " + clip[ids::name].toString(), juce::dontSendNotification);
         scrollBeats = -0.25;
         ppb = juce::jlimit (20.0, 400.0, (getWidth() - 200) / juce::jmax (4.0, (double) clip[ids::length] + 0.5));

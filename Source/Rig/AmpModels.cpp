@@ -29,12 +29,12 @@ juce::StringArray ampTypeNames()
 {
     return { "American Clean", "Tweed Breakup", "British Chime", "British Crunch", "British Lead", "Modern High Gain", "Smooth Overdrive",
              "Bass: 60s British Valve", "Bass: Classic Tube 8x10", "Bass: Vintage Flip-Top", "Bass: Modern Growl", "Bass: Studio DI",
-             "Flat / DI", "NAM Capture" };
+             "Flat / DI", "NAM Capture", "Bass: Psych Pop (rubbery DI)" };
 }
 
 bool ampTypeIsBass (AmpType t)
 {
-    return t >= AmpType::bassSixties && t <= AmpType::bassStudioDi;
+    return (t >= AmpType::bassSixties && t <= AmpType::bassStudioDi) || t == AmpType::bassPsychPop;
 }
 
 int migrateAmpTypeV1 (int old)
@@ -191,6 +191,15 @@ BuiltInAmp::Model BuiltInAmp::modelFor (AmpType t)
             m.powerDrive = 1.0f; m.sag = 0.05f; m.nfb = 0.9f; m.resonanceHz = 50;
             m.voiceLowDb = 1.0f; m.voiceLowHz = 80; m.voiceHighDb = 1.5f; m.voiceHighHz = 6000;
             break;
+        case AmpType::bassPsychPop:
+            // a DI'd violin bass into a hot valve channel: thick even harmonics, lots of bloom (it compresses itself),
+            // a tight low end, the mids pushed up into a round honk around 700 Hz and the fizz rolled off
+            m.stages = 2; m.minGainDb = 0; m.maxGainDb = 34; m.inputHpHz = 35; m.brightDb = 0; m.bias = 0.3f; m.bloom = 0.6f; m.stageLpHz = 4200;
+            m.stack = 5; m.stackAfter = 2; m.activeBassHz = 80; m.activeMidHz = 700; m.activeMidQ = 0.9f; m.activeTrebleHz = 2500; m.activeRangeDb = 12;
+            m.powerDrive = 1.4f; m.sag = 0.35f; m.asym = 0.2f; m.nfb = 0.5f; m.resonanceHz = 75;
+            m.voiceLowDb = 2.0f; m.voiceLowHz = 85; m.voiceMidDb = 4.0f; m.voiceMidHz = 720; m.voiceMidQ = 0.9f; m.voiceHighDb = -6.0f; m.voiceHighHz = 2800;
+            m.cleanBlendHz = 120; m.cleanBlendDb = 3;
+            break;
         case AmpType::flatDi:
         case AmpType::namCapture:
         case AmpType::count:
@@ -215,6 +224,7 @@ BuiltInAmp::Model BuiltInAmp::modelFor (AmpType t)
             case AmpType::bassFlipTop:     return 1.8f;
             case AmpType::bassModernGrowl: return 1.0f;
             case AmpType::bassStudioDi:    return 5.8f;
+            case AmpType::bassPsychPop:    return 7.0f;
             default:                       return 4.7f;
         }
     }();

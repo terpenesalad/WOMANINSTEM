@@ -5,6 +5,9 @@
 #include "StudioPage.h"
 #include "PluginMenus.h"
 #include "Daw/Model/DrumPatterns.h"
+#include "Daw/Model/JunkLoops.h"
+#include "Daw/Model/VocalChains.h"
+#include "Daw/Instruments/Junkyard.h"
 #include "Daw/Model/TempoDetect.h"
 #include "Daw/Engine/AudioCache.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
@@ -433,7 +436,17 @@ void StudioPage::addTrackMenu()
     m.addItem (1, "Software Instrument  (Sound Library: keys, strings, synths...)");
     m.addItem (2, "Drummer  (drum kit + 8 bars of groove)");
     m.addItem (3, "Audio: Guitar or Bass  (with Amp & Pedals)");
-    m.addItem (4, "Audio: Microphone / Vocals");
+    {
+        juce::PopupMenu vocals;
+        juce::String lastGroup;
+        const auto& chains = vocalChains();
+        for (int i = 0; i < (int) chains.size(); ++i)
+        {
+            if (chains[(size_t) i].group != lastGroup) { vocals.addSectionHeader (chains[(size_t) i].group); lastGroup = chains[(size_t) i].group; }
+            vocals.addItem (100 + i, chains[(size_t) i].name);
+        }
+        m.addSubMenu ("Audio: Microphone / Vocals  (pick a vocal sound: studio, folk, psych, weird...)", vocals);
+    }
     m.addItem (5, "Audio: Line in / Other");
     m.addItem (6, "Studio Synth");
     m.addItem (7, "HomeKeys 20  (80s keyboard with rhythm box + auto accompaniment)");
@@ -442,6 +455,8 @@ void StudioPage::addTrackMenu()
     m.addItem (10, "Drum Pads  (16 pads for your own samples)");
     m.addItem (11, "Audio: Loop Station  (looper pedal on your input)");
     m.addItem (15, "Beat Lab  (groovebox: beats, loops, samples, glitch)");
+    m.addItem (19, "Junkyard Percussion  (junk, finger snaps, bowed strings, sound spaces)");
+    m.addItem (20, "Whistler  (whistling that glides between notes)");
     m.addItem (18, "Plugin from a File...  (a .dll / .vst3 / .clap you downloaded, old 32-bit VSTs too)");
     m.addSeparator();
     m.addItem (12, "Aux Bus: Reverb  (shared reverb you send tracks to)");
@@ -454,6 +469,16 @@ void StudioPage::addTrackMenu()
         const int insertAt = [&] { auto t = project.trackById (ctx.selectedTrack); return t.isValid() ? project.tracks().indexOf (t.v) + 1 : -1; }();
         ctx.beginEdit ("New track");
         Track t;
+        if (r >= 100 && r < 100 + (int) vocalChains().size())
+        {
+            t = project.addTrack (kindAudio, "Vocals", insertAt);
+            applyVocalChain (project, t, r - 100);
+            t.v.setProperty (ids::arm, true, nullptr);
+            ctx.selectTrack (t.id());
+            setStatus ("Vocals (" + vocalChains()[(size_t) (r - 100)].name + "): choose your mic input in the track menu (right-click the track), "
+                       "then press R to record. Change the sound any time: right-click > Vocal Sound.");
+            return;
+        }
         switch (r)
         {
             case 1: t = project.addTrack (kindInstrument, "Grand Piano", insertAt); project.setInstrument (t, soundFontRef (0, 0)); break;
@@ -474,11 +499,16 @@ void StudioPage::addTrackMenu()
                 break;
             case 4:
                 t = project.addTrack (kindAudio, "Vocals", insertAt);
-                project.setPlugin (t.inserts(), -1, builtinRef ("eq"));
-                project.setPlugin (t.inserts(), -1, builtinRef ("compressor"));
-                project.setPlugin (t.inserts(), -1, builtinRef ("reverb"));
+                applyVocalChain (project, t, defaultVocalChain);
                 t.v.setProperty (ids::arm, true, nullptr);
                 break;
+            case 19:
+            {
+                t = project.addTrack (kindInstrument, "Junkyard", insertAt);
+                project.setInstrument (t, builtinPresetRef ("junkyard", 0));
+                break;
+            }
+            case 20: t = project.addTrack (kindInstrument, "Whistler", insertAt); project.setInstrument (t, builtinPresetRef ("whistle", 0)); break;
             case 5: t = project.addTrack (kindAudio, "Audio", insertAt); t.v.setProperty (ids::arm, true, nullptr); break;
             case 6: t = project.addTrack (kindInstrument, "Synth", insertAt); project.setInstrument (t, synthRef (1)); break;
             case 7: t = project.addTrack (kindInstrument, "HomeKeys 20", insertAt); project.setInstrument (t, builtinPresetRef ("homekeys", 0)); break;
@@ -526,6 +556,15 @@ void StudioPage::addTrackMenu()
             openPluginWindow (t.instrument());
             setStatus ("Beat Lab: press Play in it (or play the song), click steps to make a beat, drop loops and samples onto lanes.");
         }
+        else if (r == 19)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.instrument());
+            setStatus ("Junkyard: every key is a different thing (snaps and slaps low, wood, metal, then sound-space textures high up). "
+                       "Library > Drums has finger-snap loops, junk grooves and sound spaces for it.");
+        }
+        else if (r == 20)
+            setStatus ("Whistler: play legato (hold one key while pressing the next) and it glides between the notes.");
         else if (r >= 12)
             setStatus ("Bus added. Send tracks to it from the mixer (+ Send) or route a track's output into it.");
         else if (r == 11)
@@ -595,6 +634,15 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
             inputs.addItem (300 + i, names[i] + " + " + names[i + 1] + " (stereo)", true, (int) t.v[ids::input] == i && (bool) t.v[ids::inputStereo]);
         m.addSubMenu ("Input", inputs);
         m.addItem (5, "Input Monitoring", true, (bool) t.v[ids::monitor]);
+        juce::PopupMenu vocals;
+        juce::String lastGroup;
+        const auto& chains = vocalChains();
+        for (int i = 0; i < (int) chains.size(); ++i)
+        {
+            if (chains[(size_t) i].group != lastGroup) { vocals.addSectionHeader (chains[(size_t) i].group); lastGroup = chains[(size_t) i].group; }
+            vocals.addItem (500 + i, chains[(size_t) i].name);
+        }
+        m.addSubMenu ("Vocal Sound (replaces this track's effects)", vocals);
     }
     m.addSeparator();
     m.addItem (9, "Delete Track");
@@ -630,6 +678,14 @@ void StudioPage::trackMenu (int trackId, juce::Point<int> screenPos)
         else if (r >= 100 && r < 112) { ctx.beginEdit ("Colour"); tr.v.setProperty (ids::colour, (juce::int64) trackColourForIndex (r - 100).getARGB(), project.um()); }
         else if (r >= 200 && r < 300) { tr.v.setProperty (ids::input, r - 200, nullptr); tr.v.setProperty (ids::inputStereo, false, nullptr); }
         else if (r >= 300 && r < 400) { tr.v.setProperty (ids::input, r - 300, nullptr); tr.v.setProperty (ids::inputStereo, true, nullptr); }
+        else if (r >= 500 && r < 500 + (int) vocalChains().size())
+        {
+            engine.flushPluginStates();
+            ctx.beginEdit ("Vocal sound");
+            applyVocalChain (project, tr, r - 500);
+            engine.rebuildNow();
+            setStatus (tr.name() + ": " + vocalChains()[(size_t) (r - 500)].name + " - " + vocalChains()[(size_t) (r - 500)].description + ".");
+        }
         else if (auto it = fxRefs.find (r); it != fxRefs.end())
         {
             ctx.beginEdit ("Add effect");
@@ -793,7 +849,7 @@ void StudioPage::applyBrowserItem (const juce::String& item, int trackId, double
         if (t.clips().getNumChildren() == 0) t.v.setProperty (ids::name, trackName, project.um());
         ctx.selectTrack (t.id());
         engine.rebuildNow();
-        if (id == "sampler" || id == "drumpads" || id == "homekeys" || id == "beatlab" || id == "piano") openPluginWindow (t.instrument());
+        if (id == "sampler" || id == "drumpads" || id == "homekeys" || id == "beatlab" || id == "piano" || id == "junkyard") openPluginWindow (t.instrument());
         setStatus (id == "sampler" ? juce::String ("Sampler ready: drop an audio file onto it, then play it from your keyboard.")
                  : id == "homekeys" ? juce::String ("HomeKeys 20 ready: play along with its rhythm box (press play), or turn on Auto Accompaniment.")
                  : id == "beatlab" ? juce::String ("Beat Lab ready: press Play in it (or play the song), click steps, drop loops onto lanes.")
@@ -852,6 +908,63 @@ void StudioPage::applyBrowserItem (const juce::String& item, int trackId, double
         ctx.selectTrack (t.id());
         ctx.selectClip (c.id(), false);
         setStatus ("Added " + describeProgression (project, prog) + " (" + st.name + "). Double-click the clip to edit the notes.");
+    }
+    else if (kind == "junk")
+    {
+        const int index = rest.getIntValue();
+        const auto& loops = junkLoops();
+        if (! juce::isPositiveAndBelow (index, (int) loops.size())) return;
+        const auto& loop = loops[(size_t) index];
+        // a Junkyard track playing its kit (not one of its single-instrument sources)
+        auto isKit = [this] (const Track& tr)
+        {
+            if (! tr.isValid() || ! tr.isInstrument() || tr.instrument()[ids::uid].toString() != "junkyard") return false;
+            if (auto* p = dynamic_cast<BuiltinProcessor*> (engine.getProcessor (tr.instrument()[ids::id].toString())))
+                return (int) p->param ("source") == 0;
+            return true;
+        };
+        ctx.beginEdit ("Add " + loop.group);
+        auto t = project.trackById (trackId);
+        const bool space = ! loop.events.empty();
+        if (! isKit (t) || (space && t.clips().getNumChildren() > 0 && ! t.name().containsIgnoreCase ("space")))
+        {
+            // sound spaces get a track (and a room) of their own; loops reuse a free kit track
+            t = Track();
+            if (! space)
+                for (auto tv : project.tracks()) if (isKit (Track (tv)) && ! Track (tv).name().containsIgnoreCase ("space")) { t = Track (tv); break; }
+        }
+        if (! t.isValid())
+        {
+            const auto sel = project.trackById (trackId);
+            const int insertAt = sel.isValid() ? project.tracks().indexOf (sel.v) + 1 : -1;
+            const auto name = space ? juce::String ("Sound Space") : loop.group == "Finger Snaps" ? juce::String ("Finger Snaps") : juce::String ("Junkyard");
+            t = project.addTrack (kindInstrument, name, insertAt);
+            project.setInstrument (t, builtinPresetRef ("junkyard", loop.preset));
+        }
+        const double bpb = project.beatsPerBar();
+        auto c = insertJunkLoop (project, t, index, std::floor (beat / bpb) * bpb, 8);
+        ctx.selectTrack (t.id());
+        ctx.selectClip (c.id(), false);
+        setStatus (space ? "Added the \"" + loop.name + "\" sound space (8 bars). Stretch or loop the clip; edit the notes to move things around."
+                         : "Added 8 bars of " + loop.name + ". It's MIDI, so it follows the song's tempo (it feels good around "
+                           + juce::String ((int) loop.suggestedTempo) + " BPM).");
+    }
+    else if (kind == "vchain")
+    {
+        const int index = rest.getIntValue();
+        if (! juce::isPositiveAndBelow (index, (int) vocalChains().size())) return;
+        auto t = project.trackById (trackId != 0 ? trackId : ctx.selectedTrack);
+        engine.flushPluginStates();
+        ctx.beginEdit ("Vocal sound");
+        if (! t.isValid() || ! t.isAudio())
+        {
+            t = project.addTrack (kindAudio, "Vocals");
+            t.v.setProperty (ids::arm, true, nullptr);
+        }
+        applyVocalChain (project, t, index);
+        engine.rebuildNow();
+        ctx.selectTrack (t.id());
+        setStatus (t.name() + ": " + vocalChains()[(size_t) index].name + " - " + vocalChains()[(size_t) index].description + ".");
     }
     else if (kind == "pattern")
     {
@@ -1185,7 +1298,7 @@ void StudioPage::newProject()
                 addInst ("Bass", soundFontRef (0, 33));
                 auto d = addInst ("Drums", kit);
                 insertDrumPattern (project, d, 4, 0.0, 8, true);
-                addAudio ("Vocals", { "eq", "compressor", "reverb" });
+                { auto v = project.addTrack (kindAudio, "Vocals"); applyVocalChain (project, v, defaultVocalChain); }
             }
             else if (tmpl == 2)
             {

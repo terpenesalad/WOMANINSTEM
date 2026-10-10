@@ -26,6 +26,9 @@ enum class AmpType : int
     // utility
     flatDi,              // no amp colour: tone controls only
     namCapture,          // use the loaded .nam model
+    // 3.7 (appended: saved presets keep their indices)
+    bassPsychPop,        // psych-pop bass: a 60s hollow-body DI'd into a cooking valve preamp and squashed flat,
+                         // mids pushed into a round, rubbery honk, top rolled off (Tame Impala-ish)
     count
 };
 

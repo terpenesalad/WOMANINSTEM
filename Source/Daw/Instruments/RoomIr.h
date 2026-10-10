@@ -13,7 +13,9 @@ namespace roomir
     enum Space
     {
         dry = 0, vocalBooth, livingRoom, woodenStudio, bigLiveRoom, barClub, bathroom, concertHall,
-        church, cathedral, forest, canyon, carPark, plate, spring, numSpaces
+        church, cathedral, forest, canyon, carPark, plate, spring,
+        concreteRoom, tinShed, cave, stairwell,   // 3.7
+        numSpaces
     };
 
     juce::StringArray spaceNames();
