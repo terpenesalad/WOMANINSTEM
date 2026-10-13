@@ -174,7 +174,11 @@ jobs:
           build\dawtest_artefacts\Release\dawtest.exe 2>&1 | Tee-Object -FilePath dawtest.log
           $code = $LASTEXITCODE
           $msg = ((Get-Content dawtest.log) -replace '%','%25') -join '%0A'
-          if ($code -ne 0) { Write-Host "::error title=dawtest failed::$msg"; exit 1 }
+          if ($code -ne 0) {
+            # annotations are cut at 4 KB: lead with the failures and the summary
+            $fails = ((Select-String -Path dawtest.log -Pattern 'FAIL' | ForEach-Object { $_.Line }) -replace '%','%25') -join '%0A'
+            Write-Host "::error title=dawtest failed::$fails%0A%0A$msg"; exit 1
+          }
           Write-Host "::notice title=dawtest (Windows)::$msg"
 
       - name: Test - every plugin editor opens and paints
@@ -325,7 +329,7 @@ jobs:
       - name: Test - Studio (DAW engine, instruments, effects, recording, export)
         run: |
           set -o pipefail
-          WIS_SOUNDFONT=$PWD/sounds/GeneralUser-GS.sf2 WIS_PIANOS=$PWD/pianos ./build/dawtest_artefacts/Release/dawtest 2>&1 | tee dawtest.log || { echo "::error title=dawtest failed::$(sed 's/%/%25/g' dawtest.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+          WIS_SOUNDFONT=$PWD/sounds/GeneralUser-GS.sf2 WIS_PIANOS=$PWD/pianos ./build/dawtest_artefacts/Release/dawtest 2>&1 | tee dawtest.log || { echo "::error title=dawtest failed::$( (grep FAIL dawtest.log; echo; cat dawtest.log) | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
 
       - name: Test - every plugin editor opens and paints
         timeout-minutes: 5

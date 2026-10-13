@@ -549,9 +549,10 @@ void EchoDeck::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
 }
 
 // ---- tap tempo ---------------------------------------------------------------------------------------------------
-void EchoDeck::tap()
+void EchoDeck::tap() { tapAt (juce::Time::getMillisecondCounterHiRes()); }
+
+void EchoDeck::tapAt (double now)
 {
-    const double now = juce::Time::getMillisecondCounterHiRes();
     if (! taps.empty() && now - taps.back() > 2000.0) taps.clear();
     taps.push_back (now);
     if (taps.size() > 5) taps.erase (taps.begin());

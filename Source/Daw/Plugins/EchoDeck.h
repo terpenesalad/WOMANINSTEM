@@ -47,6 +47,8 @@ public:
 
     /** Tap tempo (message thread). In ms mode a tap sets the time; otherwise it sets the tapped tempo. */
     void tap();
+    /** The same with the tap's time given (ms on any steady clock): used by tap() and the tests. */
+    void tapAt (double ms);
 
     // read by the editor
     float getInputLevel() const   { return inLevel.load(); }

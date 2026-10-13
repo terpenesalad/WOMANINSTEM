@@ -1942,13 +1942,14 @@ int main (int argc, char** argv)
         {
             EchoDeck e;
             e.setParam ("timeMode", (float) EchoDeck::dotted);
-            e.tap(); juce::Thread::sleep (400); e.tap(); juce::Thread::sleep (400); e.tap();
+            e.tapAt (1000.0); e.tapAt (1400.0); e.tapAt (1800.0);
             const float bpm = e.param ("tapBpm");
-            check (bpm > 135.0f && bpm < 165.0f && e.param ("tempoSrc") > 0.5f, "Tap tempo: taps 400 ms apart = " + juce::String (bpm, 1) + " BPM, notes follow the tap");
+            check (std::abs (bpm - 150.0f) < 0.5f && e.param ("tempoSrc") > 0.5f, "Tap tempo: taps 400 ms apart = " + juce::String (bpm, 1) + " BPM, notes follow the tap");
             EchoDeck e2;
             e2.setParam ("timeMode", (float) EchoDeck::milliseconds);
-            e2.tap(); juce::Thread::sleep (300); e2.tap();
-            check (std::abs (e2.param ("timeMs") - 300.0f) < 40.0f, "Tap in ms mode sets the echo time (" + juce::String (e2.param ("timeMs"), 0) + " ms)");
+            e2.tapAt (5000.0); e2.tapAt (5300.0);
+            e2.tapAt (9000.0); e2.tapAt (9310.0);    // a pause over 2 s starts a new count
+            check (std::abs (e2.param ("timeMs") - 310.0f) < 1.0f, "Tap in ms mode sets the echo time (" + juce::String (e2.param ("timeMs"), 0) + " ms)");
         }
         {
             // all presets load and run; the state round-trips
