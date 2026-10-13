@@ -70,6 +70,12 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.8
+
+- **Echo Deck**: an analog-style echo processor with its own front panel (spinning reels, VU meter, amber displays). Ten echo machines (studio tape, tape echo unit, valve tape, worn tape, cassette, bucket brigade, oil can, early digital, clean digital, lo-fi radio) whose repeats darken, saturate and wobble as they go round; times in ms or notes (straight / dotted / triplet) from the song tempo or tap tempo; single, dual, ping-pong and 8-step rhythm modes; groove, feel, wobble, diffusion, width, ducking, hold, and feedback past 100%. 28 presets. Also on the Play Along pedalboard.
+
+![Echo Deck](docs/echo-deck.png)
+
 ### New in 3.7
 
 - **Junkyard Percussion**: synthesized junk and body percussion in the spirit of *Swordfishtrombones* / *Bone Machine*: finger snaps, claps and slaps, crates, chairs, planks, log drums and bones, brake drums, pipes, an anvil, pot lids, oil drums, a jail-door clang, chains, double bass and cello (pizzicato, col legno, bowed), plus held sound-space textures (bowed saw, bowed metal, wind, rain on tin, creaks, cave drips, hum, thunder sheet, waterphone, gongs), all in a space you pick (new: concrete storeroom, tin shed, cave, stairwell). Play the whole kit, or one source chromatically across the keyboard.
@@ -165,12 +171,12 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 **Mixing**
 - Mixer with channel strips: MIDI effects, instrument slot, unlimited **insert effects** (with bypass), **sends**, pan, fader, peak meters, mute / solo / record-arm, **output routing**, plus master inserts and master fader.
-- **Aux buses**: *+ Send* on a channel creates a Reverb / Delay / Shimmer bus in one click; sends are pre- or post-fader. Route tracks' outputs into a **group bus** to control them together. Feedback loops are refused.
+- **Aux buses**: *+ Send* on a channel creates a Reverb / Delay / Shimmer / Tape Echo bus in one click; sends are pre- or post-fader. Route tracks' outputs into a **group bus** to control them together. Feedback loops are refused.
 - **Side-chain**: right-click the Compressor, Noise Gate or Vocoder (or a plugin with a side-chain input) and pick the key track. Muted tracks still work as triggers.
 - **Plugin delay compensation**: every track, send and bus is lined up sample-accurately, whatever latency its plugins add.
-- 25 built-in effects with presets:
+- 26 built-in effects with presets:
   - *Dynamics & EQ*: **Channel EQ** (6 bands with a live curve), **Compressor**, **Limiter**, **Noise Gate**, **De-Esser**, **Auto Filter** (synced LFO wobbles, envelope wah, random steps).
-  - *Space*: **Reverb**, **Delay** (tempo-sync, ping-pong), **Shimmer Reverb** (octaves in the tail).
+  - *Space*: **Reverb**, **Delay** (tempo-sync, ping-pong), **Echo Deck** (analog echo processor: tape, valve, bucket-brigade, oil-can and digital machines, dual / ping-pong / rhythm modes, tap tempo, groove, hold), **Shimmer Reverb** (octaves in the tail).
   - *Modulation*: **Chorus**, **Phaser**, **Flanger**, **Tremolo / Auto-pan**, **Ring Modulator**, **Stereo Width**.
   - *Vocal & pitch*: **Vocal Tune** (pitch correction to the song key, retune speed from natural to robotic, live pitch graph, latency compensated), **Vocoder**, **Pitch Shifter / Harmonizer**.
   - *Lo-fi & experimental*: **Tape Warble** (wow, flutter, saturation, hiss, dropouts), **Bitcrusher**, **Saturator**, **Grain Cloud** (granular), **Beat Repeat** (synced stutters and rolls), **Loop Station** (looper pedal: record, overdub, undo/redo, half speed, reverse, start on the bar, put the loop on the track).
@@ -278,7 +284,7 @@ Source/
   Daw/
     Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
-    Plugins/    built-in effects, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
+    Plugins/    built-in effects, Echo Deck, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
     Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer),
                  Junkyard Percussion (modal / string / noise synthesis), Whistler
   UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays

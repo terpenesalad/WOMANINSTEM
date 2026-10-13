@@ -42,6 +42,7 @@ static void addBusChoices (StudioContext& ctx, juce::PopupMenu& m, const Track& 
         m.addItem (3, "New Reverb Bus");
         m.addItem (4, "New Delay Bus");
         m.addItem (5, "New Shimmer Bus");
+        m.addItem (7, "New Tape Echo Bus (Echo Deck)");
         m.addItem (6, "New Empty Bus");
     }
 }
@@ -55,6 +56,7 @@ static int resolveBusChoice (StudioContext& ctx, int r)
         case 4: return makeAuxBus (ctx, "Delay Bus", "delay").id();
         case 5: return makeAuxBus (ctx, "Shimmer Bus", "shimmer").id();
         case 6: return makeAuxBus (ctx, "Aux Bus", nullptr).id();
+        case 7: return makeAuxBus (ctx, "Tape Echo Bus", "echodeck").id();
         default: return r >= 1000 ? r - 1000 : 0;
     }
 }

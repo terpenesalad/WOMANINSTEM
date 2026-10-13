@@ -26,6 +26,7 @@
 #include "Daw/Instruments/Whistler.h"
 #include "Daw/Model/JunkLoops.h"
 #include "Daw/Model/VocalChains.h"
+#include "Daw/Plugins/EchoDeck.h"
 #include <iostream>
 
 using namespace wis::daw;
@@ -142,6 +143,46 @@ static juce::ValueTree addPoint (juce::ValueTree lane, double beat, double value
     return pt;
 }
 
+/** Runs a stereo buffer through an Echo Deck (256-sample blocks); `during` is called before each block. */
+static juce::AudioBuffer<float> runEcho (EchoDeck& e, const juce::AudioBuffer<float>& in, std::function<void (int)> during = {})
+{
+    e.setPlayConfigDetails (2, 2, sr, block);
+    e.prepareToPlay (sr, block);
+    juce::AudioBuffer<float> out (in);
+    juce::MidiBuffer m;
+    for (int pos = 0; pos < out.getNumSamples(); pos += block)
+    {
+        const int len = juce::jmin (block, out.getNumSamples() - pos);
+        if (during) during (pos);
+        juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, len);
+        e.processBlock (view, m);
+    }
+    return out;
+}
+
+/** A "plucked" test note: a decaying 330 Hz tone with a soft attack, from `at` seconds. */
+static juce::AudioBuffer<float> pluck (double seconds, double at, double hz = 330.0, float level = 0.5f)
+{
+    juce::AudioBuffer<float> b (2, (int) (seconds * sr));
+    b.clear();
+    for (int i = (int) (at * sr), k = 0; i < b.getNumSamples() && k < (int) (0.6 * sr); ++i, ++k)
+    {
+        const double t = k / sr;
+        const float v = level * (float) (std::sin (juce::MathConstants<double>::twoPi * hz * t) * std::exp (-t * 7.0)
+                                        * juce::jmin (1.0, t / 0.003)
+                                        + 0.3 * std::sin (juce::MathConstants<double>::twoPi * hz * 2.01 * t) * std::exp (-t * 12.0));
+        b.setSample (0, i, v); b.setSample (1, i, v);
+    }
+    return b;
+}
+
+static int peakIndexCh (const juce::AudioBuffer<float>& b, int ch, int from, int to)
+{
+    int best = -1; float bv = 0.0f;
+    for (int i = juce::jmax (0, from); i < juce::jmin (to, b.getNumSamples()); ++i) { const float v = std::abs (b.getSample (ch, i)); if (v > bv) { bv = v; best = i; } }
+    return best;
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
@@ -220,6 +261,41 @@ int main (int argc, char** argv)
                   << "  rms " << juce::Decibels::gainToDecibels (out.getRMSLevel (0, 0, total)) << " dB" << std::endl;
         return 0;
     }
+    // dawtest --render-echodeck <folder>: a phrase through every Echo Deck preset (for listening)
+    if (argc > 2 && juce::String (argv[1]) == "--render-echodeck")
+    {
+        juce::ScopedJuceInitialiser_GUI init;
+        const juce::File dir { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        dir.createDirectory();
+        // a little phrase at 120 BPM: E, G, A, then B held, a rest, so the echoes are heard
+        juce::AudioBuffer<float> phrase (2, (int) (9.0 * sr));
+        phrase.clear();
+        const double notes[][2] = { { 0.0, 329.6 }, { 0.5, 392.0 }, { 0.75, 440.0 }, { 1.5, 493.9 }, { 3.0, 392.0 }, { 3.25, 329.6 } };
+        for (auto& n : notes)
+        {
+            auto p = pluck (9.0, n[0] + 0.2, n[1]);
+            for (int ch = 0; ch < 2; ++ch) phrase.addFrom (ch, 0, p, ch, 0, p.getNumSamples());
+        }
+        EchoDeck probe;
+        const auto names = probe.getProgramNames();
+        for (int i = 0; i < names.size(); ++i)
+        {
+            EchoDeck e;
+            e.setCurrentProgram (i);
+            auto out = runEcho (e, phrase);
+            const float pk = out.getMagnitude (0, out.getNumSamples());
+            if (pk > 0.98f) out.applyGain (0.98f / pk);
+            const auto f = dir.getChildFile (juce::String (i + 1).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (names[i]) + ".wav");
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+            auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (24);
+            if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
+                w->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+            std::cout << f.getFullPathName() << std::endl;
+        }
+        return 0;
+    }
+
     // dawtest --render-junkyard <folder>: Junkyard Percussion, its loops and sound spaces, and the Whistler (for listening)
     if (argc > 2 && juce::String (argv[1]) == "--render-junkyard")
     {
@@ -1682,6 +1758,241 @@ int main (int argc, char** argv)
         }
         project.removeTrack (vt);
         check (bad.isEmpty(), juce::String ((int) vocalChains().size()) + " vocal chains build and run cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Echo Deck:" << std::endl;
+    {
+        auto clean = [] (EchoDeck& e)
+        {
+            e.setParam ("style", 8.0f);          // Clean Digital
+            e.setParam ("wobble", 0.0f);
+            e.setParam ("lowCut", 20.0f);
+            e.setParam ("highCut", 20000.0f);
+            e.setParam ("mix", 1.0f);            // echoes only
+            e.setParam ("timeMode", (float) EchoDeck::milliseconds);
+        };
+        juce::AudioBuffer<float> click (2, (int) (3.0 * sr));
+        click.clear();
+        click.setSample (0, 0, 0.5f); click.setSample (1, 0, 0.5f);
+
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("timeMs", 250.0f); e.setParam ("feedback", 0.5f);
+            auto out = runEcho (e, click);
+            const int p1 = peakIndexCh (out, 0, 100, (int) (0.375 * sr)), p2 = peakIndexCh (out, 0, (int) (0.375 * sr), (int) (0.625 * sr));
+            const float r = std::abs (out.getSample (0, p2)) / juce::jmax (1.0e-9f, std::abs (out.getSample (0, p1)));
+            check (std::abs (p1 - 12000) <= 3 && std::abs (p2 - 24000) <= 4 && r > 0.42f && r < 0.58f,
+                   "250 ms echo: repeats at " + juce::String (p1) + " / " + juce::String (p2) + " samples, second at " + juce::String (r, 2) + " of the first");
+            check (rms (out, 0, 11900) < 1.0e-4f, "...and nothing before the first echo (mix 100%)");
+        }
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("timeMode", (float) EchoDeck::note); e.setParam ("note", 4.0f);      // 1/4 at a tapped 100 BPM = 600 ms
+            e.setParam ("tempoSrc", 1.0f); e.setParam ("tapBpm", 100.0f); e.setParam ("feedback", 0.0f);
+            auto out = runEcho (e, click);
+            const int p = peakIndexCh (out, 0, 100, out.getNumSamples());
+            EchoDeck e2; clean (e2);
+            e2.setParam ("timeMode", (float) EchoDeck::dotted); e2.setParam ("note", 3.0f);  // dotted 1/8 at 120 = 375 ms
+            e2.setParam ("feedback", 0.0f);
+            auto out2 = runEcho (e2, click);
+            const int p2 = peakIndexCh (out2, 0, 100, out2.getNumSamples());
+            EchoDeck e3; clean (e3);
+            e3.setParam ("timeMode", (float) EchoDeck::triplet); e3.setParam ("note", 4.0f); // 1/4 triplet at 120 = 333 ms
+            e3.setParam ("feedback", 0.0f);
+            auto out3 = runEcho (e3, click);
+            const int p3 = peakIndexCh (out3, 0, 100, out3.getNumSamples());
+            check (std::abs (p - 28800) <= 3 && std::abs (p2 - 18000) <= 3 && std::abs (p3 - 16000) <= 3,
+                   "Note sync: 1/4 at 100 BPM, dotted 1/8 and 1/4 triplet at 120 (" + juce::String (p) + ", " + juce::String (p2) + ", " + juce::String (p3) + ")");
+        }
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("timeMs", 200.0f); e.setParam ("feedback", 0.7f); e.setParam ("groove", 0.6f);   // swing: 240 / 400 / 640 / 800 ms
+            auto out = runEcho (e, click);
+            const int p1 = peakIndexCh (out, 0, 100, (int) (0.32 * sr)), p2 = peakIndexCh (out, 0, (int) (0.32 * sr), (int) (0.52 * sr));
+            const int p3 = peakIndexCh (out, 0, (int) (0.52 * sr), (int) (0.72 * sr));
+            check (std::abs (p1 - 11520) <= 4 && std::abs (p2 - 19200) <= 4 && std::abs (p3 - 30720) <= 6,
+                   "Groove swings every other repeat (" + juce::String (p1) + ", " + juce::String (p2) + ", " + juce::String (p3) + ")");
+        }
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("timeMs", 250.0f); e.setParam ("feedback", 0.0f); e.setParam ("feel", 1.0f);     // 30 ms behind
+            auto out = runEcho (e, click);
+            const int p = peakIndexCh (out, 0, 100, out.getNumSamples());
+            check (std::abs (p - (12000 + 1440)) <= 4, "Feel puts the echoes behind the beat (" + juce::String (p) + ")");
+        }
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("mode", (float) EchoDeck::pingPong); e.setParam ("timeMs", 250.0f); e.setParam ("feedback", 0.5f);
+            auto out = runEcho (e, click);
+            const float l1 = std::abs (out.getSample (0, 12000)), r1 = std::abs (out.getSample (1, 12000));
+            const float l2 = std::abs (out.getSample (0, 24000)), r2 = std::abs (out.getSample (1, 24000));
+            check (l1 > 0.1f && r1 < 1.0e-4f && r2 > 0.05f && l2 < 1.0e-4f, "Ping-pong: left, then right");
+        }
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("mode", (float) EchoDeck::dual); e.setParam ("timeMs", 300.0f); e.setParam ("ratio", 0.5f); e.setParam ("feedback", 0.0f);
+            auto out = runEcho (e, click);
+            const int pl = peakIndexCh (out, 0, 100, out.getNumSamples()), pr = peakIndexCh (out, 1, 100, out.getNumSamples());
+            check (std::abs (pl - 14400) <= 3 && std::abs (pr - 7200) <= 3, "Dual: 300 ms left, 150 ms right (" + juce::String (pl) + ", " + juce::String (pr) + ")");
+        }
+        {
+            EchoDeck e; clean (e);
+            e.setParam ("mode", (float) EchoDeck::rhythm); e.setParam ("timeMs", 100.0f); e.setParam ("rhythmLen", 3.0f);   // 4 steps
+            e.setParam ("feedback", 0.5f);
+            for (int k = 1; k <= 8; ++k) e.setParam ("tap" + juce::String (k), (k == 2 || k == 4) ? 1.0f : 0.0f);
+            auto out = runEcho (e, click);
+            auto at = [&] (double ms) { return std::abs (out.getSample (0, (int) std::llround (ms * sr / 1000.0))); };
+            check (at (200) > 0.1f && at (400) > 0.1f && at (100) < 1.0e-4f && at (300) < 1.0e-4f && at (600) > 0.04f && at (600) < at (200),
+                   "Rhythm: taps 2 and 4 of a 4-step pattern, repeating quieter");
+        }
+        {
+            // feedback over 100%: it runs away into a held wash but stays bounded
+            EchoDeck e; clean (e);
+            e.setParam ("timeMs", 180.0f); e.setParam ("feedback", 1.1f);
+            juce::AudioBuffer<float> burst (2, (int) (10.0 * sr));
+            burst.clear();
+            juce::Random rnd (9);
+            for (int i = 0; i < (int) (0.05 * sr); ++i) { const float v = (rnd.nextFloat() - 0.5f) * 0.6f; burst.setSample (0, i, v); burst.setSample (1, i, v); }
+            auto out = runEcho (e, burst);
+            const float pk = out.getMagnitude (0, out.getNumSamples());
+            check (allFinite (out) && pk < 2.5f && rms (out, (int) (8.0 * sr), (int) (10.0 * sr)) > 0.05f,
+                   "Feedback 110%: self-sustains, bounded (peak " + juce::String (pk, 2) + ")");
+        }
+        {
+            // hold: what's in the loop keeps going at the same level, new input is ignored
+            EchoDeck e; clean (e);
+            e.setParam ("timeMs", 200.0f); e.setParam ("feedback", 0.3f);
+            auto in = pluck (6.0, 0.0);
+            for (int i = (int) (1.0 * sr); i < in.getNumSamples(); ++i) { const float v = 0.4f * (float) std::sin (0.07 * i); in.setSample (0, i, v); in.setSample (1, i, v); }
+            auto out = runEcho (e, in, [&e] (int pos) { if (pos >= (int) (0.25 * sr)) e.setParam ("hold", 1.0f); });
+            const float a = rms (out, (int) (1.5 * sr), (int) (2.5 * sr)), b = rms (out, (int) (4.5 * sr), (int) (5.5 * sr));
+            check (a > 0.01f && b > 0.8f * a && b < 1.25f * a, "Hold freezes the loop (" + juce::String (a, 3) + " -> " + juce::String (b, 3) + ")");
+        }
+        {
+            EchoDeck e;
+            e.setParam ("mix", 0.0f);
+            auto in = pluck (1.0, 0.1);
+            auto out = runEcho (e, in);
+            float diff = 0.0f;
+            for (int i = 0; i < in.getNumSamples(); ++i) diff = juce::jmax (diff, std::abs (out.getSample (0, i) - in.getSample (0, i)));
+            check (diff < 1.0e-6f, "Mix 0%: dry signal passes untouched");
+        }
+        {
+            // every style: echoes come, stay clean and finite, die away to true silence (no hiss left over)
+            juce::StringArray bad;
+            const auto names = EchoDeck::styleNames();
+            for (int s = 0; s < names.size(); ++s)
+            {
+                EchoDeck e;
+                e.setParam ("style", (float) s); e.setParam ("mix", 0.5f);
+                e.setParam ("timeMode", (float) EchoDeck::milliseconds); e.setParam ("timeMs", 300.0f); e.setParam ("feedback", 0.6f);
+                auto out = runEcho (e, pluck (16.0, 0.0));
+                const float early = rms (out, (int) (0.6 * sr), (int) (1.6 * sr)), late = rms (out, (int) (15.0 * sr), (int) (16.0 * sr));
+                const float pk = out.getMagnitude (0, out.getNumSamples());
+                if (! allFinite (out) || pk > 1.5f || early < 0.01f || late > 1.0e-4f)
+                    bad.add (names[s] + " (early " + juce::String (early, 3) + ", late " + juce::String (late, 6) + ", peak " + juce::String (pk, 2) + ")");
+            }
+            check (bad.isEmpty(), juce::String (names.size()) + " echo styles repeat, stay clean and fade to silence" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString ("; ")));
+        }
+        {
+            // tape styles really wobble (pitch moves), the clean digital one doesn't
+            auto pitchSpread = [] (int style)
+            {
+                EchoDeck e;
+                e.setParam ("style", (float) style); e.setParam ("mix", 1.0f); e.setParam ("feedback", 0.0f);
+                e.setParam ("timeMode", (float) EchoDeck::milliseconds); e.setParam ("timeMs", 100.0f);
+                e.setParam ("wobble", 2.0f); e.setParam ("saturation", 0.0f); e.setParam ("lowCut", 20.0f); e.setParam ("highCut", 20000.0f);
+                juce::AudioBuffer<float> tone (2, (int) (4.0 * sr));
+                for (int i = 0; i < tone.getNumSamples(); ++i) { const float v = 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * i / sr); tone.setSample (0, i, v); tone.setSample (1, i, v); }
+                auto out = runEcho (e, tone);
+                double lo = 1.0e9, hi = 0.0;
+                for (double t = 0.5; t < 3.9; t += 0.1)
+                {
+                    const double hz = zeroCrossingHz (out, (int) (t * sr), (int) ((t + 0.1) * sr));
+                    lo = juce::jmin (lo, hz); hi = juce::jmax (hi, hz);
+                }
+                return hi - lo;
+            };
+            const double tapeSpread = pitchSpread (4), digitalSpread = pitchSpread (8);
+            check (tapeSpread > 4.0 && digitalSpread < 1.5, "Cassette wobbles (" + juce::String (tapeSpread, 1) + " Hz spread at 1 kHz), Clean Digital doesn't (" + juce::String (digitalSpread, 1) + ")");
+        }
+        {
+            // the bucket brigade gets darker as the echo gets longer
+            auto brightness = [] (float ms)
+            {
+                EchoDeck e;
+                e.setParam ("style", 5.0f); e.setParam ("mix", 1.0f); e.setParam ("feedback", 0.0f); e.setParam ("wobble", 0.0f);
+                e.setParam ("timeMode", (float) EchoDeck::milliseconds); e.setParam ("timeMs", ms); e.setParam ("highCut", 20000.0f);
+                juce::AudioBuffer<float> noise (2, (int) (3.0 * sr));
+                juce::Random r (4);
+                for (int i = 0; i < noise.getNumSamples(); ++i) { const float v = (r.nextFloat() - 0.5f) * 0.2f; noise.setSample (0, i, v); noise.setSample (1, i, v); }
+                auto out = runEcho (e, noise);
+                double hf = 0.0, all = 0.0;
+                for (int i = (int) (1.5 * sr); i < (int) (2.9 * sr); ++i)
+                {
+                    const float d = out.getSample (0, i) - out.getSample (0, i - 1);
+                    hf += d * d; all += out.getSample (0, i) * out.getSample (0, i);
+                }
+                return hf / juce::jmax (1.0e-12, all);
+            };
+            const double shortB = brightness (60.0f), longB = brightness (600.0f);
+            check (longB < 0.6 * shortB, "Bucket brigade: 600 ms is darker than 60 ms (" + juce::String (longB, 4) + " vs " + juce::String (shortB, 4) + ")");
+        }
+        {
+            EchoDeck e;
+            e.setParam ("timeMode", (float) EchoDeck::dotted);
+            e.tap(); juce::Thread::sleep (400); e.tap(); juce::Thread::sleep (400); e.tap();
+            const float bpm = e.param ("tapBpm");
+            check (bpm > 135.0f && bpm < 165.0f && e.param ("tempoSrc") > 0.5f, "Tap tempo: taps 400 ms apart = " + juce::String (bpm, 1) + " BPM, notes follow the tap");
+            EchoDeck e2;
+            e2.setParam ("timeMode", (float) EchoDeck::milliseconds);
+            e2.tap(); juce::Thread::sleep (300); e2.tap();
+            check (std::abs (e2.param ("timeMs") - 300.0f) < 40.0f, "Tap in ms mode sets the echo time (" + juce::String (e2.param ("timeMs"), 0) + " ms)");
+        }
+        {
+            // all presets load and run; the state round-trips
+            EchoDeck e;
+            const int n = e.getProgramNames().size();
+            juce::StringArray bad;
+            for (int i = 0; i < n; ++i)
+            {
+                EchoDeck p;
+                p.setCurrentProgram (i);
+                auto out = runEcho (p, pluck (4.0, 0.0));
+                const float pk = out.getMagnitude (0, out.getNumSamples());
+                if (! allFinite (out) || pk > 3.0f || rms (out, (int) (0.05 * sr), (int) (3.0 * sr)) < 1.0e-3f) bad.add (p.getProgramName (i));
+            }
+            e.setCurrentProgram (14);
+            juce::MemoryBlock mb; e.getStateInformation (mb);
+            EchoDeck r; r.setStateInformation (mb.getData(), (int) mb.getSize());
+            check (bad.isEmpty() && (int) r.param ("mode") == EchoDeck::rhythm && r.getCurrentProgram() == 14,
+                   juce::String (n) + " presets play and the state restores" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+        }
+        {
+            // in a Studio project, synced to the song tempo (90 BPM, 1/4 = 667 ms)
+            project.setTempo (90.0);
+            while (project.numTracks() > 0) project.removeTrack (project.track (0));
+            project.masterInserts().removeAllChildren (nullptr);
+            auto f = writeClickWav (tmpRoot.getChildFile ("echo-click.wav"), 4.0, 0.5);
+            auto t = project.addTrack (kindAudio, "Echo");
+            project.addAudioClip (t, f, 0.0, 0.0, 4.0);
+            auto ref = builtinRef ("echodeck");
+            {
+                EchoDeck cfg; clean (cfg);
+                cfg.setParam ("timeMode", (float) EchoDeck::note); cfg.setParam ("note", 4.0f); cfg.setParam ("feedback", 0.0f);
+                ref.state = encodeState (cfg);
+            }
+            project.setPlugin (t.inserts(), -1, ref);
+            engine.preloadAudio();
+            engine.rebuildNow();
+            auto out = renderRange (engine, project, 0.0, 6.0);
+            const int p = peakIndex (out, (int) (0.6 * sr));
+            check (std::abs (p - (int) ((0.5 + 2.0 / 3.0) * sr)) < 8, "On a track, a 1/4 echo follows the song's 90 BPM (" + juce::String ((p / sr - 0.5) * 1000.0, 1) + " ms)");
+            project.removeTrack (t);
+            project.setTempo (120.0);
+            engine.rebuildNow();
+        }
     }
 
     // -------------------------------------------------------------------------------------------

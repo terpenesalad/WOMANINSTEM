@@ -839,6 +839,7 @@ void installInstrumentEditors()
     VocalTune::editorFactory = [] (VocalTune& v) -> juce::AudioProcessorEditor* { return new VocalTuneEditor (v); };
     installBeatLabEditor();
     installVoiceEditors();
+    installEchoDeckEditor();
 }
 
 } // namespace wis::daw

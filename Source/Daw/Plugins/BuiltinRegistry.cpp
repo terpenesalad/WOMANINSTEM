@@ -6,6 +6,7 @@
 #include "VocalTune.h"
 #include "Looper.h"
 #include "GuitarPedals.h"
+#include "EchoDeck.h"
 #include "Daw/Instruments/HomeKeys.h"
 #include "Daw/Instruments/RhythmBox.h"
 #include "Daw/Instruments/Sampler.h"
@@ -57,6 +58,7 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         add ("gate", "Noise Gate", "Dynamics", "Removes hum and noise between notes", false, make<GateFx>());
         add ("reverb", "Reverb", "Space", "Rooms, halls and plates", false, make<ReverbFx>());
         add ("delay", "Delay", "Space", "Tempo-synced stereo / ping-pong echo", false, make<DelayFx>());
+        add ("echodeck", "Echo Deck", "Space", "Analog-style echo processor: tape, valve, bucket-brigade, oil-can and early-digital echo machines; note-synced or tapped times, single / dual / ping-pong / rhythm modes, groove and feel, saturation, wobble, ducking and hold", false, make<EchoDeck>());
         add ("chorus", "Chorus", "Modulation", "Lush stereo chorus", false, make<ChorusFx>());
         add ("phaser", "Phaser", "Modulation", "Swirling phaser", false, make<PhaserFx>());
         add ("tremolo", "Tremolo / Auto-Pan", "Modulation", "Tempo-synced tremolo and auto-pan", false, make<TremoloFx>());

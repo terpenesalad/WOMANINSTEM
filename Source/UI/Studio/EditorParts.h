@@ -63,5 +63,6 @@ inline void paintEditorBackground (juce::Graphics& g, juce::Rectangle<int> r, ju
 void installInstrumentEditors();
 void installBeatLabEditor();
 void installVoiceEditors();
+void installEchoDeckEditor();
 
 } // namespace wis::daw

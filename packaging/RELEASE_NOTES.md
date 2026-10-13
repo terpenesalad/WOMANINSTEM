@@ -1,11 +1,28 @@
-## WOMANINSTEM 3.7.0 for Windows (64-bit): junkyard percussion and finger snaps, a whistler, psych-pop bass, vocal sounds for your mic
+## WOMANINSTEM 3.8.0 for Windows (64-bit): Echo Deck, a studio analog echo processor
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.6 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.7 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.8
+
+**Echo Deck** (Studio: any insert slot → *Space → Echo Deck*, or Library → Effects; on the Play Along pedalboard: *+ Add pedal → Echo Deck*)
+- A full analog-style echo processor with its own front panel: tape reels that spin at the tape speed, a VU meter (input or echo), amber readouts, illuminated keys and big chicken-head knobs. Resize the window and it scales.
+- **10 echo machines** (the *Style* window). Each repeat goes round the machine again, so it darkens, saturates and wobbles the way the real thing does:
+  - *Studio Tape* (clean pro reel-to-reel), *Tape Echo Unit* (looped tape box: dark, fluttery, a little spring), *Valve Tape* (thick valve-preamp drive), *Worn Tape*, *Cassette*,
+  - *Bucket Brigade* (analog chip: the longer the echo, the slower its clock and the darker and grittier the repeats),
+  - *Oil Can* (smeared and swimming), *Early Digital* (80s 12-bit rack), *Clean Digital* (transparent), *Lo-Fi Radio*.
+- **Echo time** in milliseconds or as a note: **1/64 to 2 bars**, straight, **dotted** or **triplet**, following the **song's tempo** or a **tapped tempo** (the **TAP** button: in MS mode a tap sets the time itself). Turn the time while it plays and the pitch glides like a tape machine.
+- **Modes**: **Single** (true stereo), **Dual** (a second echo time on the right, from x1/4 to x2), **Ping-Pong**, and **Rhythm**: an 8-step multi-tap pattern you draw, from 1 to 8 steps long, repeating with the feedback.
+- **Feedback up to 110%**: past 100% it runs away into a saturated, held wash instead of exploding. **Hold** freezes what's in the loop while you play on top.
+- **Low cut / high cut** inside the loop, **Saturation**, **Input** (drives the machine) and **Output**.
+- **Tweak**: **Groove** (pushes or swings every other repeat), **Feel** (echoes ahead of or behind the beat), **Wobble** (wow and flutter, 0 to 2x the machine's own), **Diffusion** (smears repeats towards a reverb), **Width**, and **Duck** (echoes duck while you play, swell back in the gaps).
+- **28 presets**: *Studio Tape: Dotted 1/8*, *Slapback (50s)*, *Vocal Throw 1/4*, *Tape Echo Wash*, *Dub Runaway*, *Worn Tape Lullaby*, *Cassette Dream*, *Bucket Brigade Dark*, *Bucket Brigade Doubler*, *Oil Can Swirl*, *Ping-Pong 1/8*, *Dual: 3 Against 4*, *Double Tracker (ADT)*, *Rhythm: 3-3-2*, *Rhythm: Gallop*, *Swing Eighths*, *Early Digital Lead*, *Radio Echo*, *Psych Guitar Wash*, *Bass Echo (tight lows)*, *Ducked Vocal Echo*, *Lazy Behind-the-Beat*, *Short Tape Flange*, *Ambient Tape Smear* and more.
+- **New Tape Echo Bus** in the mixer's *+ Send* menu: an Echo Deck on a return bus, 100% wet.
+- In Play Along, where there's no song tempo, tap the tempo in (or use MS mode).
 
 ### New in 3.7
 
