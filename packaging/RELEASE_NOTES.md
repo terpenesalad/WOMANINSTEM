@@ -1,11 +1,22 @@
-## WOMANINSTEM 3.9.0 for Windows (64-bit): Choir Loft (a choir built from people) and Chord Keys
+## WOMANINSTEM 3.10.0 for Windows (64-bit): Smart Drummer, a drummer that listens to your song
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.8 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.9 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.10
+
+**Smart Drummer** (Studio: *+ Track → Smart Drummer*, or Library → Sounds → Smart Drummer)
+- **A drummer that listens to your song and plays along.** Add it and it listens to everything else in the song: MIDI parts and audio (your recordings, loops, and the stems of a split song, muted ones too). It hears where the bass and the accents land, how busy and how loud each bar is, whether the song swings or shuffles, and where it changes: from your markers if you've set them (*Verse*, *Chorus*...), or found from the music (intro, verses, choruses, breaks, outro). Then it writes a part for it: quieter in the verses, harder in the choruses, the kick locking with the bass, a fill into every new section and a crash on its downbeat, resting in the breaks, and a final hit at the end.
+- **It's your part to edit.** The drums land on the track as ordinary MIDI clips, one per section (*Verse 1 - Rock*, *Chorus - Rock*...): double-click one to change any hit in the piano roll. Playing it again replaces only the drummer's own clips; Ctrl+Z undoes it.
+- **18 styles**: *Rock*, *Pop*, *Indie / Garage*, *Psych (laid back)*, *Punk*, *Metal*, *Funk*, *Soul / Motown*, *Hip-Hop (boom bap)*, *Lo-fi*, *Disco*, *House / Dance*, *Reggae (one drop)*, *Blues / Shuffle*, *Jazz (swing)*, *Bossa Nova*, *Folk / Brushes* and *Dream Pop*. Each has its own grooves at four strengths (quiet, verse, chorus, peak), its own fills (around the toms, snare builds, funk licks, shuffle triplets, jazz comping, a hip-hop pickup) and its own kit. The first time, it picks a style that suits what it heard (a shuffle gets the blues shuffle, a very fast song punk, a slow one dream pop).
+- **How it plays**: *Complexity* (from just the time to ghost notes and syncopated kicks), *Energy*, *Follow the Band* (how tightly the kick sticks to the bass), *Fills*, *Swing* (taken from the song, or your own), *Humanize*, *Push / Lay Back*, *Normal / Half-time / Double-time*, *Hi-hat or Ride*, and the *Final Hit*. **Another Take** plays the same thing a different way. With *Rewrite as You Change It* on, the part follows the knobs as you turn them.
+- **The song as the drummer heard it**: a strip of the sections over the loudness of every bar. Click a section to tell the drummer how to play it: *Quiet*, *Verse*, *Chorus*, *Peak* or *Rest*.
+- **Build your own kit** (the *KIT* page): 17 pieces (kick, snare, side stick, clap, closed / pedal / open hi-hat, floor, low, mid and high toms, crash, ride, ride bell, tambourine, shaker, cowbell), each taken from any of **11 sampled kits** (Studio 1-3, Room, Power, Electronic, 808 / 909, Dance, Jazz, Brushes, Orchestral) or **4 drum machines**, with its own tune, decay, level and pan, and a mute. Click a piece's name to hear it. A kick from the Power Kit, a snare from the Jazz Kit and hats from a drum machine is fine. Then the whole kit's **room** (any of the 18 spaces), **punch**, **drive**, **tone** and **volume**. Every style brings a matching kit; turn off *Match the Kit to the Style* to keep yours, or *Reset the Kit to the Style* to get it back.
+- The kit plays any drum part on the General MIDI drum map, so it works for your own drum tracks too.
 
 ### New in 3.9
 

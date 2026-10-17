@@ -29,6 +29,9 @@
 #include "Daw/Plugins/EchoDeck.h"
 #include "Daw/Instruments/ChoirLoft.h"
 #include "Daw/Model/ChordKeys.h"
+#include "Daw/Instruments/SmartDrummer.h"
+#include "Daw/Model/SongAnalysis.h"
+#include "Daw/Model/DrumGenerator.h"
 #include <juce_dsp/juce_dsp.h>
 #include <iostream>
 
@@ -295,6 +298,82 @@ int main (int argc, char** argv)
             if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
                 w->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
             std::cout << f.getFullPathName() << std::endl;
+        }
+        return 0;
+    }
+
+    // dawtest --render-drummer <folder>: Smart Drummer styles over a quiet-then-loud 16-bar song (for listening)
+    if (argc > 2 && juce::String (argv[1]) == "--render-drummer")
+    {
+        const juce::File dir { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        dir.createDirectory();
+        const juce::String only = argc > 3 ? juce::String (argv[3]) : juce::String();
+        for (int st = 0; st < (int) drummer::styles().size(); ++st)
+        {
+            const auto& style = drummer::styles()[(size_t) st];
+            if (only.isNotEmpty() && ! juce::String (style.name).containsIgnoreCase (only)) continue;
+            Project p;
+            const double tempo = st == 4 ? 170.0 : st == 17 ? 72.0 : st == 13 ? 92.0 : st == 14 ? 132.0 : st == 11 ? 124.0 : 100.0;
+            p.setTempo (tempo);
+            auto bass = p.addTrack (kindInstrument, "Bass");
+            auto bc = p.addMidiClip (bass, 0.0, 64.0, "bass");
+            for (int bar = 0; bar < 16; ++bar) { p.addNote (bc, 40, bar * 4.0, 0.4, 100); p.addNote (bc, 40, bar * 4.0 + 1.5, 0.4, 100); p.addNote (bc, 43, bar * 4.0 + 2.0, 0.4, 90); }
+            auto keys = p.addTrack (kindInstrument, "Keys");
+            auto kc = p.addMidiClip (keys, 32.0, 32.0, "keys");
+            for (int e = 0; e < 64; ++e) for (int n : { 60, 64, 67 }) kc.v.appendChild ([&] { juce::ValueTree t (ids::NOTE); t.setProperty (ids::p, n, nullptr); t.setProperty (ids::s, e * 0.5, nullptr); t.setProperty (ids::l, 0.3, nullptr); t.setProperty (ids::v, 90, nullptr); return t; }(), nullptr);
+            auto map = analyzeSong (SongSnapshot::capture (p, -1), nullptr, sr);
+            SmartDrummer d;
+            d.setCurrentProgram (st);
+            const auto beat = drummer::generate (map, d.settings());
+            d.setPlayConfigDetails (0, 2, sr, 512);
+            d.setNonRealtime (true);
+            d.prepareToPlay (sr, 512);
+            d.waitUntilReady();
+            juce::MidiBuffer all;
+            const double spbS = 60.0 / tempo;
+            for (auto& s : beat.sections) for (auto& h : s.hits) all.addEvent (juce::MidiMessage::noteOn (10, h.note, (juce::uint8) h.velocity), (int) (h.beat * spbS * sr));
+            for (auto& h : beat.ending) all.addEvent (juce::MidiMessage::noteOn (10, h.note, (juce::uint8) h.velocity), (int) (h.beat * spbS * sr));
+            const int total = (int) ((16 * 4 + 6) * spbS * sr);
+            juce::AudioBuffer<float> out (2, total);
+            for (int pos = 0; pos < total; pos += 512)
+            {
+                const int n = std::min (512, total - pos);
+                juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+                view.clear();
+                juce::MidiBuffer mb;
+                for (const auto meta : all)
+                    if (meta.samplePosition >= pos && meta.samplePosition < pos + n) mb.addEvent (meta.getMessage(), meta.samplePosition - pos);
+                d.processBlock (view, mb);
+            }
+            {
+                // a text drum grid of every bar, for reading
+                juce::String grid;
+                const int steps = style.triplet ? 12 : 16;
+                for (int bar = 0; bar < 17; ++bar)
+                {
+                    std::map<int, juce::String> lanes;
+                    for (auto& sec : beat.sections)
+                        for (auto& h : sec.hits)
+                            if ((int) std::floor (h.beat / 4.0 + 0.02) == bar)
+                            {
+                                auto& l = lanes[h.note];
+                                if (l.isEmpty()) l = juce::String::repeatedString (".", steps);
+                                const int st2 = juce::jlimit (0, steps - 1, juce::roundToInt ((h.beat - bar * 4.0) * steps / 4.0));
+                                l = l.replaceSection (st2, 1, h.velocity > 100 ? "X" : h.velocity > 60 ? "x" : "o");
+                            }
+                    if (lanes.empty()) continue;
+                    grid << "bar " << (bar + 1) << "\n";
+                    for (auto& [n, l] : lanes) grid << juce::String (n).paddedLeft (' ', 3) << " " << SmartDrummer::pieceName (SmartDrummer::pieceForNote (n)).paddedRight (' ', 14) << l << "\n";
+                }
+                dir.getChildFile (juce::String (st + 1).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (style.name) + ".txt").replaceWithText (grid);
+            }
+            const auto f = dir.getChildFile (juce::String (st + 1).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (style.name) + ".wav");
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+            auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (16);
+            if (auto w = juce::WavAudioFormat().createWriterFor (os, opts)) w->writeFromAudioSampleBuffer (out, 0, total);
+            std::cout << f.getFileName() << ": peak " << out.getMagnitude (0, total) << " rms " << juce::Decibels::gainToDecibels (out.getRMSLevel (0, 0, total))
+                      << " dB, " << map.sections.size() << " sections" << std::endl;
         }
         return 0;
     }
@@ -2351,6 +2430,209 @@ int main (int argc, char** argv)
             check (firstOnly && ks.isNoteOn (1, 60), "Strum: the notes come in one after another");
             pl.releaseAll();
             check (! ks.isNoteOn (1, 48), "All notes off");
+        }
+    }
+
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Smart Drummer:" << std::endl;
+    {
+        using namespace drummer;
+        // a song: 8 quiet bars (bass alone: beat 1 and the "and" of 2), then 8 loud bars (bass + chords in 8ths + a lead)
+        auto makeSong = [] (Project& p, bool swung, int tsNum)
+        {
+            p.setTempo (100.0);
+            p.setTimeSignature (tsNum, 4);
+            const double bpb = p.beatsPerBar();
+            auto bass = p.addTrack (kindInstrument, "Bass");
+            auto bc = p.addMidiClip (bass, 0.0, 16 * bpb, "bass");
+            for (int bar = 0; bar < 16; ++bar)
+            {
+                p.addNote (bc, 40, bar * bpb, 0.4, 100);
+                p.addNote (bc, 40, bar * bpb + 1.5, 0.4, 100);
+            }
+            auto keys = p.addTrack (kindInstrument, "Keys");
+            auto kc = p.addMidiClip (keys, 8 * bpb, 8 * bpb, "keys");
+            for (int e = 0; e < 8 * (int) bpb * 2; ++e)
+            {
+                const double off = (e % 2 == 1 && swung) ? 0.667 : 0.5 * (e % 2);
+                for (int n : { 60, 64, 67 }) p.addNote (kc, n, std::floor (e / 2.0) + off, 0.3, 90);
+            }
+            auto lead = p.addTrack (kindInstrument, "Lead");
+            auto lc = p.addMidiClip (lead, 8 * bpb, 8 * bpb, "lead");
+            for (int q = 0; q < 8 * (int) bpb; ++q) p.addNote (lc, 72 + (q % 5), q, 0.9, 100);
+        };
+
+        Project p1;
+        makeSong (p1, false, 4);
+        auto map = analyzeSong (SongSnapshot::capture (p1, -1), nullptr, sr);
+        check (map.bars == 16 && map.bar[0].low[0] > 0.5f && map.bar[0].low[6] > 0.5f && map.bar[0].low[4] < 0.2f,
+               "Hears the bass: beat 1 and the and-of-2 (" + juce::String (map.bar[0].low[0], 2) + ", " + juce::String (map.bar[0].low[6], 2) + "; beat 2 " + juce::String (map.bar[0].low[4], 2) + ")");
+        check (map.sections.size() >= 2 && map.sections.back().intensity > map.sections.front().intensity && map.sections[1].startBar == 8,
+               "Finds the quiet and loud sections (" + juce::String ((int) map.sections.size()) + ": " + map.sections.front().name + " / " + map.sections.back().name
+               + " from bar " + juce::String (map.sections.back().startBar + 1) + ")");
+        Project p2;
+        makeSong (p2, true, 4);
+        const auto swungMap = analyzeSong (SongSnapshot::capture (p2, -1), nullptr, sr);
+        check (map.swing < 0.2f && swungMap.swing > 0.5f, "Hears the swing (straight " + juce::String (map.swing, 2) + ", swung " + juce::String (swungMap.swing, 2) + ")");
+
+        Settings set;
+        set.style = 0;   // rock
+        set.follow = 0.0f;
+        set.fills = 0.5f;
+        auto beat = generate (map, set);
+        auto hitsIn = [&] (const Beat& b, int bar, int note)
+        {
+            std::vector<int> steps;
+            for (auto& s : b.sections)
+                for (auto& h : s.hits)
+                    if (h.note == note && (int) std::floor (h.beat / 4.0 + 1.0e-6) == bar) steps.push_back (juce::roundToInt ((h.beat - bar * 4.0) * 4.0));
+            return steps;
+        };
+        const auto snare1 = hitsIn (beat, 9, note::snare);
+        const bool backbeat = std::find (snare1.begin(), snare1.end(), 4) != snare1.end() && std::find (snare1.begin(), snare1.end(), 12) != snare1.end();
+        const auto fillBar = hitsIn (beat, 7, note::highTom), fillBar2 = hitsIn (beat, 7, note::midTom);
+        const auto crash = hitsIn (beat, 8, note::crash);
+        check (backbeat && ! fillBar.empty() + ! fillBar2.empty() > 0 && ! crash.empty(), "Rock: backbeat on 2 and 4, a tom fill into the loud section, a crash on its downbeat");
+        int kicksOn6NoFollow = 0, kicksOn6Follow = 0;
+        for (int b = 0; b < 7; ++b) { auto k = hitsIn (beat, b, note::kick); kicksOn6NoFollow += (int) std::count (k.begin(), k.end(), 6); }
+        set.follow = 1.0f;
+        auto followBeat = generate (map, set);
+        for (int b = 0; b < 7; ++b) { auto k = hitsIn (followBeat, b, note::kick); kicksOn6Follow += (int) std::count (k.begin(), k.end(), 6); }
+        check (kicksOn6Follow > kicksOn6NoFollow, "Following the band puts the kick with the bass (" + juce::String (kicksOn6NoFollow) + " -> " + juce::String (kicksOn6Follow) + " kicks on the and-of-2)");
+        auto again = generate (map, set);
+        set.seed = 2;
+        auto other = generate (map, set);
+        auto same = [] (const Beat& a, const Beat& b)
+        {
+            if (a.sections.size() != b.sections.size()) return false;
+            for (size_t i = 0; i < a.sections.size(); ++i)
+            {
+                if (a.sections[i].hits.size() != b.sections[i].hits.size()) return false;
+                for (size_t k = 0; k < a.sections[i].hits.size(); ++k)
+                    if (a.sections[i].hits[k].note != b.sections[i].hits[k].note || std::abs (a.sections[i].hits[k].beat - b.sections[i].hits[k].beat) > 1.0e-9) return false;
+            }
+            return true;
+        };
+        check (same (followBeat, again) && ! same (followBeat, other), "The same take plays the same; another take plays differently");
+
+        // every style plays every intensity in 4/4, 3/4 and 6/8 without leaving the bar
+        juce::StringArray bad;
+        for (int st = 0; st < (int) styles().size(); ++st)
+            for (int ts : { 4, 3, 6 })
+            {
+                Project p;
+                makeSong (p, false, ts);
+                if (ts == 6) p.setTimeSignature (6, 8);
+                auto m = analyzeSong (SongSnapshot::capture (p, -1), nullptr, sr);
+                Settings s2;
+                s2.style = st;
+                s2.complexity = 0.9f;
+                s2.fills = 0.9f;
+                auto b = generate (m, s2);
+                int n = 0;
+                bool ok = ! b.sections.empty();
+                for (auto& sec : b.sections)
+                    for (auto& h : sec.hits)
+                    {
+                        ++n;
+                        const double end = (sec.section.startBar + sec.section.bars) * m.beatsPerBar;
+                        if (h.beat < sec.section.startBar * m.beatsPerBar - 0.1 || h.beat > end + 0.1 || h.velocity < 1 || h.velocity > 127 || SmartDrummer::pieceForNote (h.note) < 0) ok = false;
+                    }
+                if (! ok || n < 16 * (int) m.beatsPerBar) bad.add (styles()[(size_t) st].name + juce::String (" in ") + juce::String (ts) + " (" + juce::String (n) + " hits)");
+            }
+        check (bad.isEmpty(), juce::String ((int) styles().size()) + " styles play in 4/4, 3/4 and 6/8" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+
+        // writing: one clip per section + the ending, replaced (not added to) the next time, undoable
+        {
+            auto dt = p1.addTrack (kindInstrument, "Smart Drummer");
+            p1.undo().beginNewTransaction();
+            const int notes = write (p1, dt, beat, "Rock");
+            const int clips1 = dt.clips().getNumChildren();
+            p1.undo().beginNewTransaction();
+            write (p1, dt, generate (map, set), "Rock");
+            const int clips2 = dt.clips().getNumChildren();
+            p1.undo().undo();
+            p1.undo().undo();
+            check (notes > 100 && clips1 == (int) beat.sections.size() + 1 && clips2 == clips1 && dt.clips().getNumChildren() == 0,
+                   "Writes " + juce::String (clips1) + " clips (" + juce::String (notes) + " hits), replaces them on a second take, undo removes them");
+        }
+
+        // audio: clicks on every beat of a 120 BPM file
+        {
+            const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wis-drummer-test");
+            dir.createDirectory();
+            const auto f = dir.getChildFile ("clicks.wav");
+            juce::AudioBuffer<float> b (1, (int) (sr * 8.0));
+            b.clear();
+            juce::Random r (3);
+            for (int beatN = 0; beatN < 16; ++beatN)
+                for (int i = 0; i < 2000; ++i)
+                    b.setSample (0, (int) (beatN * 0.5 * sr) + i, (r.nextFloat() * 2.0f - 1.0f) * 0.8f * std::exp (-(float) i / 300.0f));
+            {
+                f.deleteFile();
+                std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+                auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (1).withBitsPerSample (24);
+                if (auto w = juce::WavAudioFormat().createWriterFor (os, opts)) w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            }
+            Project p;
+            p.setTempo (120.0);
+            auto t = p.addTrack (kindAudio, "Loop");
+            p.addAudioClip (t, f, 0.0, 0.0, 8.0);
+            AudioCache cache;
+            auto m = analyzeSong (SongSnapshot::capture (p, -1), &cache, sr);
+            float onBeats = 0.0f, between = 0.0f;
+            for (int bar = 0; bar < m.bars; ++bar)
+                for (int s = 0; s < 16; ++s) (s % 4 == 0 ? onBeats : between) += m.bar[(size_t) bar].accents[(size_t) s];
+            check (m.bars == 4 && m.partsAnalysed == 1 && onBeats > 3.0f * between, "Hears the beats in an audio clip (" + juce::String (onBeats, 1) + " on the beat vs " + juce::String (between, 1) + " between)");
+            dir.deleteRecursively();
+        }
+
+        // the kit
+        {
+            SmartDrummer d;
+            d.setParam ("kit", 13.0f);   // Eight-Oh-Eight (synth: works without the Sound Library)
+            d.setParam ("roomMix", 0.0f);
+            d.setPlayConfigDetails (0, 2, sr, block);
+            d.prepareToPlay (sr, block);
+            d.waitUntilReady();
+            auto run = [&] (std::vector<std::pair<double, int>> notes, double seconds)
+            {
+                d.prepareToPlay (sr, block);   // nothing left ringing from the last run
+                const int total = (int) (seconds * sr);
+                juce::AudioBuffer<float> out (2, total);
+                out.clear();
+                for (int pos = 0; pos < total; pos += block)
+                {
+                    const int n = juce::jmin (block, total - pos);
+                    juce::MidiBuffer midi;
+                    for (auto& [t, note] : notes)
+                        if ((int) (t * sr) >= pos && (int) (t * sr) < pos + n) midi.addEvent (juce::MidiMessage::noteOn (10, note, (juce::uint8) 110), (int) (t * sr) - pos);
+                    juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+                    d.processBlock (view, midi);
+                }
+                return out;
+            };
+            auto kick = run ({ { 0.02, 36 } }, 0.6);
+            check (d.isKitReady() && allFinite (kick) && kick.getMagnitude (0, kick.getNumSamples()) > 0.05f && kick.getMagnitude (0, kick.getNumSamples()) < 1.0f,
+                   "Kit plays a kick (peak " + juce::String (kick.getMagnitude (0, kick.getNumSamples()), 2) + ")");
+            auto open = run ({ { 0.02, 46 } }, 0.6);
+            auto choked = run ({ { 0.02, 46 }, { 0.1, 42 } }, 0.6);
+            const float openTail = rms (open, (int) (0.3 * sr), (int) (0.5 * sr)), chokedTail = rms (choked, (int) (0.3 * sr), (int) (0.5 * sr));
+            check (chokedTail < openTail * 0.3f, "A closed hi-hat chokes the open one (" + juce::String (juce::Decibels::gainToDecibels (chokedTail / juce::jmax (1.0e-9f, openTail)), 1) + " dB)");
+            d.setParam ("snareMute", 1.0f);
+            auto muted = run ({ { 0.02, 38 } }, 0.3);
+            d.setParam ("snareMute", 0.0f);
+            check (muted.getMagnitude (0, muted.getNumSamples()) < 1.0e-6f, "Muting a piece silences it");
+            if (SoundFontCache::defaultSoundFont().existsAsFile())
+            {
+                d.setParam ("kit", 0.0f);
+                d.setParam ("snareSrc", 9.0f + 1.0f);   // snare from the Jazz Kit
+                d.waitUntilReady();
+                auto sampled = run ({ { 0.02, 36 }, { 0.3, 38 } }, 0.8);
+                check (allFinite (sampled) && rms (sampled, 0, (int) (0.25 * sr)) > 0.01f && rms (sampled, (int) (0.3 * sr), (int) (0.55 * sr)) > 0.005f,
+                       "Sampled kits: Studio Kit kick, Jazz Kit snare");
+            }
         }
     }
 

@@ -8,6 +8,7 @@
 #include "Daw/Instruments/Junkyard.h"
 #include "Daw/Instruments/Whistler.h"
 #include "Daw/Instruments/ChoirLoft.h"
+#include "Daw/Instruments/SmartDrummer.h"
 
 namespace wis::daw
 {
@@ -156,6 +157,7 @@ struct PluginMenu
         m.menu.addSubMenu ("Junkyard Percussion (junk, snaps, sound spaces)", presetMenu ("junkyard", Junkyard::presetNames(), "Junkyard: "));
         m.menu.addSubMenu ("Whistler", presetMenu ("whistle", Whistler::presetNames(), "Whistler: "));
         m.menu.addSubMenu ("Choir Loft (choirs and singers built from people)", presetMenu ("choir", ChoirLoft::presetNames(), "Choir Loft: "));
+        m.menu.addSubMenu ("Smart Drummer (plays along with your song)", presetMenu ("drummer", drummer::styleNames(), "Smart Drummer: "));
         juce::PopupMenu samplers;
         samplers.addItem (id, "Sampler (load any sound)");
         m.refs[id++] = builtinRef ("sampler");

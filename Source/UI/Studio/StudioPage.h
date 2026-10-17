@@ -16,6 +16,8 @@ namespace wis::daw
 {
 
 class BeatLab;
+class SmartDrummer;
+struct SongMap;
 
 /** The Studio: a full DAW page (control bar, library, arrangement, editor / mixer / keyboard). */
 class StudioPage : public juce::Component,
@@ -70,6 +72,9 @@ private:
     Track trackForInstrument (int trackId, const juce::String& name);
     void bounceInPlace (int trackId);
     void patternToSong (BeatLab& b, const juce::MidiMessageSequence& seq, double lengthBeats);
+    /** Smart Drummer: analyse the song (in the background) and write a part. */
+    void playDrummer (SmartDrummer& d, bool write, bool pickStyle = false);
+    void drummerAnalysed (const juce::String& slotId, int trackId, const SongMap& map, bool write, bool pickStyle);
     void audioFromPlugin (BuiltinProcessor& p, const juce::File& f);
 
     void newProject();
@@ -138,6 +143,7 @@ private:
     std::map<int, int> heldTypingKeys;   // keyCode -> note
 
     juce::Array<juce::ValueTree> clipboard;
+    std::atomic<int> drummerJobs { 0 };
     std::map<juce::String, std::unique_ptr<PluginWindow>> pluginWindows;
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<juce::DocumentWindow> pluginManagerWindow;

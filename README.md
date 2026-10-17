@@ -70,6 +70,12 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.10
+
+- **Smart Drummer**: a drummer that listens to your song and plays along. It listens to every other track (MIDI and audio, including the stems of a split song), hears the bass and accents, the swing and the sections (from your markers or found from the music), and writes a drum part as editable MIDI clips, one per section: quieter verses, bigger choruses, fills into each section, the kick following the bass. 18 styles from rock, punk and metal to funk, soul, hip-hop, lo-fi, disco, house, reggae, blues, jazz, bossa nova, folk and dream pop; complexity, energy, follow, fills, swing, humanize, push / lay back, half / double time, and another take. Click a section to make it quiet, a verse, a chorus, a peak or a rest. Then rebuild the kit piece by piece from 11 sampled kits and 4 drum machines, with tune, decay, level and pan per piece, room, punch, drive and tone.
+
+<p align="center"><img src="docs/smart-drummer.png" width="900" alt="Smart Drummer"></p>
+
 ### New in 3.9
 
 - **Choir Loft**: a choir, or one singer, built from people. Nothing is sampled: every singer is a modelled voice (vocal folds making a glottal pulse, then a throat, mouth, lips and nose shaping it into vowels), so no two notes are quite the same. Up to 64 singers: set the cast (how many, women and men, ages, how different they are) and re-roll it, or click anyone on the stage to change their face and body (head, face length, jaw, chin, cheekbones, nose, lips, mouth, neck, chest), which changes their voice: tract length, formants, range and break. Ten singing styles (classical, choral, early music, gospel, pop, folk, belt, blues, lullaby, overtone singing), a vowel chart with moving vowels, consonant onsets (doo, bah, mm, la...), humming, ensemble looseness, breaths between phrases. The choir shares out the chords you play (or takes them in octaves, round robin, or one singer legato). They stand on a stage in front of a stereo mic pair, in a church, a cathedral, a hall, a cave or a forest. 31 presets.
@@ -156,6 +162,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 - **Drum Pads**: 16 pads (the standard drum notes, so drum grooves play them) with your own samples or four synthesized kits. Per pad: tune, gain, pan, decay, filter, reverse, choke group.
 - **Beat Lab**: a step-sequencer groovebox (see *New in 3.1*). It follows the song while it plays, or runs on its own; lanes also play from MIDI notes C2-G2 and the chosen lane plays melodically from C3 up.
 - **Choir Loft**: up to 64 modelled singers (children, women and men of any age) whose faces and bodies shape their voices, ten singing styles, a vowel chart with moving vowels, consonant onsets and humming, on a stage with a stereo mic pair in a designed room (see *New in 3.9*).
+- **Smart Drummer**: listens to the rest of the song and writes a drum part for it, section by section, in 18 styles, on a kit you can rebuild piece by piece (see *New in 3.10*).
 - **Drummer**: 18 grooves played by a real kit (rock, pop, four-on-the-floor, disco, funk, Motown, boom bap, trap, half-time, shuffle, jazz swing, reggae, bossa nova, metal...) with crash cymbals and tom fills. Drop 8 bars in and edit any hit.
 - **Audio** tracks for guitar, bass, vocals or anything else, mono or stereo inputs, with input monitoring.
 - **Your Play-Along rig as a plugin**: *Amp & Pedals* puts the whole rig (gate, comp, drive, amp/NAM, cab/IR, EQ, chorus, delay, reverb, tuner) on any track.
@@ -292,11 +299,12 @@ Source/
   Engine/       real-time audio callback, stem player (loop, time-stretch), recorder, scope feed
   Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
   Daw/
-    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, chord keys, MIDI files, tempo detection
+    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, chord keys, song analysis + drum generator, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
     Plugins/    built-in effects, Echo Deck, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
     Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer),
-                 Junkyard Percussion (modal / string / noise synthesis), Whistler, Choir Loft (source-filter singers on a modelled stage)
+                 Junkyard Percussion (modal / string / noise synthesis), Whistler, Choir Loft (source-filter singers on a modelled stage),
+                 Smart Drummer (kit sampler + song analysis and drum part generator in Daw/Model)
   UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays
     Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors

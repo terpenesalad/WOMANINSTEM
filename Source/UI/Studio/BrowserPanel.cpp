@@ -9,6 +9,7 @@
 #include "Daw/Instruments/Junkyard.h"
 #include "Daw/Instruments/Whistler.h"
 #include "Daw/Instruments/ChoirLoft.h"
+#include "Daw/Instruments/SmartDrummer.h"
 #include "Daw/Model/JunkLoops.h"
 #include "Daw/Model/VocalChains.h"
 #include "Library/SongLibrary.h"
@@ -157,6 +158,9 @@ void BrowserPanel::populate()
             auto* whistle = addGroup ("Whistler (whistling that glides)");
             const auto wn = Whistler::presetNames();
             for (int i = 0; i < wn.size(); ++i) addLeaf (whistle, wn[i], "inst:whistle:" + juce::String (i), "glides between notes: play legato");
+            auto* drums = addGroup ("Smart Drummer (listens to your song and plays along)");
+            for (int i = 0; i < (int) drummer::styles().size(); ++i)
+                addLeaf (drums, drummer::styles()[(size_t) i].name, "inst:drummer:" + juce::String (i), drummer::styles()[(size_t) i].description);
             auto* choir = addGroup ("Choir Loft (choirs and singers, built from people)");
             const auto cn = ChoirLoft::presetNames();
             for (int i = 0; i < cn.size(); ++i) addLeaf (choir, cn[i], "inst:choir:" + juce::String (i), ChoirLoft::presetDescription (i));

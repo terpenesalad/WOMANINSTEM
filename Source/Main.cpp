@@ -7,6 +7,8 @@
 #include "UI/Studio/PluginMenus.h"
 #include "UI/Studio/ChordKeysPanel.h"
 #include "UI/Studio/EditorParts.h"
+#include "Daw/Instruments/SmartDrummer.h"
+#include "Daw/Model/SongAnalysis.h"
 #include "Daw/Plugins/PluginHost.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 
@@ -112,6 +114,7 @@ public:
         failures += runScopeSelfTest();
         failures += runPedalboardSelfTest();
         failures += runChordKeysSelfTest();
+        failures += runSmartDrummerSelfTest();
         if (const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {}); snapDir.isNotEmpty())
         {
             juce::FileOutputStream out (juce::File (snapDir).getChildFile ("choir-portraits.png"));
@@ -173,6 +176,54 @@ public:
             std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio plugin dock: tabs swap editors, sizes to fit, closes cleanly" << std::endl;
         }
         for (auto& [id, p] : procs) p->releaseResources();
+        return failures;
+    }
+
+    /** The Smart Drummer's editor with a song it has heard, both pages (WIS_UI_SNAPSHOTS saves drummer-song.png, drummer-kit.png). */
+    static int runSmartDrummerSelfTest()
+    {
+        // a little song: quiet verse, loud chorus, quiet verse, loud chorus, a break, outro
+        daw::Project p;
+        p.setTempo (96.0);
+        auto bass = p.addTrack (daw::kindInstrument, "Bass");
+        auto keys = p.addTrack (daw::kindInstrument, "Keys");
+        auto bc = p.addMidiClip (bass, 0.0, 40 * 4.0, "bass");
+        auto kc = p.addMidiClip (keys, 0.0, 40 * 4.0, "keys");
+        for (int bar = 0; bar < 40; ++bar)
+        {
+            if (bar >= 32 && bar < 34) continue;   // the break
+            const bool loud = (bar / 8) % 2 == 1;
+            p.addNote (bc, 40, bar * 4.0, 0.4, 100);
+            p.addNote (bc, 40, bar * 4.0 + 1.5, 0.4, 100);
+            for (int e = 0; e < (loud ? 8 : 2); ++e) p.addNote (kc, 64, bar * 4.0 + e * (loud ? 0.5 : 2.0), 0.3, loud ? 100 : 60);
+        }
+        auto d = std::make_unique<daw::SmartDrummer>();
+        d->setPlayConfigDetails (0, 2, 48000.0, 512);
+        d->prepareToPlay (48000.0, 512);
+        auto map = daw::analyzeSong (daw::SongSnapshot::capture (p, -1), nullptr, 48000.0);
+        d->setSongMap (map);
+        d->setStatus ("Played Rock over " + juce::String ((int) map.sections.size()) + " sections. " + map.summary(), false);
+        int failures = 0;
+        for (int page : { 0, 1 })
+        {
+            d->editorPage = page;
+            std::unique_ptr<juce::AudioProcessorEditor> ed (d->createEditor());
+            ed->setSize (1080, 660);
+            juce::Image img (juce::Image::ARGB, ed->getWidth(), ed->getHeight(), true);
+            juce::Graphics g (img);
+            ed->paintEntireComponent (g, true);
+            const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {});
+            if (snapDir.isNotEmpty())
+            {
+                juce::FileOutputStream out (juce::File (snapDir).getChildFile (page == 0 ? "drummer-song.png" : "drummer-kit.png"));
+                if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (img, out); }
+            }
+            d->editorBeingDeleted (ed.get());
+        }
+        const bool ok = map.sections.size() >= 4;
+        if (! ok) ++failures;
+        std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Smart Drummer pages paint with a song (" << map.sections.size() << " sections)" << std::endl;
+        d->releaseResources();
         return failures;
     }
 

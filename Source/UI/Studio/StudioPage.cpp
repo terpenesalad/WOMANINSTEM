@@ -2,6 +2,8 @@
 #include "Daw/Instruments/VintageRhythms.h"
 #include "Daw/Instruments/HomeKeys.h"
 #include "Daw/Instruments/BeatLab.h"
+#include "Daw/Instruments/SmartDrummer.h"
+#include "Daw/Model/SongAnalysis.h"
 #include "StudioPage.h"
 #include "PluginMenus.h"
 #include "Daw/Model/DrumPatterns.h"
@@ -89,6 +91,17 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     BuiltinProcessor::refToFile = [this] (const juce::String& r) { return project.resolve (r); };
     BuiltinProcessor::onAudioToTrack = [this] (BuiltinProcessor& p, const juce::File& f) { audioFromPlugin (p, f); };
     BeatLab::onPatternToSong = [this] (BeatLab& b, const juce::MidiMessageSequence& seq, double lengthBeats) { patternToSong (b, seq, lengthBeats); };
+    SmartDrummer::onPlaySong = [this] (SmartDrummer& d, bool write) { playDrummer (d, write); };
+    SmartDrummer::onRewrite = [this] (SmartDrummer& d)
+    {
+        // new settings, same song: no need to listen again
+        for (auto tv : project.tracks())
+        {
+            Track t (tv);
+            if (t.instrument().isValid() && engine.getProcessor (t.instrument()[ids::id].toString()) == &d)
+                drummerAnalysed (t.instrument()[ids::id].toString(), t.id(), d.getSongMap(), true, false);
+        }
+    };
     engine.onError = [this] (const juce::String& m) { setStatus (m); };
     engine.onRecordingFinished = [this] { setStatus ("Recorded. Press R to record another take, or Cmd/Ctrl+Z to undo it."); };
 
@@ -216,6 +229,9 @@ StudioPage::~StudioPage()
     engine.onSlotRemoved = nullptr;
     BuiltinProcessor::onAudioToTrack = nullptr;
     BeatLab::onPatternToSong = nullptr;
+    SmartDrummer::onPlaySong = nullptr;
+    SmartDrummer::onRewrite = nullptr;
+    for (int i = 0; i < 400 && drummerJobs.load() > 0; ++i) juce::Thread::sleep (25);   // let a song analysis finish
     engine.onError = nullptr;
     engine.onRecordingFinished = nullptr;
     project.onLoaded = nullptr;
@@ -466,6 +482,7 @@ void StudioPage::addTrackMenu()
     m.addSectionHeader ("New track");
     m.addItem (16, "Piano Room  (real grand, vintage grand and upright pianos, in a room you choose)");
     m.addItem (1, "Software Instrument  (Sound Library: keys, strings, synths...)");
+    m.addItem (22, "Smart Drummer  (listens to your song and plays along)");
     m.addItem (2, "Drummer  (drum kit + 8 bars of groove)");
     m.addItem (3, "Audio: Guitar or Bass  (with Amp & Pedals)");
     {
@@ -543,6 +560,7 @@ void StudioPage::addTrackMenu()
             }
             case 20: t = project.addTrack (kindInstrument, "Whistler", insertAt); project.setInstrument (t, builtinPresetRef ("whistle", 0)); break;
             case 21: t = project.addTrack (kindInstrument, "Choir", insertAt); project.setInstrument (t, builtinPresetRef ("choir", 0)); break;
+            case 22: t = project.addTrack (kindInstrument, "Smart Drummer", insertAt); project.setInstrument (t, builtinPresetRef ("drummer", 0)); break;
             case 5: t = project.addTrack (kindAudio, "Audio", insertAt); t.v.setProperty (ids::arm, true, nullptr); break;
             case 6: t = project.addTrack (kindInstrument, "Synth", insertAt); project.setInstrument (t, synthRef (1)); break;
             case 7: t = project.addTrack (kindInstrument, "HomeKeys 20", insertAt); project.setInstrument (t, builtinPresetRef ("homekeys", 0)); break;
@@ -599,6 +617,14 @@ void StudioPage::addTrackMenu()
         }
         else if (r == 20)
             setStatus ("Whistler: play legato (hold one key while pressing the next) and it glides between the notes.");
+        else if (r == 22)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.instrument());
+            if (auto* d = dynamic_cast<SmartDrummer*> (engine.getProcessor (t.instrument()[ids::id].toString())))
+                playDrummer (*d, true, true);
+            setStatus ("Smart Drummer: listening to your song and writing a part. Change the style, the feel or the kit in its window, then Play the Song again.");
+        }
         else if (r == 21)
         {
             engine.rebuildNow();
@@ -836,6 +862,66 @@ void StudioPage::patternToSong (BeatLab& b, const juce::MidiMessageSequence& seq
     ctx.selectTrack (owner.id());
     ctx.selectClip (c.id(), false);
     setStatus ("Pattern added at bar " + juce::String ((int) (at / bpb) + 1) + " on \"" + owner.name() + "\". Loop or copy the clip to make a song.");
+}
+
+void StudioPage::playDrummer (SmartDrummer& d, bool write, bool pickStyle)
+{
+    Track owner;
+    juce::String slotId;
+    for (auto tv : project.tracks())
+    {
+        Track t (tv);
+        if (t.instrument().isValid() && engine.getProcessor (t.instrument()[ids::id].toString()) == &d)
+        {
+            owner = t;
+            slotId = t.instrument()[ids::id].toString();
+        }
+    }
+    if (! owner.isValid()) { d.setStatus ("Put the Smart Drummer on a track in the Studio to play a song.", false); return; }
+    if (d.isBusy()) return;
+    auto snap = SongSnapshot::capture (project, owner.id());
+    const int trackId = owner.id();
+    d.setStatus (snap.trackNames.isEmpty() ? juce::String ("Nothing else in the song yet: playing the style on its own...")
+                                            : "Listening to " + snap.trackNames.joinIntoString (", ") + "...", true);
+    auto* cache = &engine.getCache();
+    const double sr = engine.getSampleRate();
+    juce::Component::SafePointer<StudioPage> safe (this);
+    ++drummerJobs;
+    juce::Thread::launch ([safe, snap, cache, sr, slotId, trackId, write, pickStyle, jobs = &drummerJobs]
+    {
+        auto map = std::make_shared<SongMap> (analyzeSong (snap, cache, sr));
+        juce::MessageManager::callAsync ([safe, map, slotId, trackId, write, pickStyle]
+        {
+            if (safe != nullptr) safe->drummerAnalysed (slotId, trackId, *map, write, pickStyle);
+        });
+        --(*jobs);
+    });
+}
+
+void StudioPage::drummerAnalysed (const juce::String& slotId, int trackId, const SongMap& map, bool write, bool pickStyle)
+{
+    auto* d = dynamic_cast<SmartDrummer*> (engine.getProcessor (slotId));
+    auto owner = project.trackById (trackId);
+    if (d == nullptr || ! owner.isValid()) return;
+    if (pickStyle && ! map.isEmpty())
+    {
+        const int style = drummer::suggestStyle (map);
+        d->setParam ("style", (float) style);
+        d->applyStyleKit (style);
+    }
+    d->setSongMap (map);
+    if (! write) { d->setStatus ("Heard: " + map.summary(), false); return; }
+    const auto settings = d->settings();
+    const auto beat = drummer::generate (map, settings);
+    const auto style = drummer::styleNames()[settings.style];
+    ctx.beginEdit ("Smart Drummer");
+    const int notes = drummer::write (project, owner, beat, style);
+    ctx.selectTrack (trackId);
+    juce::String msg;
+    if (map.isEmpty()) msg << "Played 8 bars of " << style << " (there's nothing else in the song to follow yet).";
+    else msg << "Played " << style << " over " << (int) beat.sections.size() << " section" << (beat.sections.size() == 1 ? "" : "s") << " (" << notes << " hits). " << map.summary();
+    d->setStatus (msg, false);
+    setStatus ("Smart Drummer: " + msg + "  Double-click a clip to edit the beat; Cmd/Ctrl+Z undoes it.");
 }
 
 Track StudioPage::trackForInstrument (int trackId, const juce::String& name)
