@@ -840,6 +840,7 @@ void installInstrumentEditors()
     installBeatLabEditor();
     installVoiceEditors();
     installEchoDeckEditor();
+    installChoirLoftEditor();
 }
 
 } // namespace wis::daw

@@ -64,5 +64,7 @@ void installInstrumentEditors();
 void installBeatLabEditor();
 void installVoiceEditors();
 void installEchoDeckEditor();
+void installChoirLoftEditor();
+juce::Image choirPortraitSheet();
 
 } // namespace wis::daw

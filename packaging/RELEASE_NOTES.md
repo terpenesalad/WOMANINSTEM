@@ -1,11 +1,40 @@
-## WOMANINSTEM 3.8.0 for Windows (64-bit): Echo Deck, a studio analog echo processor
+## WOMANINSTEM 3.9.0 for Windows (64-bit): Choir Loft (a choir built from people) and Chord Keys
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.7 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.8 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.9
+
+**Choir Loft** (Studio: *+ Track → Choir Loft*, or Library → Sounds → Choir Loft)
+- A choir, or a single singer, where **nothing is sampled**. Every singer is a modelled voice: their vocal folds make a glottal pulse (pressed or breathy, with the tiny cycle-to-cycle wobbles real folds have, and a rasp if they're gravelly), then their throat, mouth, lips and nose shape it into vowels. No two notes come out quite the same, and a choir of them sounds like people, not copies.
+- **Singers built from people**, up to 64. Set the cast: how many, women and men, the average age and the spread, how different everyone is; **New Cast** re-rolls them. Click anyone on the stage to see their face and change them:
+  - *Body*: woman to man, age (6 to 90), head size, face length, jaw width, chin, cheekbones, nose, lip fullness, mouth width, neck length, chest. These change the voice the way they do in life: a longer face and neck make a longer vocal tract and darker vowels, a wider jaw opens the vowels up, fuller lips round them, a bigger nose makes them more nasal. Children have short tracts and high voices, voices settle after puberty, older singers wobble more, darken and get breathier.
+  - *Voice*: where their range sits (alto or soprano, bass or tenor), rasp, air, vibrato speed and width, brightness, and how well they hit the note.
+  - Each singer gets a name, a voice type (Soprano, Mezzo, Alto, Tenor, Baritone, Bass, Treble), a range and a break; the **vocal tract** view shows their tube, its length and the formants of the vowel they're singing. **LOCK** keeps a singer when you re-roll; **NEW FACE** swaps one person.
+- **Ten singing styles**: *Classical* (a ringing core, F1 tuned to high notes, wide even vibrato), *Choral*, *Early Music* (straight tone), *Gospel* (pressed, scooping), *Pop* (close and breathy), *Folk*, *Belt*, *Blues & Raspy*, *Lullaby* (half-whispered) and *Overtone* (throat singing: the whistle above the drone follows the vowel).
+- **Four ways to share the notes**: *Sections* (the whole choir shares the chord you hold, each singer taking the note that suits their voice), *Octaves* (each in their own range: one key, a whole choir), *Round Robin* (each new note goes to the next singer or few), *Solo* (the selected singer, legato: overlap notes and they glide).
+- **Vowels**: drag the dot on the vowel chart (*ee* to *oo*, *ah* to *aw*), round or spread the lips, or **hum** with the mouth closed. **Vowel motion**: a wave between two vowels, a move from one to the other on every note (*ooh* opening to *aah*), steps, a random vowel per note (a choir that seems to sing words), or a slow drift. Each singer can move on their own or the choir together.
+- **Onsets**: soft, hard, *h*, *m*, *n*, *l*, *d* (doo, dah), *b*, *w*, *y*, or random, for doo-wop and backing parts.
+- **Expression**: dynamics (soft notes get breathier and darker, loud ones pressed and bright), breath, vibrato, **ensemble looseness** (late entries, pitch scatter, drifting vibratos), rasp, **breaths between phrases**, attack, release, glide, fine tune. The mod wheel deepens the vibrato, CC11 is expression, the sustain pedal holds, MPE bends and presses each note.
+- **The stage**: the singers stand in rows, an arc, sections (high voices left, low voices right), a line or a cluster, and you can drag anyone somewhere else. In front of them is a modelled stereo pair (*spaced omnis*, *near-coincident*, *X-Y cardioids*, *crossed figure-8s* or *one mic*): every singer reaches each microphone at their own distance, angle and level, so the image is real. **Mic distance** trades presence for room; the **room** is any of the 18 designed spaces (or none) (church, cathedral, concert hall, wooden studio, cave, forest, canyon...).
+- **31 presets**: *Cathedral Choir (Aah)*, *Chamber Choir (Ooh)*, *Mixed Choir (Oh)*, *Boys' Choir (Treble)*, *Women's Choir*, *Men's Chorus*, *Monks (low drone)*, *Hum Choir (Mmm)*, *Gospel Choir*, *Folk Harmony Trio*, *Barbershop Quartet*, *Doo-Wop Backing (Doo)*, *Pop Backing (Ooh)*, *Wordless Film Choir*, *Vowel Sweep Pad*, *Talking Choir*, *Ghost Choir*, *Village Choir (loose)*, *Old Folks' Choir*, *Classroom Singalong*, *Stadium Crowd (64)*, *Early Music Consort*, *Soprano Solo*, *Tenor Solo*, *Lullaby Voice*, *Blues Holler*, *Bass Drone*, *Overtone Singer*, *Belting Ensemble*, *Dry Studio Choir* and *Init*.
+- Choir Loft is an original instrument with the same kind of feature set as some commercial "built from people" choir plugins; it isn't a copy of any of them (no names, artwork, layouts or presets taken).
+
+**Chord Keys** (Studio: the **Chords** button, or `H`; `Ctrl+Shift+K` turns them on)
+- Play **whole chords from your computer keyboard** into any instrument track: the number row and the three letter rows are 40 chord keys.
+- **You choose what's on every key**: click a key and pick the root, the chord type (major, minor, diminished, augmented, sus2 / sus4, power chords, 7, maj7, m7, m(maj7), m7b5, dim7, 7sus4, 6, m6, add9, 6/9, 9, maj9, m9, 11, m11, 13, maj7#11, 7b9, 7#9, single notes, octaves...), the inversion, the octave, the voicing (close, open, spread, wide) and a bass note for slash chords. Or just type the name: `Am7`, `F#m7b5`, `C/G`, `Bbmaj9`.
+- **Move them around**: drag a key onto another to swap the chords, Alt-drag to copy. Right-click to copy, paste or clear; *Fill Row* puts the chords of the key on a row (triads, sevenths, or sus / add9 colours).
+- **Ten banks to start from**: *Pop & Rock (C major)*, *Minor Moods (A minor)*, *Jazz & Soul*, *Blues (A)*, *Neo-Soul & Lo-fi*, *Psychedelic 60s*, *Dream Pop*, *Folk & Open Chords (G)*, *Every Major & Minor* and an empty one. Make your own (new, duplicate, rename, delete), **save banks to files** and load them back; they're remembered between sessions.
+- **Follows the song's key**: banks are written in a home key and move to your song's key (a C major bank in a D major song plays D, Em, F#m...; major banks fit minor songs through the relative key).
+- **Smooth voice leading** picks the inversion closest to the last chord, like a keyboard player's hands. Also **root in the bass**, **strum** (0 to 120 ms, up, down or alternating), **latch** (chords ring until the next one), velocity, `[` `]` octave and `-` `=` transpose while you play.
+- The keyboard on screen lights the chords as you play them, and the status bar shows the chord and its notes. Chords record into MIDI clips like anything else you play.
+
+**Fixes**
+- Junkyard Percussion and the Whistler no longer click when they're pushed very loud (their output ceiling had a small jump in it).
 
 ### New in 3.8
 

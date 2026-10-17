@@ -1074,7 +1074,8 @@ void Junkyard::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         for (int i = 0; i < total; ++i)
         {
             const float y = x[i] * vol;
-            x[i] = std::abs (y) < 0.9f ? y : std::tanh (y);
+            const float ay = std::abs (y);   // continuous soft knee (was a jump from 0.9 to 0.72)
+            x[i] = ay < 0.8f ? y : std::copysign (0.8f + 0.2f * std::tanh ((ay - 0.8f) * 5.0f), y);
         }
     }
 }

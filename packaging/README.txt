@@ -34,10 +34,14 @@ Studio quick start
 ------------------
 1. Click STUDIO. A piano track is ready: play it with a USB MIDI keyboard, or press
    Ctrl+K (Musical Typing) and use A S D F G H J K L (white keys) / W E T Y U O P (black keys).
+   For whole chords: click Chords (or press H), then Ctrl+Shift+K (Chord Keys): every key on the
+   number row and the letter rows plays the chord shown on it. Click a key to change its chord,
+   drag keys around, pick a bank; [ ] octave, - = transpose. Banks follow the song's key.
 2. "+ Track": Drummer (a kit plus 8 bars of groove), Software Instrument (piano, keys,
    strings, synths...), HomeKeys 20 (80s keyboard with a 20-rhythm rhythm box), Vintage Rhythm
    Box, Sampler, Drum Pads, Loop Station, Beat Lab (groovebox), Junkyard Percussion (junk, finger
-   snaps, bowed strings, sound spaces), Whistler, Audio: Guitar or Bass (records through Amp & Pedals),
+   snaps, bowed strings, sound spaces), Whistler, Choir Loft (a choir or a singer built from people:
+   click singers on its stage to change who they are), Audio: Guitar or Bass (records through Amp & Pedals),
    Microphone / Vocals (pick a vocal sound: studio, folk, psych, weird...), and Aux Buses (a shared
    reverb or delay your tracks send to). Right-click an audio track > Vocal Sound to change it.
 3. Library (left): Sounds = instruments and drum kits, Drums = finger-snap loops, junkyard grooves,

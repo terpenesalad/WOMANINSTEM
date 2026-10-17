@@ -70,6 +70,14 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.9
+
+- **Choir Loft**: a choir, or one singer, built from people. Nothing is sampled: every singer is a modelled voice (vocal folds making a glottal pulse, then a throat, mouth, lips and nose shaping it into vowels), so no two notes are quite the same. Up to 64 singers: set the cast (how many, women and men, ages, how different they are) and re-roll it, or click anyone on the stage to change their face and body (head, face length, jaw, chin, cheekbones, nose, lips, mouth, neck, chest), which changes their voice: tract length, formants, range and break. Ten singing styles (classical, choral, early music, gospel, pop, folk, belt, blues, lullaby, overtone singing), a vowel chart with moving vowels, consonant onsets (doo, bah, mm, la...), humming, ensemble looseness, breaths between phrases. The choir shares out the chords you play (or takes them in octaves, round robin, or one singer legato). They stand on a stage in front of a stereo mic pair, in a church, a cathedral, a hall, a cave or a forest. 31 presets.
+- **Chord Keys**: play whole chords from your computer keyboard. All 40 keys (the number row and the three letter rows) each hold a chord, and you choose which chord goes where: root, type (triads, sevenths, sus, add9, 9ths, 11ths, 13ths, altered...), inversion, octave, voicing and a bass note, or just type a name like `Am7/G`. Drag keys around to rearrange them. Ten banks to start from (pop and rock, minor moods, jazz and soul, blues, neo-soul, 60s psych, dream pop, folk, every major and minor), banks follow the song's key, smooth voice leading, strum, latch, and your own banks saved to files. Open the **Chords** panel (`H`) and press `Ctrl+Shift+K`.
+
+<p align="center"><img src="docs/choir-loft.png" width="900" alt="Choir Loft"></p>
+<p align="center"><img src="docs/chord-keys.png" width="900" alt="Chord Keys"></p>
+
 ### New in 3.8
 
 - **Echo Deck**: an analog-style echo processor with its own front panel (spinning reels, VU meter, amber displays). Ten echo machines (studio tape, tape echo unit, valve tape, worn tape, cassette, bucket brigade, oil can, early digital, clean digital, lo-fi radio) whose repeats darken, saturate and wobble as they go round; times in ms or notes (straight / dotted / triplet) from the song tempo or tap tempo; single, dual, ping-pong and 8-step rhythm modes; groove, feel, wobble, diffusion, width, ducking, hold, and feedback past 100%. 28 presets. Also on the Play Along pedalboard.
@@ -139,7 +147,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 <p align="center"><img src="docs/homekeys.png" width="720" alt="HomeKeys 20"></p>
 
 **Tracks**
-- **Software Instrument** tracks, played from a **USB MIDI keyboard** (any class-compliant keyboard works, plug it in and go) or your computer keyboard (**Musical Typing**, `Ctrl+K`).
+- **Software Instrument** tracks, played from a **USB MIDI keyboard** (any class-compliant keyboard works, plug it in and go) or your computer keyboard (**Musical Typing**, `Ctrl+K`, or whole chords with **Chord Keys**, `Ctrl+Shift+K`).
 - **Sound Library**: 287 built-in instruments and drum kits (GeneralUser GS): grand & electric pianos, organs, guitars, basses, strings, choirs, brass, woodwinds, synths, percussion and 13 drum kits. Load any other `.sf2` SoundFont too.
 - **Studio Synth**: a 16-voice analog-style synth (2 oscillators + sub + noise, resonant filter with envelope, LFO, glide / mono legato) with 16 presets.
 - **HomeKeys 20**: an 80s portable home keyboard. 18 tones (two early-80s digital dream organs, organs, electric piano, toy strings, vibes, glockenspiel, music box, choir, synth brass...), ensemble, vibrato, sustain, a *Vintage* knob (tape wobble, hiss, lo-fi), and an effects section: amp drive, a vibrato wobble and a big reverb. Its **rhythm box** has 20 rhythms (Slow Rock, Waltz, Bossa Nova, Rhumba, Beguine, Disco, Rock, 16 Beat, Soft Rock, Ballad, Swing, Shuffle, March, Tango, Samba, Reggae, Country, Polka, Cha-Cha, Mambo) on 4 drum-machine sounds, with fills, START / SYNC START, and **auto accompaniment**: hold a chord (or one key) in the left hand and it plays bass and chords in the rhythm. It follows the song's tempo while the song plays.
@@ -147,6 +155,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 - **Sampler**: drop in any audio file. *Classic* plays it across the keys, *One Shot* plays it to the end, *Slice* chops it by transients (or 4/8/16/32 equal slices), one slice per key from C2. Start/end and loop markers (with crossfade), ADSR, filter with envelope, velocity, glide, mono/legato, reverse.
 - **Drum Pads**: 16 pads (the standard drum notes, so drum grooves play them) with your own samples or four synthesized kits. Per pad: tune, gain, pan, decay, filter, reverse, choke group.
 - **Beat Lab**: a step-sequencer groovebox (see *New in 3.1*). It follows the song while it plays, or runs on its own; lanes also play from MIDI notes C2-G2 and the chosen lane plays melodically from C3 up.
+- **Choir Loft**: up to 64 modelled singers (children, women and men of any age) whose faces and bodies shape their voices, ten singing styles, a vowel chart with moving vowels, consonant onsets and humming, on a stage with a stereo mic pair in a designed room (see *New in 3.9*).
 - **Drummer**: 18 grooves played by a real kit (rock, pop, four-on-the-floor, disco, funk, Motown, boom bap, trap, half-time, shuffle, jazz swing, reggae, bossa nova, metal...) with crash cymbals and tom fills. Drop 8 bars in and edit any hit.
 - **Audio** tracks for guitar, bass, vocals or anything else, mono or stereo inputs, with input monitoring.
 - **Your Play-Along rig as a plugin**: *Amp & Pedals* puts the whole rig (gate, comp, drive, amp/NAM, cab/IR, EQ, chorus, delay, reverb, tuner) on any track.
@@ -198,6 +207,7 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 | `Enter` | go to start | `,` / `.` | back / forward a bar |
 | `C` | cycle on/off | `K` | metronome on/off |
 | `Ctrl+K` | Musical Typing (`A`–`'` play notes, `W E T Y U O P` sharps, `Z`/`X` octave, `C`/`V` velocity) | `Ctrl+Z` / `Ctrl+Y` | undo / redo |
+| `Ctrl+Shift+K` | Chord Keys (every key plays its chord, `[` `]` octave, `-` `=` transpose) | `H` | Chords panel |
 | `Ctrl+T` | split at playhead | `Ctrl+D` | duplicate |
 | `Ctrl+C` / `Ctrl+V` | copy / paste at playhead | `Del` | delete |
 | `M` / `S` | mute / solo the selected track | `↑` / `↓` | select track |
@@ -282,11 +292,11 @@ Source/
   Engine/       real-time audio callback, stem player (loop, time-stretch), recorder, scope feed
   Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
   Daw/
-    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, MIDI files, tempo detection
+    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, chord keys, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
     Plugins/    built-in effects, Echo Deck, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
     Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer),
-                 Junkyard Percussion (modal / string / noise synthesis), Whistler
+                 Junkyard Percussion (modal / string / noise synthesis), Whistler, Choir Loft (source-filter singers on a modelled stage)
   UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays
     Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors

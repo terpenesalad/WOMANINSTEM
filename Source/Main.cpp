@@ -5,6 +5,8 @@
 #include "UI/LookAndFeel.h"
 #include "UI/Studio/PluginEditors.h"
 #include "UI/Studio/PluginMenus.h"
+#include "UI/Studio/ChordKeysPanel.h"
+#include "UI/Studio/EditorParts.h"
 #include "Daw/Plugins/PluginHost.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
 
@@ -109,6 +111,12 @@ public:
         failures += runPluginDockSelfTest();
         failures += runScopeSelfTest();
         failures += runPedalboardSelfTest();
+        failures += runChordKeysSelfTest();
+        if (const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {}); snapDir.isNotEmpty())
+        {
+            juce::FileOutputStream out (juce::File (snapDir).getChildFile ("choir-portraits.png"));
+            if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (daw::choirPortraitSheet(), out); }
+        }
         std::cout << (failures == 0 ? "UI SELF-TEST PASSED" : "UI SELF-TEST FAILED") << std::endl;
         return failures == 0 ? 0 : 1;
     }
@@ -166,6 +174,44 @@ public:
         }
         for (auto& [id, p] : procs) p->releaseResources();
         return failures;
+    }
+
+    /** The Studio's Chords panel lays out, paints and edits a bank (WIS_UI_SNAPSHOTS saves studio-chords*.png). */
+    static int runChordKeysSelfTest()
+    {
+        daw::ChordKeysState state (nullptr);
+        daw::ChordKeysPanel panel (state);
+        int auditioned = -1;
+        panel.onAudition = [&] (int slot) { auditioned = slot; };
+        panel.songKey = [] { return std::pair<int, int> { 2, 0 }; };   // D major
+        auto paint = [&] (const juce::String& name)
+        {
+            juce::Image img (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+            juce::Graphics g (img);
+            panel.paintEntireComponent (g, true);
+            const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {});
+            if (snapDir.isNotEmpty())
+            {
+                juce::FileOutputStream out (juce::File (snapDir).getChildFile (name));
+                if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (img, out); }
+            }
+        };
+        state.enabled = true;
+        panel.setSize (1660, 320);
+        panel.setVisible (true);
+        panel.selectSlot (15);   // Y
+        panel.setHeld ({ 15, 2 });
+        panel.refresh();
+        paint ("studio-chords.png");
+        panel.setSize (900, 260);
+        paint ("studio-chords-small.png");
+        state.current = (int) state.banks.size() - 1;   // the empty bank
+        panel.refresh();
+        paint ("studio-chords-empty.png");
+        const bool ok = state.banks.size() >= 9 && daw::chordkeys::chordName (state.banks[0].slots[0], state.effectiveTranspose (2, 0)) == "D";
+        std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio Chords panel: draws the keyboard and follows the song key (key 1 = D in D major)" << std::endl;
+        juce::ignoreUnused (auditioned);
+        return ok ? 0 : 1;
     }
 
     /** The rig panel with an edited pedalboard lays out and paints (WIS_UI_SNAPSHOTS saves rig-pedalboard.png). */

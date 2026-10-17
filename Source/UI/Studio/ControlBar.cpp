@@ -229,7 +229,7 @@ ControlBar::ControlBar (StudioContext& c) : ctx (c), lcd (c)
     addAndMakeVisible (lcd);
 
     for (auto [b, cb] : { std::pair<juce::TextButton*, std::function<void()>*> { &browserB, &onToggleBrowser }, { &editorB, &onToggleEditor },
-                          { &mixerB, &onToggleMixer }, { &keysB, &onToggleKeys }, { &pluginsB, &onTogglePlugins } })
+                          { &mixerB, &onToggleMixer }, { &keysB, &onToggleKeys }, { &pluginsB, &onTogglePlugins }, { &chordsB, &onToggleChords } })
     {
         b->setClickingTogglesState (false);
         b->setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.8f));
@@ -242,6 +242,7 @@ ControlBar::ControlBar (StudioContext& c) : ctx (c), lcd (c)
     mixerB.setTooltip ("Show / hide the mixer (X)");
     keysB.setTooltip ("Show / hide the on-screen keyboard");
     pluginsB.setTooltip ("Show / hide the open instruments and effects (P)");
+    chordsB.setTooltip ("Chord Keys: play whole chords from your computer keyboard and choose which chord is on each key (H; Ctrl+Shift+K turns them on)");
 
     master.setRange (-40.0, 6.0, 0.1);
     master.setSkewFactorFromMidPoint (-10.0);
@@ -275,13 +276,14 @@ void ControlBar::syncToggles()
     for (auto* b : { &cycleB, &metroB, &countB }) b->repaint();
 }
 
-void ControlBar::setPanelStates (bool browser, bool editor, bool mixer, bool keys, bool plugins, bool typing)
+void ControlBar::setPanelStates (bool browser, bool editor, bool mixer, bool keys, bool plugins, bool typing, bool chords)
 {
     browserB.setToggleState (browser, juce::dontSendNotification);
     editorB.setToggleState (editor, juce::dontSendNotification);
     mixerB.setToggleState (mixer, juce::dontSendNotification);
     keysB.setToggleState (keys, juce::dontSendNotification);
     pluginsB.setToggleState (plugins, juce::dontSendNotification);
+    chordsB.setToggleState (chords, juce::dontSendNotification);
     typingB.lit = typing;
     typingB.repaint();
 }
@@ -312,7 +314,8 @@ void ControlBar::resized()
     browserB.setBounds (r.removeFromLeft (70)); r.removeFromLeft (6);
     projectButton.setBounds (r.removeFromLeft (80)); r.removeFromLeft (14);
 
-    auto right = r.removeFromRight (374);
+    auto right = r.removeFromRight (438);
+    chordsB.setBounds (right.removeFromRight (60)); right.removeFromRight (4);
     pluginsB.setBounds (right.removeFromRight (60)); right.removeFromRight (4);
     keysB.setBounds (right.removeFromRight (52)); right.removeFromRight (4);
     mixerB.setBounds (right.removeFromRight (58)); right.removeFromRight (4);

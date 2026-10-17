@@ -98,12 +98,35 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     controlBar.onToggleMixer = [this] { setBottomPanel (bottomPanel == 2 ? 0 : 2); };
     controlBar.onToggleKeys = [this] { setBottomPanel (bottomPanel == 3 ? 0 : 3); };
     controlBar.onTogglePlugins = [this] { setBottomPanel (bottomPanel == 4 ? 0 : 4); };
+    controlBar.onToggleChords = [this] { setBottomPanel (bottomPanel == 5 ? 0 : 5); };
+
+    // Chord Keys: chords on the computer keyboard
+    chordPanel.songKey = [this] { return songKey(); };
+    chordPanel.onToggleEnabled = [this] { toggleChordKeys(); };
+    chordPanel.onFocusBack = [this] { grabKeyboardFocus(); };
+    chordPanel.onAudition = [this] (int slot)
+    {
+        const int owner = -1000 - slot;
+        chordPlayer.release (owner);
+        playChordSlot (slot, owner);
+        juce::Timer::callAfterDelay (650, [safe = juce::Component::SafePointer<StudioPage> (this), owner]
+        {
+            if (safe == nullptr) return;
+            safe->chordPlayer.release (owner);
+            safe->heldChordKeys.erase (owner);
+            safe->updateHeldChords();
+        });
+        grabKeyboardFocus();
+    };
     controlBar.onToggleTyping = [this]
     {
         typing = ! typing;
         releaseTypingKeys (true);
-        setStatus (typing ? "Musical Typing ON: A-' play notes, W E T Y U O P sharps, Z/X octave, C/V velocity. Ctrl+K to turn off."
-                          : "Musical Typing off.");
+        if (typing && chordState.enabled)
+            setStatus ("Musical Typing ON with Chord Keys: every key plays its chord ([ ] octave, - = transpose). Ctrl+Shift+K for single notes, Ctrl+K to turn off.");
+        else
+            setStatus (typing ? "Musical Typing ON: A-' play notes, W E T Y U O P sharps, Z/X octave, C/V velocity. Ctrl+K to turn off."
+                              : "Musical Typing off.");
         updatePanelButtons();
         grabKeyboardFocus();
     };
@@ -129,7 +152,7 @@ StudioPage::StudioPage (Project& p, DawEngine& e, PluginHost& h, juce::Propertie
     status.setFont (uiFont (12.0f));
     status.setColour (juce::Label::textColourId, theme::textDim);
 
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &controlBar, &browser, &arrangement, &pianoRoll, &audioEditor, &mixer, &dock, &keyboard, &keysHint, &status, &splitter })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &controlBar, &browser, &arrangement, &pianoRoll, &audioEditor, &mixer, &dock, &chordPanel, &keyboard, &keysHint, &status, &splitter })
         addChildComponent (c);
     for (juce::Component* c : std::initializer_list<juce::Component*> { &controlBar, &browser, &arrangement, &status, &splitter })
         c->setVisible (true);
@@ -267,6 +290,12 @@ void StudioPage::setBottomPanel (int which)
     bottomPanel = which;
     updatePanelButtons();
     resized();
+    if (which == 5 && chordPanel.getHeight() < 300)
+    {
+        // the chord keyboard needs a bit of room
+        const int total = chordPanel.getBottom() - arrangement.getY();
+        if (total > 460) { layout.setItemPosition (1, juce::jmax (140, total - 306)); resized(); }
+    }
 }
 
 void StudioPage::toggleBrowser()
@@ -278,7 +307,8 @@ void StudioPage::toggleBrowser()
 
 void StudioPage::updatePanelButtons()
 {
-    controlBar.setPanelStates (showBrowser, bottomPanel == 1, bottomPanel == 2, bottomPanel == 3, bottomPanel == 4, typing);
+    controlBar.setPanelStates (showBrowser, bottomPanel == 1, bottomPanel == 2, bottomPanel == 3, bottomPanel == 4, typing, bottomPanel == 5);
+    chordPanel.refresh();
 }
 
 void StudioPage::paint (juce::Graphics& g)
@@ -300,6 +330,7 @@ void StudioPage::resized()
     audioEditor.setVisible (bottomPanel == 1 && ! pianoRoll.isVisible());
     mixer.setVisible (bottomPanel == 2);
     dock.setVisible (bottomPanel == 4);
+    chordPanel.setVisible (bottomPanel == 5);
     keyboard.setVisible (bottomPanel == 3);
     keysHint.setVisible (bottomPanel == 3);
     splitter.setVisible (bottomPanel != 0);
@@ -312,7 +343,8 @@ void StudioPage::resized()
 
     juce::Component* bottom = bottomPanel == 1 ? (pianoRoll.isVisible() ? (juce::Component*) &pianoRoll : (juce::Component*) &audioEditor)
                             : bottomPanel == 2 ? (juce::Component*) &mixer
-                            : bottomPanel == 4 ? (juce::Component*) &dock : nullptr;
+                            : bottomPanel == 4 ? (juce::Component*) &dock
+                            : bottomPanel == 5 ? (juce::Component*) &chordPanel : nullptr;
     juce::Component dummy;
     juce::Component* comps[] = { &arrangement, &splitter, bottom != nullptr ? bottom : &dummy };
     layout.layOutComponents (comps, 3, r.getX(), r.getY(), r.getWidth(), r.getHeight(), true, true);
@@ -457,6 +489,7 @@ void StudioPage::addTrackMenu()
     m.addItem (15, "Beat Lab  (groovebox: beats, loops, samples, glitch)");
     m.addItem (19, "Junkyard Percussion  (junk, finger snaps, bowed strings, sound spaces)");
     m.addItem (20, "Whistler  (whistling that glides between notes)");
+    m.addItem (21, "Choir Loft  (a choir or a singer, built from people)");
     m.addItem (18, "Plugin from a File...  (a .dll / .vst3 / .clap you downloaded, old 32-bit VSTs too)");
     m.addSeparator();
     m.addItem (12, "Aux Bus: Reverb  (shared reverb you send tracks to)");
@@ -509,6 +542,7 @@ void StudioPage::addTrackMenu()
                 break;
             }
             case 20: t = project.addTrack (kindInstrument, "Whistler", insertAt); project.setInstrument (t, builtinPresetRef ("whistle", 0)); break;
+            case 21: t = project.addTrack (kindInstrument, "Choir", insertAt); project.setInstrument (t, builtinPresetRef ("choir", 0)); break;
             case 5: t = project.addTrack (kindAudio, "Audio", insertAt); t.v.setProperty (ids::arm, true, nullptr); break;
             case 6: t = project.addTrack (kindInstrument, "Synth", insertAt); project.setInstrument (t, synthRef (1)); break;
             case 7: t = project.addTrack (kindInstrument, "HomeKeys 20", insertAt); project.setInstrument (t, builtinPresetRef ("homekeys", 0)); break;
@@ -565,6 +599,12 @@ void StudioPage::addTrackMenu()
         }
         else if (r == 20)
             setStatus ("Whistler: play legato (hold one key while pressing the next) and it glides between the notes.");
+        else if (r == 21)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.instrument());
+            setStatus ("Choir Loft: play chords and the choir shares them out. Click a singer on the stage to change who they are; drag the vowel; try the presets.");
+        }
         else if (r >= 12)
             setStatus ("Bus added. Send tracks to it from the mixer (+ Send) or route a track's output into it.");
         else if (r == 11)
@@ -1157,6 +1197,7 @@ void StudioPage::paste()
 bool StudioPage::handleTypingKey (const juce::KeyPress& k)
 {
     if (! typing || k.getModifiers().isCommandDown() || k.getModifiers().isCtrlDown() || k.getModifiers().isAltDown()) return false;
+    if (chordState.enabled) return handleChordKey (k);
     const auto ch = juce::CharacterFunctions::toLowerCase (k.getTextCharacter());
     if (ch == 'z') { typingOctave = juce::jmax (1, typingOctave - 1); setStatus ("Musical Typing: octave C" + juce::String (typingOctave - 1)); return true; }
     if (ch == 'x') { typingOctave = juce::jmin (8, typingOctave + 1); setStatus ("Musical Typing: octave C" + juce::String (typingOctave - 1)); return true; }
@@ -1175,8 +1216,95 @@ bool StudioPage::handleTypingKey (const juce::KeyPress& k)
     return true;
 }
 
+std::pair<int, int> StudioPage::songKey() const { return { project.key(), project.scale() }; }
+
+bool StudioPage::handleChordKey (const juce::KeyPress& k)
+{
+    const auto ch = k.getTextCharacter();
+    auto status = [this] (const juce::String& what)
+    {
+        setStatus ("Chord Keys: " + what);
+        chordPanel.refresh();
+    };
+    if (ch == '[' || ch == '{') { chordState.octave = juce::jmax (1, chordState.octave - 1); chordState.changed(); lastChordNotes.clear(); status ("octave C" + juce::String (chordState.octave)); return true; }
+    if (ch == ']' || ch == '}') { chordState.octave = juce::jmin (7, chordState.octave + 1); chordState.changed(); lastChordNotes.clear(); status ("octave C" + juce::String (chordState.octave)); return true; }
+    if (ch == '-' || ch == '_') { chordState.transpose = juce::jmax (-11, chordState.transpose - 1); chordState.changed(); status ("transpose " + juce::String (chordState.transpose)); return true; }
+    if (ch == '=' || ch == '+') { chordState.transpose = juce::jmin (11, chordState.transpose + 1); chordState.changed(); status ("transpose " + juce::String (chordState.transpose)); return true; }
+    const int slot = chordkeys::keyIndexForChar (ch);
+    if (slot < 0) return false;
+    const int code = k.getKeyCode();
+    if (heldChordKeys.count (code) > 0) return true;   // auto-repeat
+    playChordSlot (slot, code);
+    return true;
+}
+
+void StudioPage::playChordSlot (int slot, int owner)
+{
+    const auto& s = chordState.bank().slots[(size_t) slot];
+    chordPanel.selectSlot (slot);
+    if (! s.used)
+    {
+        setStatus ("Key " + chordkeys::keyLabel (slot) + " has no chord yet: pick one in the Chords panel (click Chords, or press H with Musical Typing off).");
+        return;
+    }
+    const auto [key, scale] = songKey();
+    const auto opts = chordState.options (key, scale);
+    auto notes = chordkeys::notesFor (s, opts, owner >= 0 ? lastChordNotes : std::vector<int>());
+    if (owner >= 0)
+    {
+        lastChordNotes = notes;
+        if (chordState.latch)
+        {
+            chordPlayer.releaseAll();
+            heldChordKeys.clear();
+            latchedSlot = slot;
+        }
+    }
+    int dir = chordState.strumDir;
+    if (dir == 2) { strumFlip = ! strumFlip; dir = strumFlip ? 0 : 1; }
+    chordPlayer.press (owner, notes, (float) chordState.velocity / 127.0f, chordState.strumMs, dir);
+    heldChordKeys[owner] = slot;
+    updateHeldChords();
+    juce::StringArray names;
+    for (int n : notes) names.add (juce::MidiMessage::getMidiNoteName (n, false, true, 4));
+    setStatus (chordkeys::chordName (s, opts.transpose, chordState.spelling (key, scale)) + "   (" + names.joinIntoString (" ") + ")");
+}
+
+void StudioPage::updateHeldChords()
+{
+    std::set<int> lit;
+    for (auto& [owner, slot] : heldChordKeys) lit.insert (slot);
+    if (chordState.latch && latchedSlot >= 0 && ! chordPlayer.owners().empty()) lit.insert (latchedSlot);
+    chordPanel.setHeld (lit);
+}
+
+void StudioPage::toggleChordKeys()
+{
+    chordState.enabled = ! chordState.enabled;
+    if (chordState.enabled) typing = true;
+    releaseTypingKeys (true);
+    chordState.changed();
+    updatePanelButtons();
+    setStatus (chordState.enabled ? "Chord Keys ON: the number row and the letter rows play the chords in the Chords panel ([ ] octave, - = transpose). Ctrl+Shift+K to go back to single notes."
+                                  : "Chord Keys off: Musical Typing plays single notes again (Ctrl+K turns it off).");
+    grabKeyboardFocus();
+}
+
 void StudioPage::releaseTypingKeys (bool all)
 {
+    for (auto it = heldChordKeys.begin(); it != heldChordKeys.end();)
+    {
+        if (it->first < 0) { ++it; continue; }   // a chord being auditioned from the panel
+        if (all || ! juce::KeyPress::isKeyCurrentlyDown (it->first))
+        {
+            if (! chordState.latch || all) chordPlayer.release (it->first);
+            it = heldChordKeys.erase (it);
+        }
+        else ++it;
+    }
+    if (all) { chordPlayer.releaseAll(); latchedSlot = -1; lastChordNotes.clear(); }
+    updateHeldChords();
+
     for (auto it = heldTypingKeys.begin(); it != heldTypingKeys.end();)
     {
         if (all || ! juce::KeyPress::isKeyCurrentlyDown (it->first))
@@ -1190,7 +1318,7 @@ void StudioPage::releaseTypingKeys (bool all)
 
 bool StudioPage::keyStateChanged (bool)
 {
-    if (! heldTypingKeys.empty()) releaseTypingKeys (false);
+    if (! heldTypingKeys.empty() || ! heldChordKeys.empty()) releaseTypingKeys (false);
     return false;
 }
 
@@ -1200,6 +1328,7 @@ bool StudioPage::keyPressed (const juce::KeyPress& k)
     const auto shift = juce::ModifierKeys::shiftModifier;
 
     if (k == juce::KeyPress ('k', cmd, 0)) { controlBar.onToggleTyping(); return true; }
+    if (k == juce::KeyPress ('k', cmd | shift, 0)) { toggleChordKeys(); return true; }
     if (handleTypingKey (k)) return true;
 
     if (k == juce::KeyPress::spaceKey) { engine.togglePlay(); return true; }
@@ -1238,6 +1367,7 @@ bool StudioPage::keyPressed (const juce::KeyPress& k)
         case 'x': setBottomPanel (bottomPanel == 2 ? 0 : 2); return true;
         case 'e': setBottomPanel (bottomPanel == 1 ? 0 : 1); return true;
         case 'p': setBottomPanel (bottomPanel == 4 ? 0 : 4); return true;
+        case 'h': setBottomPanel (bottomPanel == 5 ? 0 : 5); return true;
         case 'b': toggleBrowser(); return true;
         case 'm': if (auto t = project.trackById (ctx.selectedTrack); t.isValid()) { ctx.beginEdit ("Mute"); t.v.setProperty (ids::mute, ! (bool) t.v[ids::mute], project.um()); } return true;
         case 's': if (auto t = project.trackById (ctx.selectedTrack); t.isValid()) { ctx.beginEdit ("Solo"); t.v.setProperty (ids::solo, ! (bool) t.v[ids::solo], project.um()); } return true;
@@ -1484,6 +1614,7 @@ void StudioPage::showShortcuts()
                     "Space  play / stop          R  record          Enter  go to start\n"
                     "C  cycle on/off          K  metronome          ,  .  back / forward a bar\n"
                     "Ctrl+K  Musical Typing (A S D F... play notes, Z/X octave)\n"
+                    "Ctrl+Shift+K  Chord Keys (every key plays a chord; [ ] octave, - = transpose)          H  Chords panel\n"
                     "Ctrl+Z / Ctrl+Y  undo / redo          Ctrl+S  save          Ctrl+E  export\n"
                     "Ctrl+T  split at playhead          Ctrl+D  duplicate          Ctrl+C / V  copy / paste\n"
                     "Del  delete          M / S  mute / solo track          Up / Down  select track\n"

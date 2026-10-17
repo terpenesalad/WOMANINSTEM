@@ -8,6 +8,8 @@
 #include "MixerView.h"
 #include "BrowserPanel.h"
 #include "PluginEditors.h"
+#include "ChordKeysPanel.h"
+#include "Daw/Model/ChordKeys.h"
 #include "Library/SongLibrary.h"
 
 namespace wis::daw
@@ -48,7 +50,7 @@ private:
     void timerCallback() override;
 
     // panels
-    void setBottomPanel (int which);   // 0 none, 1 editor, 2 mixer, 3 keys, 4 plugins
+    void setBottomPanel (int which);   // 0 none, 1 editor, 2 mixer, 3 keys, 4 plugins, 5 chords
     void toggleBrowser();
     void updatePanelButtons();
 
@@ -93,6 +95,12 @@ private:
     // musical typing
     bool handleTypingKey (const juce::KeyPress&);
     void releaseTypingKeys (bool all);
+    // chord keys
+    bool handleChordKey (const juce::KeyPress&);
+    void playChordSlot (int slot, int owner);
+    void toggleChordKeys();
+    void updateHeldChords();
+    std::pair<int, int> songKey() const;
 
     Project& project;
     DawEngine& engine;
@@ -108,6 +116,13 @@ private:
     AudioClipEditor audioEditor { ctx };
     MixerView mixer { ctx };
     PluginDock dock;
+    ChordKeysState chordState { &settings };
+    ChordPlayer chordPlayer { engine.keyboardState };
+    ChordKeysPanel chordPanel { chordState };
+    std::vector<int> lastChordNotes;
+    std::map<int, int> heldChordKeys;   // keyCode -> chord key
+    int latchedSlot = -1;
+    bool strumFlip = false;
     juce::MidiKeyboardComponent keyboard { engine.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard };
     juce::Label keysHint, status;
     juce::StretchableLayoutResizerBar splitter { &layout, 1, false };

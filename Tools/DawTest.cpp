@@ -27,6 +27,9 @@
 #include "Daw/Model/JunkLoops.h"
 #include "Daw/Model/VocalChains.h"
 #include "Daw/Plugins/EchoDeck.h"
+#include "Daw/Instruments/ChoirLoft.h"
+#include "Daw/Model/ChordKeys.h"
+#include <juce_dsp/juce_dsp.h>
 #include <iostream>
 
 using namespace wis::daw;
@@ -292,6 +295,75 @@ int main (int argc, char** argv)
             if (auto w = juce::WavAudioFormat().createWriterFor (os, opts))
                 w->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
             std::cout << f.getFullPathName() << std::endl;
+        }
+        return 0;
+    }
+
+    // dawtest --render-choir <folder>: Choir Loft presets on a chord progression, solos on a melody (for listening)
+    if (argc > 2 && juce::String (argv[1]) == "--render-choir")
+    {
+        const juce::File dir { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        dir.createDirectory();
+        struct Ev { int note; double on, off; int vel; };
+        auto render = [] (ChoirLoft& p, const std::vector<Ev>& evs, double seconds, const juce::File& f)
+        {
+            p.setPlayConfigDetails (0, 2, sr, 512);
+            p.setNonRealtime (true);
+            p.prepareToPlay (sr, 512);
+            p.waitUntilReady();
+            juce::MidiBuffer all;
+            for (auto& e : evs)
+            {
+                all.addEvent (juce::MidiMessage::noteOn (1, e.note, (juce::uint8) e.vel), (int) (e.on * sr));
+                all.addEvent (juce::MidiMessage::noteOff (1, e.note), (int) (e.off * sr));
+            }
+            const int total = (int) (seconds * sr);
+            juce::AudioBuffer<float> out (2, total);
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            for (int pos = 0; pos < total; pos += 512)
+            {
+                const int n = std::min (512, total - pos);
+                juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+                view.clear();
+                juce::MidiBuffer mb;
+                for (const auto meta : all)
+                    if (meta.samplePosition >= pos && meta.samplePosition < pos + n) mb.addEvent (meta.getMessage(), meta.samplePosition - pos);
+                p.processBlock (view, mb);
+            }
+            const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+            auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (16);
+            if (auto w = juce::WavAudioFormat().createWriterFor (os, opts)) w->writeFromAudioSampleBuffer (out, 0, total);
+            std::cout << f.getFileName() << ": peak " << out.getMagnitude (0, total) << "  rms "
+                      << juce::Decibels::gainToDecibels (out.getRMSLevel (0, 0, total)) << " dB  (" << juce::String (ms / (seconds * 10.0), 1) << "% of real time)" << std::endl;
+        };
+        // I - vi - IV - V in C, with a bass note, 2.2 s per chord
+        std::vector<Ev> prog;
+        {
+            const int chords[4][4] = { { 48, 60, 64, 67 }, { 45, 60, 64, 69 }, { 41, 60, 65, 69 }, { 43, 59, 62, 67 } };
+            for (int c = 0; c < 4; ++c)
+                for (int n : chords[c]) prog.push_back ({ n, 0.2 + c * 2.2, 0.2 + c * 2.2 + 2.1, 90 });
+        }
+        juce::String only = argc > 3 ? juce::String (argv[3]) : juce::String();
+        ChoirLoft names;
+        for (int pr = 0; pr < names.getNumPrograms(); ++pr)
+        {
+            if (only.isNotEmpty() && ! names.getProgramName (pr).containsIgnoreCase (only)) continue;
+            ChoirLoft c;
+            c.setCurrentProgram (pr);
+            const bool soloMode = (int) c.param ("mode") == ChoirLoft::solo;
+            std::vector<Ev> evs;
+            if (soloMode)
+            {
+                // a slow legato melody (overlapping notes glide), transposed to suit the voice
+                const int base = c.getSinger (0).sex > 0.5f ? 50 : 64;
+                const int mel[] = { 0, 4, 7, 12, 11, 7, 9, 5, 4, 2, 0 };
+                double t = 0.2;
+                for (int i = 0; i < 11; ++i) { const double len = i == 10 ? 2.0 : (i % 4 == 3 ? 1.2 : 0.75); evs.push_back ({ base + mel[i], t, t + len + 0.06, 80 + (i % 3) * 10 }); t += len; }
+            }
+            else evs = prog;
+            render (c, evs, soloMode ? 11.0 : 11.5, dir.getChildFile (juce::String (pr + 1).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (c.getProgramName (pr)) + ".wav"));
         }
         return 0;
     }
@@ -1993,6 +2065,292 @@ int main (int argc, char** argv)
             project.removeTrack (t);
             project.setTempo (120.0);
             engine.rebuildNow();
+        }
+    }
+
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Choir Loft:" << std::endl;
+    {
+        struct Note { int note; float vel; double on, off; };
+        auto play = [] (ChoirLoft& p, std::vector<Note> notes, double seconds, int* peakActive = nullptr)
+        {
+            p.setPlayConfigDetails (0, 2, sr, block);
+            p.prepareToPlay (sr, block);
+            p.waitUntilReady();
+            const int total = (int) (seconds * sr);
+            juce::AudioBuffer<float> out (2, total);
+            out.clear();
+            int most = 0;
+            for (int pos = 0; pos < total; pos += block)
+            {
+                const int n = juce::jmin (block, total - pos);
+                juce::MidiBuffer midi;
+                for (auto& nt : notes)
+                {
+                    const int on = (int) (nt.on * sr), off = (int) (nt.off * sr);
+                    if (on >= pos && on < pos + n) midi.addEvent (juce::MidiMessage::noteOn (1, nt.note, nt.vel), on - pos);
+                    if (off >= pos && off < pos + n) midi.addEvent (juce::MidiMessage::noteOff (1, nt.note), off - pos);
+                }
+                juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+                p.processBlock (view, midi);
+                most = juce::jmax (most, p.getActiveSingers());
+            }
+            if (peakActive != nullptr) *peakActive = most;
+            return out;
+        };
+        auto pitchOf = [] (const juce::AudioBuffer<float>& b, int from, int len)
+        {
+            std::vector<float> x ((size_t) len);
+            for (int i = 0; i < len; ++i) x[(size_t) i] = b.getSample (0, from + i) + b.getSample (1, from + i);
+            const int minLag = (int) (sr / 1200), maxLag = (int) (sr / 60);
+            std::vector<double> ac ((size_t) maxLag + 2, 0.0);
+            for (int lag = minLag; lag <= maxLag; ++lag)
+            {
+                double acc = 0;
+                for (int i = 0; i + lag < len; ++i) acc += x[(size_t) i] * x[(size_t) (i + lag)];
+                ac[(size_t) lag] = acc;
+            }
+            const double peak = *std::max_element (ac.begin(), ac.end());
+            for (int lag = minLag; lag <= maxLag; ++lag)
+                if (ac[(size_t) lag] > 0.9 * peak && ac[(size_t) lag] >= ac[(size_t) lag - 1] && ac[(size_t) lag] >= ac[(size_t) lag + 1]) return sr / lag;
+            return 0.0;
+        };
+        // energy (dB) in a frequency band, averaged over FFT frames
+        auto bandDb = [] (const juce::AudioBuffer<float>& b, int from, int len, double lo, double hi)
+        {
+            constexpr int order = 13, size = 1 << order;
+            juce::dsp::FFT fft (order);
+            juce::dsp::WindowingFunction<float> win (size, juce::dsp::WindowingFunction<float>::hann);
+            double e = 0; int frames = 0;
+            for (int s = from; s + size <= from + len; s += size / 2, ++frames)
+            {
+                std::vector<float> x ((size_t) size * 2, 0.0f);
+                for (int i = 0; i < size; ++i) x[(size_t) i] = b.getSample (0, s + i) + b.getSample (1, s + i);
+                win.multiplyWithWindowingTable (x.data(), size);
+                fft.performFrequencyOnlyForwardTransform (x.data());
+                for (int k = (int) (lo * size / sr); k <= (int) (hi * size / sr); ++k) e += (double) x[(size_t) k] * x[(size_t) k];
+            }
+            return 10.0 * std::log10 (e / juce::jmax (1, frames) + 1.0e-20);
+        };
+        auto setup = [] (ChoirLoft& c, std::initializer_list<std::pair<const char*, float>> values)
+        {
+            c.setCurrentProgram (c.getNumPrograms() - 1);   // Init
+            for (auto [id, v] : { std::pair<const char*, float> { "space", 0.0f }, { "vibrato", 0.0f }, { "looseness", 0.0f }, { "style", 2.0f },
+                                  { "breaths", 0.0f }, { "diversity", 0.0f }, { "ageSpread", 0.0f }, { "mics", (float) ChoirLoft::micMono } })
+                c.setParam (id, v);
+            for (auto [id, v] : values) c.setParam (id, v);
+        };
+
+        {
+            ChoirLoft c;
+            setup (c, { { "singers", 1.0f }, { "women", 0.0f }, { "age", 35.0f }, { "mode", (float) ChoirLoft::solo }, { "release", 80.0f } });
+            auto a = play (c, { { 57, 0.8f, 0.05, 1.4 } }, 1.8);
+            const double hz = pitchOf (a, (int) (0.7 * sr), (int) (0.2 * sr));
+            check (allFinite (a) && rms (a, (int) (0.5 * sr), (int) (1.3 * sr)) > 0.003f && std::abs (hz - 220.0) < 220.0 * 0.02,
+                   "A man sings A3 in tune (" + juce::String (hz, 1) + " Hz, " + juce::String (juce::Decibels::gainToDecibels (rms (a, (int) (0.5 * sr), (int) (1.3 * sr))), 1) + " dB)");
+            check (rms (a, (int) (1.7 * sr), (int) (1.8 * sr)) < 0.0005f, "...and stops after the key comes up (" + juce::String (juce::Decibels::gainToDecibels (rms (a, (int) (1.7 * sr), (int) (1.8 * sr))), 1) + " dB)");
+
+            // vowels: "ee" has its 2nd formant high and its 1st low, "ah" the other way round
+            c.setParam ("vowelX", 0.0f); c.setParam ("vowelY", 0.0f);
+            auto ee = play (c, { { 50, 0.8f, 0.05, 1.4 } }, 1.4);
+            c.setParam ("vowelX", 0.5f); c.setParam ("vowelY", 1.0f);
+            auto ah = play (c, { { 50, 0.8f, 0.05, 1.4 } }, 1.4);
+            const double eeTilt = bandDb (ee, (int) (0.4 * sr), (int) (0.9 * sr), 1900, 2700) - bandDb (ee, (int) (0.4 * sr), (int) (0.9 * sr), 550, 900);
+            const double ahTilt = bandDb (ah, (int) (0.4 * sr), (int) (0.9 * sr), 1900, 2700) - bandDb (ah, (int) (0.4 * sr), (int) (0.9 * sr), 550, 900);
+            check (eeTilt > ahTilt + 12.0, "Vowels: 'ee' is bright up top, 'ah' is open in the middle (" + juce::String (eeTilt, 1) + " vs " + juce::String (ahTilt, 1) + " dB)");
+
+            // hum closes the mouth: much less high end
+            c.setParam ("hum", 1.0f);
+            auto hm = play (c, { { 50, 0.8f, 0.05, 1.4 } }, 1.4);
+            c.setParam ("hum", 0.0f);
+            const double humHi = bandDb (hm, (int) (0.4 * sr), (int) (0.9 * sr), 1500, 4000) - bandDb (hm, (int) (0.4 * sr), (int) (0.9 * sr), 100, 400);
+            const double ahHi = bandDb (ah, (int) (0.4 * sr), (int) (0.9 * sr), 1500, 4000) - bandDb (ah, (int) (0.4 * sr), (int) (0.9 * sr), 100, 400);
+            check (humHi < ahHi - 10.0, "Humming closes the mouth (" + juce::String (humHi, 1) + " vs " + juce::String (ahHi, 1) + " dB of highs)");
+
+            // legato glide in solo mode
+            c.setParam ("glide", 300.0f);
+            auto g = play (c, { { 57, 0.8f, 0.05, 1.6 }, { 64, 0.8f, 0.7, 1.6 } }, 1.7);
+            const double before = pitchOf (g, (int) (0.5 * sr), (int) (0.12 * sr));
+            const double during = pitchOf (g, (int) (0.80 * sr), (int) (0.05 * sr));
+            const double after = pitchOf (g, (int) (1.3 * sr), (int) (0.15 * sr));
+            check (std::abs (before - 220.0) < 6.0 && std::abs (after - 329.6) < 9.0 && during > 228.0 && during < 322.0,
+                   "Solo legato glides (" + juce::String (before, 0) + " -> " + juce::String (during, 0) + " -> " + juce::String (after, 0) + " Hz)");
+        }
+        {
+            // the body sets the formants: a child's vocal tract is shorter than a man's
+            auto man = ChoirLoft::describe ([] { ChoirLoft::Singer s; s.sex = 1.0f; s.age = 40.0f; return s; }());
+            auto woman = ChoirLoft::describe ([] { ChoirLoft::Singer s; s.sex = 0.0f; s.age = 40.0f; return s; }());
+            auto child = ChoirLoft::describe ([] { ChoirLoft::Singer s; s.sex = 0.0f; s.age = 8.0f; return s; }());
+            ChoirLoft::Singer longFace; longFace.sex = 1.0f; longFace.age = 40.0f; longFace.faceLength = 1.0f; longFace.neck = 1.0f;
+            check (man.tractCm > woman.tractCm && woman.tractCm > child.tractCm && ChoirLoft::describe (longFace).tractCm > man.tractCm
+                   && man.centre < woman.centre && woman.centre < child.centre,
+                   "Bodies make voices: tract " + juce::String (child.tractCm, 1) + " / " + juce::String (woman.tractCm, 1) + " / " + juce::String (man.tractCm, 1)
+                   + " cm, a " + child.kind + ", a " + woman.kind + " and a " + man.kind);
+
+            ChoirLoft c;
+            setup (c, { { "singers", 1.0f }, { "women", 1.0f }, { "age", 35.0f }, { "mode", (float) ChoirLoft::solo }, { "vowelX", 0.5f }, { "vowelY", 0.9f } });
+            auto w = play (c, { { 57, 0.8f, 0.05, 1.4 } }, 1.4);
+            c.setParam ("women", 0.0f);
+            auto m = play (c, { { 57, 0.8f, 0.05, 1.4 } }, 1.4);
+            const double wHi = bandDb (w, (int) (0.4 * sr), (int) (0.9 * sr), 900, 1500) - bandDb (w, (int) (0.4 * sr), (int) (0.9 * sr), 500, 850);
+            const double mHi = bandDb (m, (int) (0.4 * sr), (int) (0.9 * sr), 900, 1500) - bandDb (m, (int) (0.4 * sr), (int) (0.9 * sr), 500, 850);
+            check (wHi > mHi + 3.0, "On the same note and vowel a woman's formants sit higher than a man's (" + juce::String (wHi, 1) + " vs " + juce::String (mHi, 1) + " dB)");
+        }
+        {
+            // the choir shares the chord; round robin gives each note its own singers
+            ChoirLoft c;
+            setup (c, { { "singers", 12.0f }, { "mode", (float) ChoirLoft::sections } });
+            int most = 0;
+            auto one = play (c, { { 60, 0.8f, 0.05, 0.8 } }, 1.0, &most);
+            check (most == 12, "Sections: the whole choir sings one note (" + juce::String (most) + " singers)");
+            auto chord = play (c, { { 48, 0.8f, 0.05, 1.0 }, { 60, 0.8f, 0.3, 1.0 }, { 64, 0.8f, 0.3, 1.0 }, { 67, 0.8f, 0.3, 1.0 } }, 1.2, &most);
+            check (most == 12 && allFinite (chord) && chord.getMagnitude (0, chord.getNumSamples()) < 1.0f,
+                   "...and shares out a 4-note chord without dropping anyone (" + juce::String (most) + " singers, peak " + juce::String (chord.getMagnitude (0, chord.getNumSamples()), 2) + ")");
+            c.setParam ("mode", (float) ChoirLoft::roundRobin);
+            c.setParam ("perNote", 2.0f);
+            play (c, { { 60, 0.8f, 0.05, 1.0 }, { 64, 0.8f, 0.1, 1.0 }, { 67, 0.8f, 0.15, 1.0 } }, 1.0, &most);
+            check (most == 6, "Round robin: 2 singers per note, 3 notes = " + juce::String (most) + " singers");
+            c.setParam ("singers", 3.0f);
+            c.setParam ("mode", (float) ChoirLoft::sections);
+            auto many = play (c, { { 60, 0.8f, 0.05, 1.0 }, { 64, 0.8f, 0.1, 1.0 }, { 67, 0.8f, 0.15, 1.0 }, { 72, 0.8f, 0.2, 1.0 } }, 1.0, &most);
+            check (most == 3 && allFinite (many), "More notes than singers: the newest note takes a singer (" + juce::String (most) + " busy)");
+        }
+        {
+            // the cast is stable, follows the women / men balance, and edits survive saving
+            ChoirLoft c;
+            c.setCurrentProgram (0);
+            c.setParam ("singers", 12.0f);
+            c.setParam ("women", 0.5f);
+            int women = 0;
+            for (int i = 0; i < 12; ++i) if (c.getSinger (i).sex < 0.5f) ++women;
+            const auto before = c.getSinger (3);
+            check (women == 6 && c.getSinger (3).age == before.age && c.getSinger (3).jaw == before.jaw, "Cast: half of 12 are women (" + juce::String (women) + "), the same cast number gives the same people");
+            auto edited = c.getSinger (5);
+            edited.jaw = 0.93f; edited.age = 61.0f;
+            c.setSinger (5, edited);
+            c.setPosition (2, { 1.5f, 2.0f });
+            juce::MemoryBlock mb;
+            c.getStateInformation (mb);
+            ChoirLoft d;
+            d.setStateInformation (mb.getData(), (int) mb.getSize());
+            check (std::abs (d.getSinger (5).jaw - 0.93f) < 0.001f && std::abs (d.getSinger (5).age - 61.0f) < 0.01f && d.getSinger (5).locked
+                   && std::abs (d.getPosition (2).x - 1.5f) < 0.001f, "An edited singer and a moved singer are saved with the song");
+            const auto other = d.getSinger (7);
+            d.rerollCast();
+            check (std::abs (d.getSinger (5).jaw - 0.93f) < 0.001f && (d.getSinger (7).jaw != other.jaw || d.getSinger (7).age != other.age),
+                   "Re-rolling the cast keeps locked singers and changes the rest");
+        }
+        {
+            // the stage: further away = less direct sound; spaced omnis make a wider image than one mic
+            ChoirLoft c;
+            setup (c, { { "singers", 8.0f }, { "distance", 1.0f }, { "mics", (float) ChoirLoft::micSpaced } });
+            auto nearB = play (c, { { 60, 0.8f, 0.05, 1.0 } }, 1.0);
+            c.setParam ("distance", 10.0f);
+            auto farB = play (c, { { 60, 0.8f, 0.05, 1.0 } }, 1.0);
+            const float rn = rms (nearB, (int) (0.5 * sr), (int) (0.95 * sr)), rf = rms (farB, (int) (0.5 * sr), (int) (0.95 * sr));
+            check (rn > rf * 2.0f, "Moving the mics back from 1 m to 10 m lowers the direct sound (" + juce::String (juce::Decibels::gainToDecibels (rf / rn), 1) + " dB)");
+            c.setParam ("distance", 2.0f);
+            auto wide = play (c, { { 60, 0.8f, 0.05, 1.0 } }, 1.0);
+            auto side = [] (const juce::AudioBuffer<float>& b)
+            {
+                double s = 0, m = 0;
+                for (int i = (int) (0.5 * sr); i < (int) (0.95 * sr); ++i)
+                {
+                    const double l = b.getSample (0, i), r = b.getSample (1, i);
+                    s += (l - r) * (l - r); m += (l + r) * (l + r);
+                }
+                return s / juce::jmax (1.0e-12, m);
+            };
+            c.setParam ("mics", (float) ChoirLoft::micMono);
+            auto mono = play (c, { { 60, 0.8f, 0.05, 1.0 } }, 1.0);
+            check (side (wide) > 0.02 && side (mono) < 1.0e-6, "Spaced pair is stereo, one mic is mono (side/mid " + juce::String (side (wide), 3) + " vs " + juce::String (side (mono), 6) + ")");
+        }
+        {
+            // every preset plays a chord at a sensible level
+            ChoirLoft c;
+            juce::StringArray bad;
+            for (int pr = 0; pr < c.getNumPrograms(); ++pr)
+            {
+                c.setCurrentProgram (pr);
+                auto out = play (c, { { 55, 0.8f, 0.05, 1.6 }, { 59, 0.8f, 0.05, 1.6 }, { 62, 0.8f, 0.05, 1.6 } }, 2.0);
+                const float r = rms (out, (int) (0.6 * sr), (int) (1.5 * sr)), pk = out.getMagnitude (0, out.getNumSamples());
+                if (! allFinite (out) || r < 0.006f || pk > 0.99f)
+                    bad.add (c.getProgramName (pr) + " (rms " + juce::String (juce::Decibels::gainToDecibels (r), 1) + " dB, peak " + juce::String (pk, 2) + ")");
+            }
+            check (bad.isEmpty(), juce::String (c.getNumPrograms()) + " Choir Loft presets sing cleanly" + (bad.isEmpty() ? juce::String() : ": " + bad.joinIntoString (", ")));
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Chord Keys:" << std::endl;
+    {
+        using namespace chordkeys;
+        auto s = parse ("Am7/G");
+        check (s.used && s.root == 9 && juce::String (types()[(size_t) s.type].suffix) == "m7" && s.bass == 7 && chordName (s) == "Am7/G",
+               "Parses and names chords (Am7/G)");
+        int bad = 0, used = 0;
+        for (auto& b : factoryBanks())
+            for (auto& sl : b.slots)
+                if (sl.used) { ++used; if (! (parse (chordName (sl)) .root == sl.root && parse (chordName (sl)).type == sl.type)) ++bad; }
+        check (bad == 0 && used >= 360, juce::String (used) + " factory chords name and parse back the same");
+
+        PlayOptions o;
+        auto c = notesFor (parse ("C"), o);
+        auto inv = parse ("C"); inv.inversion = 1;
+        auto slash = notesFor (parse ("C/G"), o);
+        check (c == std::vector<int> { 60, 64, 67 } && notesFor (inv, o) == std::vector<int> { 64, 67, 72 } && slash.front() == 55 && slash.size() == 4,
+               "C = C4 E4 G4, first inversion E G C, C/G puts G underneath");
+        o.voiceLeading = true;
+        auto f = notesFor (parse ("F"), o, c);
+        check (f == std::vector<int> { 60, 65, 69 }, "Voice leading: C then F plays F/C (" + juce::String (f[0]) + " " + juce::String (f[1]) + " " + juce::String (f[2]) + ")");
+
+        ChordKeysState st (nullptr);
+        st.current = 0;   // Pop & Rock in C
+        st.followKey = true;
+        check (st.effectiveTranspose (7, 0) == -5 && st.effectiveTranspose (9, 1) == 0 && st.effectiveTranspose (0, 0) == 0,
+               "Follows the song's key (C bank in G: " + juce::String (st.effectiveTranspose (7, 0)) + ", in A minor: " + juce::String (st.effectiveTranspose (9, 1)) + ")");
+        auto g = notesFor (st.bank().slots[0], st.options (7, 0));
+        check (g.size() == 3 && g[0] % 12 == 7 && chordName (st.bank().slots[0], st.effectiveTranspose (7, 0)) == "G", "Key 1 plays G in a G major song");
+        {
+            // spelled in the key: in D major the borrowed bVII and bVI are C and Bb, the vii is C#dim
+            const int tr = st.effectiveTranspose (2, 0), key = st.spelling (2, 0);
+            const auto spelled = chordName (st.bank().slots[7], tr, key) + " " + chordName (st.bank().slots[8], tr, key) + " " + chordName (st.bank().slots[6], tr, key)
+                               + " " + chordName (parse ("F#m7b5"), 0, 7) + " " + chordName (parse ("Bb"), 2, 5);
+            check (spelled == "C Bb C#dim F#m7b5 C", "Chords are spelled in the song's key (" + spelled + ")");
+        }
+
+        Bank fill;
+        fillRow (fill, 1, 0, false, 0);
+        juce::StringArray names;
+        for (int k = 10; k < 20; ++k) names.add (chordName (fill.slots[(size_t) k]));
+        check (names.joinIntoString (" ") == "C Dm Em F G Am Bdim C G7 F", "Fill a row with the key's chords: " + names.joinIntoString (" "));
+
+        juce::String roundTrip;
+        auto tree = st.toTree();
+        ChordKeysState st2 (nullptr);
+        st2.fromTree (tree);
+        bool same = st2.banks.size() == st.banks.size();
+        for (size_t b = 0; same && b < st.banks.size(); ++b)
+            for (int k = 0; k < numKeys; ++k) same = same && st2.banks[b].slots[(size_t) k] == st.banks[b].slots[(size_t) k];
+        check (same, "Banks save and load (" + juce::String ((int) st.banks.size()) + " banks)");
+        check (keyIndexForChar ('Q') == 10 && keyIndexForChar ('!') == 0 && keyIndexForChar ('/') == 39 && keyIndexForChar ('[') == -1, "Keys map to the 4 rows (shifted and capital keys too)");
+
+        juce::MidiKeyboardState ks;
+        {
+            ChordPlayer pl (ks);
+            pl.press (1, { 60, 64, 67 }, 0.8f, 0.0f, 0);
+            pl.press (2, { 57, 60, 64 }, 0.8f, 0.0f, 0);
+            pl.release (1);
+            const bool shared = ks.isNoteOn (1, 60) && ks.isNoteOn (1, 64) && ! ks.isNoteOn (1, 67);
+            pl.release (2);
+            check (shared && ! ks.isNoteOn (1, 60) && ! ks.isNoteOn (1, 57), "Notes two chords share keep sounding until both keys are up");
+            pl.press (3, { 48, 52, 55, 60 }, 0.8f, 40.0f, 0);
+            const bool firstOnly = ks.isNoteOn (1, 48) && ! ks.isNoteOn (1, 60);
+            juce::Thread::sleep (200);
+            check (firstOnly && ks.isNoteOn (1, 60), "Strum: the notes come in one after another");
+            pl.releaseAll();
+            check (! ks.isNoteOn (1, 48), "All notes off");
         }
     }
 

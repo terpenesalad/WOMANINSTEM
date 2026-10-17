@@ -16,6 +16,7 @@
 #include "Daw/Instruments/PianoRoom.h"
 #include "Daw/Instruments/Junkyard.h"
 #include "Daw/Instruments/Whistler.h"
+#include "Daw/Instruments/ChoirLoft.h"
 
 namespace wis::daw
 {
@@ -45,6 +46,7 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
 
         add ("junkyard", "Junkyard Percussion", "Instrument", "Junk and body percussion, all synthesized: finger snaps, claps and slaps, crates, chairs and log drums, brake drums, pipes, an anvil and a jail-door clang, plucked and bowed basses and cellos, and sound-space textures (wind, rain on tin, creaks, cave drips, bowed metal, a waterphone) in a concrete storeroom, a tin shed, a cave or a forest", true, make<Junkyard>());
         add ("whistle", "Whistler", "Instrument", "A person whistling: glides between the notes you play, scoops up into each phrase, breath, a delayed vibrato, a human wobble, echo and reverb", true, make<Whistler>());
+        add ("choir", "Choir Loft", "Instrument", "A choir built from people, nothing sampled: up to 64 singers (children, women and men of any age) whose faces and bodies shape their voices, ten singing styles, a vowel chart with moving vowels, consonant onsets and humming, standing on a stage in front of a stereo mic pair in a church, a hall or a cave", true, make<ChoirLoft>());
 
         add ("arp", "Arpeggiator", "MIDI FX", "Up/down/random/chord arpeggios synced to the song, with octaves, swing, latch, rhythms, probability and ratchets", false, make<Arpeggiator>());
         add ("chordtrig", "Chord Trigger", "MIDI FX", "Play whole chords from a single key", false, make<ChordTrigger>());
