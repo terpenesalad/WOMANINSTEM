@@ -66,6 +66,7 @@ void installVoiceEditors();
 void installEchoDeckEditor();
 void installChoirLoftEditor();
 void installSmartDrummerEditor();
+void installDaydreamEditor();
 juce::Image choirPortraitSheet();
 
 } // namespace wis::daw

@@ -2,6 +2,7 @@
 #include "Daw/Model/TempoDetect.h"
 #include "Daw/Instruments/InstrumentRefs.h"
 #include "Daw/Instruments/Junkyard.h"
+#include "Daw/Instruments/Daydream.h"
 
 namespace wis::daw
 {
@@ -413,7 +414,17 @@ public:
                 const bool black = isBlackKey (p);
                 g.setColour (p == pressed ? theme::accent : black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xffe8e8e8));
                 g.fillRect (black ? 0.0f : 0.0f, y, black ? getWidth() * 0.62f : (float) getWidth(), r.rowH - 0.5f);
-                if (p % 12 == 0)
+                const auto button = std::find (r.chordButtonKeys.begin(), r.chordButtonKeys.end(), p);
+                if (button != r.chordButtonKeys.end())
+                {
+                    // Daydream's chord buttons
+                    const int b = (int) (button - r.chordButtonKeys.begin());
+                    g.setColour (juce::Colour (b < 4 ? 0xffff7a59 : 0xffb7a4ff));
+                    g.fillRect (getWidth() * 0.5f, y, getWidth() * 0.5f, r.rowH - 0.5f);
+                    g.setColour (juce::Colour (0xff1c2227));
+                    g.drawText (daydream::buttonName (b), juce::Rectangle<float> (getWidth() * 0.5f, y, getWidth() * 0.5f - 3.0f, r.rowH), juce::Justification::centredRight);
+                }
+                else if (p % 12 == 0)
                 {
                     g.setColour (juce::Colour (0xff333333));
                     g.drawText ("C" + juce::String (p / 12 - 1), juce::Rectangle<float> (0, y, (float) getWidth() - 4, r.rowH), juce::Justification::centredRight);
@@ -618,6 +629,10 @@ void PianoRoll::setClip (int clipId)
                 junkMode = (int) p->param ("source") == 0;
             drumMode = drumMode || junkMode;
         }
+        chordButtonKeys.fill (-1);
+        if (inst.isValid() && inst[ids::uid].toString() == "daydream")
+            if (auto* d = dynamic_cast<Daydream*> (ctx.engine.getProcessor (inst[ids::id].toString())))
+                for (int b = 0; b < 8; ++b) chordButtonKeys[(size_t) b] = d->buttonNote (b);
         title.setText (t.name() + "  -  " + clip[ids::name].toString(), juce::dontSendNotification);
         scrollBeats = -0.25;
         ppb = juce::jlimit (20.0, 400.0, (getWidth() - 200) / juce::jmax (4.0, (double) clip[ids::length] + 0.5));

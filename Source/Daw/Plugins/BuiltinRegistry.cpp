@@ -18,6 +18,7 @@
 #include "Daw/Instruments/Whistler.h"
 #include "Daw/Instruments/ChoirLoft.h"
 #include "Daw/Instruments/SmartDrummer.h"
+#include "Daw/Instruments/Daydream.h"
 
 namespace wis::daw
 {
@@ -49,6 +50,8 @@ const juce::Array<BuiltinInfo>& builtinPlugins()
         add ("whistle", "Whistler", "Instrument", "A person whistling: glides between the notes you play, scoops up into each phrase, breath, a delayed vibrato, a human wobble, echo and reverb", true, make<Whistler>());
         add ("drummer", "Smart Drummer", "Instrument", "A drummer that listens to your song and plays along: 18 styles from rock, funk and hip-hop to jazz, bossa nova and dream pop, following the band's accents, swing and sections, with fills; then a kit you can rebuild piece by piece from 11 sampled kits and 4 drum machines", true, make<SmartDrummer>());
         add ("choir", "Choir Loft", "Instrument", "A choir built from people, nothing sampled: up to 64 singers (children, women and men of any age) whose faces and bodies shape their voices, ten singing styles, a vowel chart with moving vowels, consonant onsets and humming, standing on a stage in front of a stereo mic pair in a church, a hall or a cave", true, make<ChoirLoft>());
+
+        add ("daydream", "Daydream", "Instrument", "A chord machine for finding song ideas: hold chord buttons (major, minor, sus, dim + 6, m7, maj7, 9) and play one key for the chord, or Key Mode for chords in key; a voicing ladder that walks chords through their inversions and a bass that walks through the chord; strum, sloppy strum, arpeggios, rhythm patterns and harp sweeps; a separate bass synth; analogue, FM and reed electric piano engines with 8 effects; drum grooves and a looper", true, make<Daydream>());
 
         add ("arp", "Arpeggiator", "MIDI FX", "Up/down/random/chord arpeggios synced to the song, with octaves, swing, latch, rhythms, probability and ratchets", false, make<Arpeggiator>());
         add ("chordtrig", "Chord Trigger", "MIDI FX", "Play whole chords from a single key", false, make<ChordTrigger>());

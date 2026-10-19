@@ -483,6 +483,7 @@ void StudioPage::addTrackMenu()
     m.addItem (16, "Piano Room  (real grand, vintage grand and upright pianos, in a room you choose)");
     m.addItem (1, "Software Instrument  (Sound Library: keys, strings, synths...)");
     m.addItem (22, "Smart Drummer  (listens to your song and plays along)");
+    m.addItem (23, "Daydream  (chord machine: chords from one key, strums, arps, bass, beats, looper)");
     m.addItem (2, "Drummer  (drum kit + 8 bars of groove)");
     m.addItem (3, "Audio: Guitar or Bass  (with Amp & Pedals)");
     {
@@ -561,6 +562,7 @@ void StudioPage::addTrackMenu()
             case 20: t = project.addTrack (kindInstrument, "Whistler", insertAt); project.setInstrument (t, builtinPresetRef ("whistle", 0)); break;
             case 21: t = project.addTrack (kindInstrument, "Choir", insertAt); project.setInstrument (t, builtinPresetRef ("choir", 0)); break;
             case 22: t = project.addTrack (kindInstrument, "Smart Drummer", insertAt); project.setInstrument (t, builtinPresetRef ("drummer", 0)); break;
+            case 23: t = project.addTrack (kindInstrument, "Daydream", insertAt); project.setInstrument (t, builtinPresetRef ("daydream", 0)); break;
             case 5: t = project.addTrack (kindAudio, "Audio", insertAt); t.v.setProperty (ids::arm, true, nullptr); break;
             case 6: t = project.addTrack (kindInstrument, "Synth", insertAt); project.setInstrument (t, synthRef (1)); break;
             case 7: t = project.addTrack (kindInstrument, "HomeKeys 20", insertAt); project.setInstrument (t, builtinPresetRef ("homekeys", 0)); break;
@@ -614,6 +616,13 @@ void StudioPage::addTrackMenu()
             openPluginWindow (t.instrument());
             setStatus ("Junkyard: every key is a different thing (snaps and slaps low, wood, metal, then sound-space textures high up). "
                        "Library > Drums has finger-snap loops, junk grooves and sound spaces for it.");
+        }
+        else if (r == 23)
+        {
+            engine.rebuildNow();
+            openPluginWindow (t.instrument());
+            setStatus ("Daydream: hold chord keys C2 to C3 on your MIDI keyboard (C Maj, D Min, E Sus, F Dim, G 6, A m7, B M7, C 9) or click the buttons, "
+                       "and play a root anywhere else. Or turn on Key Mode and play one finger chords.");
         }
         else if (r == 20)
             setStatus ("Whistler: play legato (hold one key while pressing the next) and it glides between the notes.");

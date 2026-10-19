@@ -160,6 +160,8 @@ namespace prm
         return juce::AudioParameterFloatAttributes().withLabel (unit)
             .withStringFromValueFunction ([decimals, unit] (float v, int)
             {
+                if (unit == "Hz" && decimals > 0 && v < 20.0f)
+                    return juce::String (v, decimals) + " Hz";   // slow rates (LFOs) keep their decimals
                 if (unit == "Hz")
                     return v >= 1000.0f ? juce::String (v / 1000.0f, v >= 10000.0f ? 1 : 2) + " kHz" : juce::String ((int) std::round (v)) + " Hz";
                 if (unit == "%")

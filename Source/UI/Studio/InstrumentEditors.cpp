@@ -842,6 +842,7 @@ void installInstrumentEditors()
     installEchoDeckEditor();
     installChoirLoftEditor();
     installSmartDrummerEditor();
+    installDaydreamEditor();
 }
 
 } // namespace wis::daw

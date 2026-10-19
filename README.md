@@ -70,6 +70,12 @@ A GarageBand / Logic-style recording studio, built in. Everything runs at low la
 
 ![Studio mixer](docs/studio-mixer.png)
 
+### New in 3.11
+
+- **Daydream**: a chord machine for finding song ideas. Hold chord buttons (Maj, Min, Sus, Dim, coloured with 6, m7, M7 and 9: on screen, or the white keys C2 to C3 of a MIDI keyboard) and play one key for the whole chord, or turn on Key Mode and every key plays the chord of the key. A voicing ladder walks the chord through its inversions and up and down the keyboard, a bass ladder walks the bass through the chord's notes, and chords can stay in one place so progressions move smoothly. Strum, sloppy strum, arpeggios, 16 rhythm patterns and harp sweeps; a separate bass synth; analogue, FM and modelled reed electric piano engines with eight effects; 15 drum grooves to play to and a looper with overdubs. 45 sounds.
+
+<p align="center"><img src="docs/daydream.png" width="900" alt="Daydream"></p>
+
 ### New in 3.10
 
 - **Smart Drummer**: a drummer that listens to your song and plays along. It listens to every other track (MIDI and audio, including the stems of a split song), hears the bass and accents, the swing and the sections (from your markers or found from the music), and writes a drum part as editable MIDI clips, one per section: quieter verses, bigger choruses, fills into each section, the kick following the bass. 18 styles from rock, punk and metal to funk, soul, hip-hop, lo-fi, disco, house, reggae, blues, jazz, bossa nova, folk and dream pop; complexity, energy, follow, fills, swing, humanize, push / lay back, half / double time, and another take. Click a section to make it quiet, a verse, a chorus, a peak or a rest. Then rebuild the kit piece by piece from 11 sampled kits and 4 drum machines, with tune, decay, level and pan per piece, room, punch, drive and tone.
@@ -299,12 +305,13 @@ Source/
   Engine/       real-time audio callback, stem player (loop, time-stretch), recorder, scope feed
   Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
   Daw/
-    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, chord keys, song analysis + drum generator, MIDI files, tempo detection
+    Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, chord keys, song analysis + drum generator, Daydream's chord logic, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
     Plugins/    built-in effects, Echo Deck, guitar / bass stomp boxes, MIDI effects, Vocal Tune, Loop Station; VST3 / VST / CLAP / LV2 hosting with out-of-process scanning
     Instruments/ Sound Library (SoundFont), Studio Synth, HomeKeys 20, Rhythm Box (vintage drum synthesis + 20 rhythms), Sampler, Drum Pads, Beat Lab, Piano Room (+ room IR designer),
                  Junkyard Percussion (modal / string / noise synthesis), Whistler, Choir Loft (source-filter singers on a modelled stage),
-                 Smart Drummer (kit sampler + song analysis and drum part generator in Daw/Model)
+                 Smart Drummer (kit sampler + song analysis and drum part generator in Daw/Model),
+                 Daydream (chord machine: chord engine, performance modes, looper; analogue / FM / reed piano voices, bass synth, effects)
   UI/           app shell, look & feel, waveform lanes, mixer, rig panel + pedalboard strip, overlays
     Scope/      oscilloscope window and its phosphor renderer
     Studio/     control bar, library browser, arrangement, piano roll, mixer, plugin editors
@@ -320,6 +327,7 @@ packaging/      installer script, end-user readme, release notes
 - Separation is CPU-only, which keeps the app small (a few MB plus a 55 MB model) and runs on any PC, but it's slower than GPU-based tools.
 - The Studio's tempo is constant per song (no tempo changes during a song yet), there's no score view, and no track folders / stacks yet.
 - Vocal Tune works on one voice (or one note) at a time, like the classic hardware it imitates; it won't correct chords.
+- Daydream's chords play its own sounds: it can't send its generated chords and arpeggios to another instrument track yet, and its looper's loops aren't saved with the song (record the track to keep them).
 - Plugins are Windows / Linux formats: VST3, VST, CLAP and LV2 (no Audio Units, which are Mac-only).
 - Tempo detection for **Open in Studio** assumes a steady 4/4 beat. If it's off, type the right tempo in the LCD: the stems stay where they are, only the grid moves.
 

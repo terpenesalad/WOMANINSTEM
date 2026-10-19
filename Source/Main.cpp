@@ -8,6 +8,7 @@
 #include "UI/Studio/ChordKeysPanel.h"
 #include "UI/Studio/EditorParts.h"
 #include "Daw/Instruments/SmartDrummer.h"
+#include "Daw/Instruments/Daydream.h"
 #include "Daw/Model/SongAnalysis.h"
 #include "Daw/Plugins/PluginHost.h"
 #include "Daw/Instruments/SoundFontInstrument.h"
@@ -115,6 +116,7 @@ public:
         failures += runPedalboardSelfTest();
         failures += runChordKeysSelfTest();
         failures += runSmartDrummerSelfTest();
+        failures += runDaydreamSelfTest();
         if (const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {}); snapDir.isNotEmpty())
         {
             juce::FileOutputStream out (juce::File (snapDir).getChildFile ("choir-portraits.png"));
@@ -176,6 +178,57 @@ public:
             std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Studio plugin dock: tabs swap editors, sizes to fit, closes cleanly" << std::endl;
         }
         for (auto& [id, p] : procs) p->releaseResources();
+        return failures;
+    }
+
+    /** Daydream's editor with a chord playing, every page (WIS_UI_SNAPSHOTS saves daydream-play.png, -sound, -effects, -settings). */
+    static int runDaydreamSelfTest()
+    {
+        auto d = std::make_unique<daw::Daydream>();
+        d->setPlayConfigDetails (0, 2, 48000.0, 512);
+        d->prepareToPlay (48000.0, 512);
+        d->setParam ("bassMode", 1.0f);
+        d->setParam ("voicing", 1.0f);
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int b = 0; b < 40; ++b)
+        {
+            juce::MidiBuffer m;
+            if (b == 0)
+            {
+                m.addEvent (juce::MidiMessage::noteOn (1, d->buttonNote (daw::daydream::bMaj), (juce::uint8) 100), 0);
+                m.addEvent (juce::MidiMessage::noteOn (1, d->buttonNote (daw::daydream::bM7), (juce::uint8) 100), 0);
+                m.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100), 2);
+            }
+            d->processBlock (buf, m);
+        }
+        const auto disp = d->getDisplay();
+        const auto name = daw::daydream::chordName (disp.root, std::vector<int> (disp.intervals.begin(), disp.intervals.begin() + disp.numIntervals));
+        int failures = 0;
+        const char* pages[] = { "daydream-play.png", "daydream-sound.png", "daydream-effects.png", "daydream-settings.png" };
+        for (int page = 0; page < 4; ++page)
+        {
+            d->editorPage = page;
+            for (auto size : { juce::Point<int> (1120, 700), juce::Point<int> (900, 600) })
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> ed (d->createEditor());
+                ed->setSize (size.x, size.y);
+                juce::Image img (juce::Image::ARGB, ed->getWidth(), ed->getHeight(), true);
+                juce::Graphics g (img);
+                ed->paintEntireComponent (g, true);
+                const auto snapDir = juce::SystemStats::getEnvironmentVariable ("WIS_UI_SNAPSHOTS", {});
+                if (snapDir.isNotEmpty())
+                {
+                    const juce::String file = size.x == 1120 ? juce::String (pages[page]) : juce::String (pages[page]).replace (".png", "-small.png");
+                    juce::FileOutputStream out (juce::File (snapDir).getChildFile (file));
+                    if (out.openedOk()) { out.setPosition (0); out.truncate(); juce::PNGImageFormat().writeImageToStream (img, out); }
+                }
+                d->editorBeingDeleted (ed.get());
+            }
+        }
+        const bool ok = disp.chord && name == "Dmaj7";
+        if (! ok) ++failures;
+        std::cout << (ok ? "  [ok]   " : "  [FAIL] ") << "Daydream pages paint with a chord playing (" << name << ")" << std::endl;
+        d->releaseResources();
         return failures;
     }
 

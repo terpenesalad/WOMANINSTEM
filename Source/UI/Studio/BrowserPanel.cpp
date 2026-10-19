@@ -9,6 +9,7 @@
 #include "Daw/Instruments/Junkyard.h"
 #include "Daw/Instruments/Whistler.h"
 #include "Daw/Instruments/ChoirLoft.h"
+#include "Daw/Instruments/Daydream.h"
 #include "Daw/Instruments/SmartDrummer.h"
 #include "Daw/Model/JunkLoops.h"
 #include "Daw/Model/VocalChains.h"
@@ -161,6 +162,9 @@ void BrowserPanel::populate()
             auto* drums = addGroup ("Smart Drummer (listens to your song and plays along)");
             for (int i = 0; i < (int) drummer::styles().size(); ++i)
                 addLeaf (drums, drummer::styles()[(size_t) i].name, "inst:drummer:" + juce::String (i), drummer::styles()[(size_t) i].description);
+            auto* dream = addGroup ("Daydream (chord machine: one key, whole chords)");
+            const auto dn = Daydream::presetNames();
+            for (int i = 0; i < dn.size(); ++i) addLeaf (dream, dn[i], "inst:daydream:" + juce::String (i), Daydream::presetCategory (i) + ": hold chord buttons and play one key");
             auto* choir = addGroup ("Choir Loft (choirs and singers, built from people)");
             const auto cn = ChoirLoft::presetNames();
             for (int i = 0; i < cn.size(); ++i) addLeaf (choir, cn[i], "inst:choir:" + juce::String (i), ChoirLoft::presetDescription (i));

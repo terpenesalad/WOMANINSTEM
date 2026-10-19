@@ -30,6 +30,7 @@
 #include "Daw/Instruments/ChoirLoft.h"
 #include "Daw/Model/ChordKeys.h"
 #include "Daw/Instruments/SmartDrummer.h"
+#include "Daw/Instruments/Daydream.h"
 #include "Daw/Model/SongAnalysis.h"
 #include "Daw/Model/DrumGenerator.h"
 #include <juce_dsp/juce_dsp.h>
@@ -187,6 +188,60 @@ static int peakIndexCh (const juce::AudioBuffer<float>& b, int ch, int from, int
     int best = -1; float bv = 0.0f;
     for (int i = juce::jmax (0, from); i < juce::jmin (to, b.getNumSamples()); ++i) { const float v = std::abs (b.getSample (ch, i)); if (v > bv) { bv = v; best = i; } }
     return best;
+}
+
+// ---- Daydream ------------------------------------------------------------------------------------------
+struct DdEv { double at; int note; bool on; int vel = 100; };
+
+/** Runs Daydream over MIDI events; `during` is called after every block with the time reached (s). */
+static juce::AudioBuffer<float> runDaydream (Daydream& d, std::vector<DdEv> evs, double seconds, std::function<void (double)> during = {}, bool prepare = true)
+{
+    if (prepare)
+    {
+        d.setPlayConfigDetails (0, 2, sr, block);
+        d.setNonRealtime (true);
+        d.prepareToPlay (sr, block);
+    }
+    std::stable_sort (evs.begin(), evs.end(), [] (const DdEv& a, const DdEv& b) { return a.at < b.at; });
+    const int total = (int) (seconds * sr);
+    juce::AudioBuffer<float> out (2, total);
+    out.clear();
+    for (int pos = 0; pos < total; pos += block)
+    {
+        const int n = juce::jmin (block, total - pos);
+        juce::MidiBuffer midi;
+        for (auto& e : evs)
+        {
+            const int at = (int) (e.at * sr);
+            if (at >= pos && at < pos + n)
+                midi.addEvent (e.on ? juce::MidiMessage::noteOn (1, e.note, (juce::uint8) e.vel) : juce::MidiMessage::noteOff (1, e.note), at - pos);
+        }
+        juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), 2, pos, n);
+        d.processBlock (view, midi);
+        if (during) during ((pos + n) / sr);
+    }
+    return out;
+}
+
+/** A chord: hold these buttons and press `root` from `at` for `len` seconds. */
+static void ddChord (std::vector<DdEv>& evs, const Daydream& d, std::initializer_list<int> buttons, int root, double at, double len, int vel = 100)
+{
+    for (int b : buttons) evs.push_back ({ at, d.buttonNote (b), true, 100 });
+    evs.push_back ({ at + 0.005, root, true, vel });
+    evs.push_back ({ at + len - 0.02, root, false });
+    for (int b : buttons) evs.push_back ({ at + len - 0.01, d.buttonNote (b), false });
+}
+
+/** Cmaj7 - Am7 - Fmaj9 - G7sus4, `len` seconds each. */
+static std::vector<DdEv> ddProgression (const Daydream& d, double len, double start = 0.1)
+{
+    using namespace daydream;
+    std::vector<DdEv> evs;
+    ddChord (evs, d, { bMaj, bM7 }, 60, start, len, 96);
+    ddChord (evs, d, { bMin, bm7 }, 69, start + len, len, 84);
+    ddChord (evs, d, { bMaj, bM7, b9 }, 65, start + 2 * len, len, 100);
+    ddChord (evs, d, { bSus, bm7 }, 67, start + 3 * len, len, 90);
+    return evs;
 }
 
 int main (int argc, char** argv)
@@ -443,6 +498,85 @@ int main (int argc, char** argv)
             }
             else evs = prog;
             render (c, evs, soloMode ? 11.0 : 11.5, dir.getChildFile (juce::String (pr + 1).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (c.getProgramName (pr)) + ".wav"));
+        }
+        return 0;
+    }
+
+    // dawtest --render-daydream <folder> [name filter]: every Daydream sound on a progression, plus demos (for listening)
+    if (argc > 2 && juce::String (argv[1]) == "--render-daydream")
+    {
+        const juce::File dir { juce::String (juce::CharPointer_UTF8 (argv[2])) };
+        dir.createDirectory();
+        const juce::String only = argc > 3 ? juce::String (argv[3]) : juce::String();
+        auto write = [] (const juce::AudioBuffer<float>& out, const juce::File& f)
+        {
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+            auto opts = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (16);
+            if (auto w = juce::WavAudioFormat().createWriterFor (os, opts)) w->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+        };
+        Daydream names;
+        juce::StringArray trims;
+        for (int pr = 0; pr < names.getNumPrograms(); ++pr)
+        {
+            if (only.isNotEmpty() && ! names.getProgramName (pr).containsIgnoreCase (only)) continue;
+            Daydream d;
+            d.setCurrentProgram (pr);
+            d.setParam ("tempoSrc", 1.0f);
+            d.setParam ("bpm", 100.0f);
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            auto out = runDaydream (d, ddProgression (d, 2.4), 10.6);
+            const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
+            const float r = juce::Decibels::gainToDecibels (rms (out, (int) (0.1 * sr), (int) (9.7 * sr)));
+            std::cout << juce::String (pr).paddedLeft (' ', 2) << " " << names.getProgramName (pr).paddedRight (' ', 26) << " peak " << juce::String (out.getMagnitude (0, out.getNumSamples()), 2)
+                      << "  rms " << juce::String (r, 1) << " dB  (" << juce::String (ms / 106.0, 1) << "% of real time)" << std::endl;
+            trims.add (juce::String (std::round ((-18.0f - r) * 2.0f) / 2.0f, 1));
+            write (out, dir.getChildFile (juce::String (pr + 1).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (names.getProgramName (pr)) + ".wav"));
+        }
+        std::cout << "trims to -18 dB: { " << trims.joinIntoString (", ") << " }" << std::endl;
+        if (only.isEmpty() || only == "demo")
+        {
+            using namespace daydream;
+            // Key Mode: one finger per chord, with the bass synth and a groove
+            {
+                Daydream d;
+                d.setCurrentProgram (Daydream::presetNames().indexOf ("Velvet Reed Piano"));
+                d.setParam ("tempoSrc", 1.0f); d.setParam ("bpm", 88.0f);
+                d.setParam ("keyMode", 1.0f); d.setParam ("key", 0.0f);
+                d.setParam ("bassMode", (float) Daydream::bassWithChords); d.setParam ("bassSound", 1.0f);
+                d.setParam ("beat", 2.0f); d.setParam ("beatOn", 1.0f);
+                const double bar = 4.0 * 60.0 / 88.0;
+                std::vector<DdEv> evs;
+                const int roots[] = { 60, 69, 65, 67, 64, 69, 62, 67 };
+                for (int i = 0; i < 8; ++i) { evs.push_back ({ i * bar + 0.01, roots[i], true, 92 }); evs.push_back ({ (i + 1) * bar - 0.03, roots[i], false }); }
+                write (runDaydream (d, evs, 8 * bar + 2.0), dir.getChildFile ("Demo 1 - Key Mode with bass and a beat.wav"));
+            }
+            // the voicing ladder: one held chord walked up and down
+            {
+                Daydream d;
+                d.setCurrentProgram (Daydream::presetNames().indexOf ("Glass Tine Piano"));
+                std::vector<DdEv> evs;
+                ddChord (evs, d, { bMaj, bM7, b9 }, 62, 0.05, 11.0);
+                const int steps[] = { 0, 1, 2, 3, 4, 3, 2, 1, 0, -1, -2, -1, 0 };
+                write (runDaydream (d, evs, 12.5, [&] (double t) { d.setParam ("voicing", (float) steps[juce::jlimit (0, 12, (int) (t / 0.85))]); }),
+                       dir.getChildFile ("Demo 2 - the voicing ladder.wav"));
+            }
+            // every performance mode on the same chords
+            {
+                Daydream d;
+                d.setCurrentProgram (Daydream::presetNames().indexOf ("Psych Poly"));
+                d.setParam ("tempoSrc", 1.0f); d.setParam ("bpm", 110.0f);
+                d.setParam ("bassMode", (float) Daydream::bassWithChords);
+                std::vector<DdEv> evs;
+                const double len = 4.0 * 60.0 / 110.0;
+                for (int m = 0; m < Daydream::numPerfModes; ++m)
+                {
+                    ddChord (evs, d, { bMin, bm7 }, 69, m * 2 * len, len);
+                    ddChord (evs, d, { bMaj, bM7 }, 65, m * 2 * len + len, len);
+                }
+                write (runDaydream (d, evs, Daydream::numPerfModes * 2 * len + 1.5, [&] (double t) { d.setParam ("perf", (float) juce::jlimit (0, Daydream::numPerfModes - 1, (int) (t / (2 * len)))); }),
+                       dir.getChildFile ("Demo 3 - performance modes (chord, strum, strum 2 oct, slop, arp, arp 2 oct, pattern, harp).wav"));
+            }
         }
         return 0;
     }
@@ -2633,6 +2767,345 @@ int main (int argc, char** argv)
                 check (allFinite (sampled) && rms (sampled, 0, (int) (0.25 * sr)) > 0.01f && rms (sampled, (int) (0.3 * sr), (int) (0.55 * sr)) > 0.005f,
                        "Sampled kits: Studio Kit kick, Jazz Kit snare");
             }
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    std::cout << "Daydream:" << std::endl;
+    {
+        using namespace daydream;
+        auto bits = [] (std::initializer_list<int> b) { unsigned m = 0; for (int x : b) m |= 1u << x; return m; };
+        auto ivs = [] (std::vector<int> v) { return v; };
+        // chord buttons
+        {
+            Daydream d;
+            check (d.chordFor (60, bits ({ bMaj })).intervals == ivs ({ 0, 4, 7 }) && d.chordFor (60, bits ({ bMin })).intervals == ivs ({ 0, 3, 7 })
+                   && d.chordFor (60, bits ({ bSus })).intervals == ivs ({ 0, 5, 7 }) && d.chordFor (60, bits ({ bDim })).intervals == ivs ({ 0, 3, 6 }),
+                   "Chord types: major, minor, sus4, diminished");
+            check (d.chordFor (62, bits ({ bMaj, bM7 })).intervals == ivs ({ 0, 4, 7, 11 }) && d.chordFor (62, bits ({ bMaj, bM7 })).root == 2
+                   && d.chordFor (60, bits ({ bMin, bm7, b9 })).intervals == ivs ({ 0, 3, 7, 10, 14 }),
+                   "Colours add the 6th, 7ths and 9th");
+            check (d.chordFor (60, bits ({ bm7 })).intervals.empty() && d.chordFor (60, 0).intervals.empty(), "A colour on its own (or no button) is a single note");
+            d.setParam ("sus2", 1.0f);
+            check (d.chordFor (60, bits ({ bSus })).intervals == ivs ({ 0, 2, 7 }), "Sus can be sus2");
+        }
+        // names
+        {
+            struct N { std::vector<int> iv; const char* name; };
+            const N names[] = {
+                { { 0, 4, 7 }, "C" }, { { 0, 3, 7 }, "Cm" }, { { 0, 5, 7 }, "Csus4" }, { { 0, 3, 6 }, "Cdim" }, { { 0, 4, 7, 9 }, "C6" },
+                { { 0, 4, 7, 11 }, "Cmaj7" }, { { 0, 4, 7, 10 }, "C7" }, { { 0, 3, 7, 10 }, "Cm7" }, { { 0, 3, 7, 11 }, "Cm(maj7)" },
+                { { 0, 3, 6, 10 }, "Cm7b5" }, { { 0, 3, 6, 9 }, "Cdim7" }, { { 0, 5, 7, 10 }, "C7sus4" }, { { 0, 4, 7, 14 }, "Cadd9" },
+                { { 0, 3, 7, 10, 14 }, "Cm9" }, { { 0, 4, 7, 9, 14 }, "C6/9" }, { { 0, 4, 7, 11, 14 }, "Cmaj9" }, { { 0, 4, 7, 10, 14 }, "C9" },
+                { { 0, 3, 7, 9 }, "Cm6" }, { { 0, 3, 7, 14 }, "Cm(add9)" }, { { 0, 4, 7, 9, 11 }, "Cmaj7(6)" },
+            };
+            juce::String bad;
+            for (auto& n : names) if (chordName (0, n.iv) != n.name) bad << n.name << " came out " << chordName (0, n.iv) << "; ";
+            check (bad.isEmpty(), "Chord names (C, Cm, Csus4, Cdim, C6, Cmaj7, C7, Cm7, Cm(maj7), Cm7b5, Cdim7, C7sus4, Cadd9, Cm9, C6/9, Cmaj9, C9...) " + bad);
+            check (chordName (10, { 0, 4, 7 }, 5) == "Bb" && chordName (1, { 0, 3, 7 }, 9) == "C#m" && chordName (0, { 0, 4, 7 }, -1, 4) == "C/E",
+                   "Names spelled for the key, slash bass");
+        }
+        // Key Mode
+        {
+            Daydream d;
+            d.setParam ("keyMode", 1.0f);
+            auto c = d.chordFor (62, 0);
+            check (c.root == 2 && c.intervals == ivs ({ 0, 3, 7 }), "Key Mode, C major: D plays D minor");
+            c = d.chordFor (71, 0);
+            check (c.root == 11 && c.intervals == ivs ({ 0, 3, 6 }), "Key Mode: B plays B diminished");
+            c = d.chordFor (61, 0);
+            check (c.root == 0 && c.intervals == ivs ({ 0, 4, 7 }), "Key Mode: an out-of-key note snaps to the scale (C# -> C)");
+            c = d.chordFor (67, bits ({ bm7 }));
+            check (c.root == 7 && c.intervals == ivs ({ 0, 4, 7, 10 }), "Key Mode: the 7th button gives the key's own 7th (G7)");
+            c = d.chordFor (64, bits ({ bm7, b9 }));
+            check (c.root == 4 && c.intervals == ivs ({ 0, 3, 7, 10, 13 }), "Key Mode: E with 7 and 9 is Em7(b9) in C");
+            c = d.chordFor (62, bits ({ bMaj }));
+            check (c.root == 2 && c.intervals == ivs ({ 0, 4, 7 }), "A chord button overrides Key Mode (D major)");
+            d.setParam ("scale", 1.0f); d.setParam ("key", 9.0f);
+            c = d.chordFor (69, 0);
+            check (c.root == 9 && c.intervals == ivs ({ 0, 3, 7 }) && d.chordFor (67, 0).intervals == ivs ({ 0, 4, 7 }), "Key Mode, A minor: A is Am, G is G");
+            d.setParam ("followSongKey", 1.0f);
+            BuiltinProcessor::songKey = 2; BuiltinProcessor::songScale = 0;
+            c = d.chordFor (64, 0);
+            check (c.root == 4 && c.intervals == ivs ({ 0, 3, 7 }) && d.chordFor (66, 0).intervals == ivs ({ 0, 3, 7 }), "Key Mode follows the song's key (D major: E is Em, F# is F#m)");
+            BuiltinProcessor::songKey = 0;
+        }
+        // voicing ladder and bass
+        {
+            Daydream d;
+            d.setParam ("position", (float) followKey);
+            Chord cm7 { 0, { 0, 4, 7, 11 } };
+            const auto base = d.notesFor (cm7);
+            d.setParam ("voicing", 1.0f);
+            const auto up = d.notesFor (cm7);
+            d.setParam ("voicing", -1.0f);
+            const auto down = d.notesFor (cm7);
+            check (base == ivs ({ 48, 52, 55, 59 }) && up == ivs ({ 52, 55, 59, 60 }) && down == ivs ({ 47, 48, 52, 55 }),
+                   "Voicing: up moves the lowest note to the top, down moves the highest to the bottom");
+            d.setParam ("voicing", 4.0f);
+            check (d.notesFor (cm7) == ivs ({ 60, 64, 67, 71 }), "Four steps up the ladder is the chord an octave up");
+            d.setParam ("voicing", 0.0f);
+            d.setParam ("position", (float) stayCentred);
+            float worst = 0.0f;
+            for (int r = 0; r < 12; ++r)
+            {
+                const auto n = d.notesFor ({ r, { 0, 4, 7 } });
+                float m = 0; for (int x : n) m += (float) x; m /= (float) n.size();
+                worst = juce::jmax (worst, std::abs (m - 62.0f));
+            }
+            check (worst <= 4.0f, "Stay in one place: every root's chord sits near the centre (worst " + juce::String (worst, 1) + " st)");
+            d.setParam ("spread", (float) drop2);
+            d.setParam ("position", (float) followKey);
+            check (d.notesFor (cm7) == ivs ({ 43, 48, 52, 59 }), "Open (drop 2) spread");
+            check (bassNote ({ 0, { 0, 4, 7 } }, 2, 0) == 36 && bassNote ({ 0, { 0, 4, 7 } }, 2, 1) == 40 && bassNote ({ 0, { 0, 4, 7 } }, 2, -1) == 31
+                   && bassNote ({ 9, { 0, 3, 7, 10 } }, 2, 1) == 48, "Bass voicing walks through the chord's notes");
+        }
+        // playing it
+        {
+            Daydream d;
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Init (Dry Analogue)"));
+            d.setParam ("position", (float) followKey);
+            std::vector<DdEv> evs;
+            ddChord (evs, d, { bMaj }, 62, 0.1, 0.5);                  // D major
+            evs.push_back ({ 0.8, 64, true }); evs.push_back ({ 1.0, 64, false });   // a single E
+            bool chordOk = false, singleOk = false, quietAfter = true;
+            auto out = runDaydream (d, evs, 2.2, [&] (double t)
+            {
+                auto sounding = [&] (std::initializer_list<int> want) { int n = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++n; bool all = true; for (int w : want) all = all && d.isSounding (w); return all && n == (int) want.size(); };
+                if (t > 0.3 && t < 0.32) chordOk = sounding ({ 50, 54, 57 });
+                if (t > 0.9 && t < 0.92) singleOk = sounding ({ 64 });
+                if (t > 1.6) for (int i = 0; i < 128; ++i) if (d.isSounding (i)) quietAfter = false;
+            });
+            check (chordOk, "Hold Maj and press D: D major sounds (D3 F#3 A3)");
+            check (singleOk, "No chord button: a key plays a single note");
+            check (quietAfter && allFinite (out) && rms (out, (int) (0.2 * sr), (int) (0.5 * sr)) > 0.01f, "Notes stop when released");
+            const auto disp = d.getDisplay();
+            check (disp.serial > 0, "The display hears about chords");
+        }
+        // buttons after the key, colours while holding, latched buttons, transpose
+        {
+            Daydream d;
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Init (Dry Analogue)"));
+            d.setParam ("position", (float) followKey);
+            std::vector<DdEv> evs;
+            evs.push_back ({ 0.1, 60, true });
+            evs.push_back ({ 0.2, d.buttonNote (bMin), true });     // minor pressed after the key
+            evs.push_back ({ 0.4, d.buttonNote (bm7), true });      // then the 7th
+            evs.push_back ({ 0.7, 60, false });
+            evs.push_back ({ 0.75, d.buttonNote (bMin), false }); evs.push_back ({ 0.75, d.buttonNote (bm7), false });
+            bool minorOk = false, sevenOk = false;
+            runDaydream (d, evs, 1.0, [&] (double t)
+            {
+                if (t > 0.3 && t < 0.32) minorOk = d.isSounding (48) && d.isSounding (51) && d.isSounding (55) && ! d.isSounding (58);
+                if (t > 0.5 && t < 0.52) sevenOk = d.isSounding (48) && d.isSounding (51) && d.isSounding (55) && d.isSounding (58);
+            });
+            check (minorOk && sevenOk, "A button pressed after the key turns the note into a chord; a colour added while holding adds its note");
+
+            d.setLatched (1u << bMaj);
+            d.setParam ("transpose", 2.0f);
+            bool latchedOk = false;
+            runDaydream (d, { { 0.05, 60, true }, { 0.5, 60, false } }, 0.6, [&] (double t) { if (t > 0.2 && t < 0.22) latchedOk = d.isSounding (50) && d.isSounding (54) && d.isSounding (57); });
+            check (latchedOk, "Latched on-screen button + transpose +2: C plays D major");
+            juce::MemoryBlock mb;
+            d.getStateInformation (mb);
+            Daydream d2;
+            d2.setStateInformation (mb.getData(), (int) mb.getSize());
+            check (d2.getLatched() == (1u << bMaj) && juce::roundToInt (d2.param ("transpose")) == 2, "Latched buttons and settings are saved");
+        }
+        // performance modes
+        {
+            Daydream d;
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Init (Dry Analogue)"));
+            d.setParam ("position", (float) followKey);
+            d.setParam ("tempoSrc", 1.0f); d.setParam ("bpm", 120.0f);
+            auto countAt = [&] (double from, double to, std::function<void (double, int)> f)
+            {
+                return [&, from, to, f] (double t) { if (t >= from && t < to) { int n = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++n; f (t, n); } };
+            };
+            juce::ignoreUnused (countAt);
+            // strum: 50 ms between the strings
+            d.setParam ("perf", (float) Daydream::perfStrum); d.setParam ("strumMs", 50.0f);
+            std::vector<DdEv> evs;
+            ddChord (evs, d, { bMaj }, 60, 0.1, 0.6);
+            std::vector<std::pair<double, int>> trace;
+            runDaydream (d, evs, 0.5, [&] (double t) { int n = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++n; trace.push_back ({ t, n }); });
+            auto countWhen = [&] (double t) { for (auto& [tt, n] : trace) if (tt >= t) return n; return -1; };
+            check (countWhen (0.13) == 1 && countWhen (0.175) == 2 && countWhen (0.225) == 3, "Strum: the notes come in 50 ms apart ("
+                   + juce::String (countWhen (0.13)) + ", " + juce::String (countWhen (0.175)) + ", " + juce::String (countWhen (0.225)) + ")");
+
+            // arpeggio: 1/8 notes at 120 BPM go up the chord
+            d.setParam ("perf", (float) Daydream::perfArp); d.setParam ("arpRate", 1.0f); d.setParam ("arpOrder", 0.0f); d.setParam ("gate", 0.5f);
+            std::vector<int> heard;
+            {
+                const double at[] = { 0.15, 0.4, 0.65 };
+                int next = 0;
+                runDaydream (d, evs, 1.0, [&] (double t)
+                {
+                    if (next < 3 && t >= at[next]) { ++next; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) heard.push_back (i); }
+                });
+            }
+            juce::String heardText; for (int h : heard) heardText << h << " ";
+            check (heard == ivs ({ 48, 52, 55 }), "Arpeggio: one note every 1/8 at 120 BPM, going up (heard " + heardText.trim() + ")");
+
+            // a rhythm pattern keeps time: eighth pulse = chord on every 1/8, gone in between
+            d.setParam ("perf", (float) Daydream::perfPattern); d.setParam ("pattern", 0.0f);
+            std::vector<int> counts;
+            {
+                const double at[] = { 0.13, 0.28, 0.37, 0.53 };
+                int next = 0;
+                runDaydream (d, evs, 0.75, [&] (double t)
+                {
+                    if (next < 4 && t >= at[next]) { ++next; int n = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++n; counts.push_back (n); }
+                });
+            }
+            check (counts == ivs ({ 3, 0, 3, 0 }), "Pattern: the chord on every eighth, silent between (" + juce::String (counts.size()) + " checks)");
+
+            // harp: the chord swept up three octaves
+            d.setParam ("perf", (float) Daydream::perfHarp); d.setParam ("harpMs", 20.0f); d.setParam ("harpOctaves", 1.0f);
+            int most = 0;
+            runDaydream (d, evs, 0.6, [&] (double) { int n = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++n; most = juce::jmax (most, n); });
+            check (most == 9, "Harp: a 3-note chord swept over 3 octaves = 9 notes (" + juce::String (most) + ")");
+
+            // sloppy strum: all the notes, a little late
+            d.setParam ("perf", (float) Daydream::perfSlop); d.setParam ("slop", 1.0f);
+            int at0 = -1, later = 0;
+            runDaydream (d, evs, 0.5, [&] (double t)
+            {
+                int n = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++n;
+                if (t > 0.11 && at0 < 0) at0 = n;
+                if (t > 0.3 && t < 0.31) later = n;
+            });
+            check (later == 3 && at0 < 3, "Sloppy strum: notes arrive at different moments");
+        }
+        // bass
+        {
+            Daydream d;
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Init (Dry Analogue)"));
+            std::vector<DdEv> evs;
+            ddChord (evs, d, { bMin }, 69, 0.1, 0.6);   // A minor
+            d.setParam ("bassMode", (float) Daydream::bassWithChords);
+            int bassNow = -1, chordNotes = 0;
+            runDaydream (d, evs, 0.5, [&] (double t) { if (t > 0.3 && t < 0.31) { bassNow = d.getBassSounding(); chordNotes = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++chordNotes; } });
+            check (bassNow == 45 && chordNotes == 3, "Bass with chords: A2 under A minor");
+            d.setParam ("bassMode", (float) Daydream::bassOnly);
+            auto out = runDaydream (d, evs, 0.5, [&] (double t) { if (t > 0.3 && t < 0.31) { bassNow = d.getBassSounding(); chordNotes = 0; for (int i = 0; i < 128; ++i) if (d.isSounding (i)) ++chordNotes; } });
+            check (bassNow == 45 && chordNotes == 0 && rms (out, (int) (0.2 * sr), (int) (0.5 * sr)) > 0.005f, "Bass only: just the bass");
+            d.setParam ("bassMode", (float) Daydream::bassWithChords);
+            d.setParam ("bassVoicing", 1.0f);
+            runDaydream (d, evs, 0.5, [&] (double t) { if (t > 0.3 && t < 0.31) bassNow = d.getBassSounding(); });
+            check (bassNow == 48, "Bass voicing +1: C3 (the minor third) under A minor");
+        }
+        // the engines are in tune
+        {
+            auto pitchOf = [] (const juce::AudioBuffer<float>& b, int from, int len)
+            {
+                std::vector<float> x ((size_t) len);
+                for (int i = 0; i < len; ++i) x[(size_t) i] = b.getSample (0, from + i) + b.getSample (1, from + i);
+                const int minLag = (int) (sr / 1500), maxLag = (int) (sr / 60);
+                std::vector<double> ac ((size_t) maxLag + 2, 0.0);
+                for (int lag = minLag; lag <= maxLag; ++lag) { double a = 0; for (int i = 0; i + lag < len; ++i) a += x[(size_t) i] * x[(size_t) (i + lag)]; ac[(size_t) lag] = a; }
+                const double peak = *std::max_element (ac.begin(), ac.end());
+                for (int lag = minLag; lag <= maxLag; ++lag)
+                    if (ac[(size_t) lag] > 0.9 * peak && ac[(size_t) lag] >= ac[(size_t) lag - 1] && ac[(size_t) lag] >= ac[(size_t) lag + 1])
+                    {
+                        const double a = ac[(size_t) lag - 1], b0 = ac[(size_t) lag], c = ac[(size_t) lag + 1];
+                        const double shift = 0.5 * (a - c) / (a - 2 * b0 + c);
+                        return sr / (lag + shift);
+                    }
+                return 0.0;
+            };
+            for (auto* name : { "Init (Dry Analogue)", "Glass Tine Piano", "Velvet Reed Piano", "Sunday Organ" })
+            {
+                Daydream d;
+                d.setCurrentProgram (Daydream::presetNames().indexOf (name));
+                for (auto id : { "reverb", "delay", "chorus", "ensemble", "flanger", "phaser", "tremolo", "drive", "drift", "vibrato" }) d.setParam (id, 0.0f);
+                auto out = runDaydream (d, { { 0.05, 69, true }, { 1.0, 69, false } }, 1.1);
+                const double hz = pitchOf (out, (int) (0.3 * sr), 8192);
+                double cents = 1200.0 * std::log2 (hz / 440.0);
+                const int octaves = (int) std::round (cents / 1200.0);   // an organ's 16' sounds an octave down
+                cents -= 1200.0 * octaves;
+                check (std::abs (cents) < 8.0 && std::abs (octaves) <= 1, juce::String (name) + " (" + engineNames()[(int) d.param ("engine")] + ") plays A in tune ("
+                       + juce::String (cents, 1) + " ct" + (octaves != 0 ? ", " + juce::String (octaves) + " oct" : juce::String()) + ")");
+            }
+        }
+        // locks
+        {
+            Daydream d;
+            d.setParam ("lockPerf", 1.0f);
+            d.setParam ("perf", (float) Daydream::perfArp);
+            d.setParam ("reverb", 0.33f);
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Velvet Reed Piano"));
+            check ((int) d.param ("perf") == Daydream::perfArp && std::abs (d.param ("reverb") - 0.2f) < 0.01f, "Locked performance stays when the sound changes; effects follow the sound");
+            d.setParam ("lockFx", 1.0f); d.setParam ("reverb", 0.33f);
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Moon Pad"));
+            check (std::abs (d.param ("reverb") - 0.33f) < 0.01f && (int) d.param ("engine") == 0, "Locked effects stay too");
+        }
+        // drum grooves
+        {
+            bool lanes = true;
+            for (auto& g : grooves()) for (auto& l : g.lanes) lanes = lanes && (int) std::strlen (l.steps) == g.stepsPerBar;
+            bool pats = true;
+            for (auto& p : patterns()) pats = pats && (p.steps == 16 || p.steps == 12);
+            check (lanes && pats && grooves().size() >= 12 && patterns().size() >= 12, "Grooves and patterns are a bar long");
+            Daydream d;
+            d.setParam ("tempoSrc", 1.0f); d.setParam ("bpm", 120.0f);
+            d.setParam ("beat", 3.0f); d.setParam ("beatOn", 1.0f);
+            auto out = runDaydream (d, {}, 2.1);
+            bool onBeat = true;
+            juce::String where;
+            const float loud = out.getMagnitude (0, out.getNumSamples());
+            for (int k = 0; k < 4; ++k)
+            {
+                const int p = firstSampleAbove (out, 0.3f * loud, juce::jmax (0, (int) ((k * 0.5 - 0.02) * sr)));
+                where << juce::String ((p / sr - k * 0.5) * 1000.0, 1) << " ";
+                onBeat = onBeat && p >= (int) (k * 0.5 * sr) && p < (int) ((k * 0.5 + 0.012) * sr);
+            }
+            check (allFinite (out) && rms (out, 0, out.getNumSamples()) > 0.01f && onBeat, "Four on the Floor: a hit on every beat at 120 BPM (ms after: " + where + ")");
+        }
+        // looper: count-in, a bar recorded, played back
+        {
+            Daydream d;
+            d.setCurrentProgram (Daydream::presetNames().indexOf ("Init (Dry Analogue)"));
+            d.setParam ("position", (float) followKey);
+            d.setParam ("tempoSrc", 1.0f); d.setParam ("bpm", 120.0f); d.setParam ("loopLength", 1.0f);
+            std::vector<DdEv> evs;
+            ddChord (evs, d, { bMaj }, 62, 2.3, 0.6);        // D major in the recorded bar (2..4 s)
+            d.loopButton();
+            bool countIn = false, recording = false, playedBack = false, silentBetween = true;
+            runDaydream (d, evs, 6.2, [&] (double t)
+            {
+                if (t > 1.0 && t < 1.01) countIn = d.getLoopState() == Daydream::loopCountIn;
+                if (t > 3.0 && t < 3.01) recording = d.getLoopState() == Daydream::loopRecording;
+                if (t > 3.3 && t < 4.2) for (int i = 0; i < 128; ++i) if (d.isSounding (i)) silentBetween = false;
+                if (t > 4.6 && t < 4.61) playedBack = d.getLoopState() == Daydream::loopPlaying && d.isSounding (50) && d.isSounding (54) && d.isSounding (57);
+            });
+            check (countIn && recording, "Looper: a bar of count-in, then recording");
+            check (playedBack && silentBetween && d.getLoopLayers() == 1, "Looper: the recorded chord plays back on the next pass");
+            d.overdubButton();
+            runDaydream (d, {}, 0.1, {}, false);
+            check (d.getLoopState() == Daydream::loopOverdub, "Looper: overdub");
+            d.loopUndo();
+            runDaydream (d, {}, 0.1, {}, false);
+            d.loopClear();
+            runDaydream (d, {}, 0.1, {}, false);
+            check (d.getLoopState() == Daydream::loopIdle && d.getLoopLayers() == 0, "Looper: undo and clear");
+        }
+        // every sound
+        {
+            Daydream names;
+            int bad = 0;
+            juce::String report;
+            for (int pr = 0; pr < names.getNumPrograms(); ++pr)
+            {
+                Daydream d;
+                d.setCurrentProgram (pr);
+                d.setParam ("tempoSrc", 1.0f); d.setParam ("bpm", 100.0f);
+                auto out = runDaydream (d, ddProgression (d, 1.2), 5.4);
+                const float r = juce::Decibels::gainToDecibels (rms (out, (int) (0.1 * sr), (int) (4.9 * sr)));
+                const float pk = out.getMagnitude (0, out.getNumSamples());
+                if (! allFinite (out) || pk > 1.0f || r < -26.0f || r > -11.0f) { ++bad; report << names.getProgramName (pr) << " (" << juce::String (r, 1) << " dB, peak " << juce::String (pk, 2) << ") "; }
+            }
+            check (bad == 0, juce::String (names.getNumPrograms()) + " sounds play at a sensible level " + report);
         }
     }
 

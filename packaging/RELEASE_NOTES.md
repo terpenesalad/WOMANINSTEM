@@ -1,11 +1,31 @@
-## WOMANINSTEM 3.10.0 for Windows (64-bit): Smart Drummer, a drummer that listens to your song
+## WOMANINSTEM 3.11.0 for Windows (64-bit): Daydream, a chord machine for finding song ideas
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.9 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.10 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+
+### New in 3.11
+
+**Daydream** (Studio: *+ Track → Daydream*, or Library → Sounds → Daydream)
+- **A chord machine: one key, a whole chord.** Hold a chord button and play a key: **Maj**, **Min**, **Sus** or **Dim**, coloured with **6**, **m7**, **M7** and **9**. Hold more than one and they combine: *Maj + M7* is a major 7th, *Min + m7 + 9* a minor 9th, *Dim + m7* a half-diminished, *Sus + m7* a 7sus4. The screen names whatever you make (Cmaj9, Am7, F6/9, G7sus4, Bm7b5...).
+- **On a MIDI keyboard** the eight buttons are the white keys of one octave (C2 to C3 by default: C Maj, D Min, E Sus, F Dim, G 6, A m7, B M7, C 9), so your left hand holds the chord and your right hand plays roots anywhere else. Press the buttons before or after the key, add a colour while the chord rings and it joins in. They're ordinary notes, so a part you record plays its chords back. On screen, click a button to latch it on. With no button held, keys play single notes.
+- **Key Mode**: every key plays the chord its scale makes on it (in C major, D is Dm, G is G, B is Bdim); out-of-key notes snap to the scale, the colour buttons add the key's own 6th, 7th and 9th, and a chord button still overrides. Eight scales (major, minor, Dorian, Mixolydian, Lydian, Phrygian, harmonic and melodic minor), or **follow the song's key**. **Transpose** moves everything by semitones.
+- **The voicing ladder**: each step up moves the chord's lowest note an octave up to the top, each step down moves the top note to the bottom, so one control walks a chord through all its inversions and up or down the keyboard; turn it while a chord rings and the notes move. The **bass ladder** walks the bass note through the chord's notes (C, C/E, C/G...). **Chord position** either follows the key you press or **stays in one place** (every chord is voiced around a centre note, so progressions move smoothly); **spread**: close, open (drop 2 or drop 3), or wide.
+- **Performance modes** bring the chord to life: **Strum** (speed, up, down or alternating), **Strum 2 Octaves**, **Sloppy Strum** (human timing and touch), **Arpeggio** and **Arpeggio 2 Octaves** (1/4 to 1/32 with triplets, up, down, up and down, random, outside-in, gate, swing), **Pattern** (16 rhythm patterns that fit any chord: eighth pulse, offbeat stabs, broken chords, bossa comping, motorik chug, gallop, two hands, ballad picking, waltz...) and **Harp** (the chord swept up two to five octaves). **Lock** keeps your performance when you change the sound.
+- **A separate bass synth** underneath: 8 sounds (*Deep Sub*, *Round Analogue*, *Warm Fingers*, *Rubber Band*, *Saw Growl*, *Hollow Square*, *Bell Bass*, *Tape Wobble*), playing with chords, with chords and single notes, or on its own; its own level, octave, glide and tone.
+- **Three synth engines**, all editable on the *SOUND* page:
+  - *Analogue*: two oscillators (saw, square, pulse, triangle, sine) with up to 4-voice unison, a sub oscillator, noise, four filters (24 and 12 dB low pass, band pass, high pass), filter and amp envelopes, an LFO for vibrato, filter, pulse width and level, and analogue drift.
+  - *FM*: four operators in eight algorithms, each with its own ratio, level and envelope, feedback and touch.
+  - *Reed Piano*: a modelled 60s reed electric piano, nothing sampled: the reed's own overtones struck by a felt hammer, the pickup's bark when you dig in, the key's thump and the damper.
+- **Eight effects**: drive, tremolo (or auto-pan), phaser, flanger, chorus, ensemble, a tempo-synced delay (ping-pong) and reverb. The **FX** knob turns each sound's main effect; *Lock* keeps your effects when you change the sound.
+- **Beats to play to**: 15 drum grooves (*Easy Pop*, *Laid-Back Hip-Hop*, *Four on the Floor*, *Motorik*, *Breakbeat*, *Bossa*, *Disco Strut*, *Slow Jam 12/8*, *Psych Shuffle*, *Lo-Fi Dust*, *One Drop*, *Afro Groove*, *Half-Time*, *Soft Brushes*, *Krautrock Toms*) on four drum machine kits, at the song's tempo or its own.
+- **A looper** for sketching: free length (it starts with your first note) or 1 to 16 bars after a bar of count-in, then **overdub** layer on layer, **undo** the last one, or clear.
+- **The screen** shows the chord name, its notes, a keyboard with the chord and the bass lit up, or a scope; click it to change the view.
+- **45 sounds** in seven groups: *Keys* (Velvet Reed Piano, Barking Reed, Glass Tine Piano, Sunday Organ, Thrift Combo Organ...), *Pads* (Moon Pad, Velour Strings, Glacier, Deep Space Drift...), *Synths* (Psych Poly, Vintage Brass Synth, Lucid Chords, Rubber Funk Stabs...), *Plucks & Strums* (Twelve-String Strum, Nylon Strum, Harp Glissando, Kalimba Arp, Music Box...), *Bells*, *Arps & Patterns* (Night Drive Arp, Motorik Chug, Arp Rain...) and *Textures* (Cassette Memory, Underwater Organ, Hymn in a Cave...). Every sound is level-matched.
+- Daydream is an original instrument with the same kind of feature set as hardware chord synthesizers; it isn't a copy of any of them (no names, artwork, layouts or sounds taken).
 
 ### New in 3.10
 

@@ -42,7 +42,9 @@ Studio quick start
    Box, Sampler, Drum Pads, Loop Station, Beat Lab (groovebox), Junkyard Percussion (junk, finger
    snaps, bowed strings, sound spaces), Whistler, Choir Loft (a choir or a singer built from people:
    click singers on its stage to change who they are), Smart Drummer (listens to the song and writes a
-   drum part for it, one clip per section; change the style, the feel or the kit and play it again), Audio: Guitar or Bass (records through Amp & Pedals),
+   drum part for it, one clip per section; change the style, the feel or the kit and play it again),
+   Daydream (a chord machine: hold chord keys C2 to C3 - C Maj, D Min, E Sus, F Dim, G 6, A m7, B M7,
+   C 9 - and play one key for the whole chord, or turn on Key Mode), Audio: Guitar or Bass (records through Amp & Pedals),
    Microphone / Vocals (pick a vocal sound: studio, folk, psych, weird...), and Aux Buses (a shared
    reverb or delay your tracks send to). Right-click an audio track > Vocal Sound to change it.
 3. Library (left): Sounds = instruments and drum kits, Drums = finger-snap loops, junkyard grooves,
