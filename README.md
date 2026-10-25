@@ -42,13 +42,14 @@ Stems are cached in your **Library** (24-bit FLAC), so a song is only ever split
 
 **Play-along rig**: plug into any USB audio interface (ASIO, WASAPI exclusive/shared) and play through:
 
-- **Input** with channel picker, gain, clip warning and a **chromatic tuner** (down to low B on a 5-string)
+- **Input** with channel picker, gain, clip warning, a **guitar cable** (a 6 m lead into an amp softens the brittle top of a short cable into an interface) and a **chromatic tuner** (down to low B on a 5-string)
 - **Strings & Pickups**: one knob turns your bass or guitar into another one: flatwounds, a 60s hollow-body *violin bass*, foam mute, bright roundwounds, P-bass, single coils or humbuckers. No EQ fiddling.
 - **Noise gate** (hysteresis + hold, no chatter) and **compressor**
 - **Drive pedal**: overdrive / distortion / fuzz, plus a **bass drive** that keeps your clean low end, oversampled
-- **Amp**: 12 built-in models, each with its own preamp, real (modelled) tone-stack circuit, power amp, sag and bloom, 4× oversampled. Guitar: *American Clean, Tweed Breakup, British Chime, British Crunch, British Lead, Modern High Gain, Smooth Overdrive*. Bass: *60s British Valve, Classic Tube 8x10, Vintage Flip-Top, Modern Growl, Studio DI*. **Or load any [Neural Amp Modeler](https://www.neuralampmodeler.com/) `.nam` capture** (thousands free on [TONE3000](https://www.tone3000.com))
-- **Cabinet**: 11 speaker cabinets (guitar 4x12s, 2x12s, 1x12s; bass 1x15, 2x15, 4x10 with horn, 8x10, 2x10) with a choice of **microphone** (dynamic, ribbon, condenser, dynamic + ribbon), **mic position** (centre to edge), **room**, and a phase-aligned **DI blend** like a studio bass recording. Or **any impulse response** (`.wav`)
-- **Studio EQ, tape saturation, chorus, stereo/ping-pong delay, reverb** with pre-delay
+- **Amp**: 12 built-in models, each with its own preamp, real (modelled) tone-stack circuit, power amp, sag and bloom, output transformer (low notes and pick thumps saturate its core) and a speaker that gives a little when pushed, 4× oversampled. Guitar: *American Clean, Tweed Breakup, British Chime, British Crunch, British Lead, Modern High Gain, Smooth Overdrive*. Bass: *60s British Valve, Classic Tube 8x10, Vintage Flip-Top, Modern Growl, Studio DI*. **Or load any [Neural Amp Modeler](https://www.neuralampmodeler.com/) `.nam` capture** (thousands free on [TONE3000](https://www.tone3000.com))
+- **Cabinet**: 11 speaker cabinets (guitar 4x12s, 2x12s, 1x12s; bass 1x15, 2x15, 4x10 with horn, 8x10, 2x10), each a **physical model of the speaker and the mic**: the sound of every part of the cone at the mic's real position, cone break-up, the cab's other speakers, its box and the floor. Choose the **microphone** (dynamic, ribbon, condenser, dynamic + ribbon), **where it points** (dust cap to cone edge) and **how far back** it is (2 cm to 1 m, with real proximity effect), plus a phase-aligned **DI blend** like a studio bass recording. Or **any impulse response** (`.wav`)
+- **Room mics**: put the amp in a room (*Studio Live Room*, *Small Room*, *Big Live Room*, *Concrete Garage*, *Hall Stage*) and blend a spaced pair of room mics with the close mic, in stereo
+- **Studio EQ, tape saturation, chorus, stereo/ping-pong delay, reverb** with pre-delay: *Classic*, *Room*, *Plate*, *Spring* (the amp's own tank) or *Hall*
 - **Pedalboard**: the chain is shown as a row of pedals you can **drag into any order** (delay before the drive, reverb before the amp...), and **+ Add pedal** puts up to 16 more on the board: *Drive Pedal*, *Boost*, *Wah* (pedal, envelope or LFO), *Octaver*, *Volume Swell*, plus phaser, flanger, tremolo, pitch shifter, shimmer, tape warble, bitcrusher, looper and every other Studio effect
 - 22 factory presets, all loudness-matched, that sound finished with no extra EQ: for bass *60s Merseybeat (violin bass)*, *Late 60s Studio (DI + amp)*, *Motown Flatwound*, *Classic Rock 8x10*, *Modern Growl*, *Modern Clean Hi-Fi*, *Punk Pick*, *Dub Deep*, *Fuzz Bass*, *Clean DI*; for guitar clean, jangle, blues, crunch, high gain, lead, dream pop and fuzz. Save your own.
 
@@ -69,6 +70,10 @@ A glowing oscilloscope beam drawn by the sound, like the psychedelic projections
 A GarageBand / Logic-style recording studio, built in. Everything runs at low latency on the same audio interface and the same amp rig.
 
 ![Studio mixer](docs/studio-mixer.png)
+
+### New in 3.12
+
+- **Guitar and bass that sound like an amp in a room, not a DI.** The *Amp & Pedals* rig (Studio *Audio: Guitar or Bass* tracks and Play Along) has new cabinets: each one a physical model of the speaker and the microphone instead of an EQ curve, with the cone break-up peaks and notches and the short ringing of a real speaker, mic placement that behaves like moving a real mic (dust cap to cone edge, 2 cm to 1 m back), and the other speakers in the cab, its box and the floor. **Room mics** put the amp in a studio live room, a small room, a big live room, a concrete garage or on a stage, in stereo. The amps gain an **output transformer** and a **speaker** that react to how hard you play, a **guitar cable** takes the brittle edge off an interface's input, and the reverb has real **Room, Plate, Spring and Hall** spaces. Every factory preset uses them and was re-levelled on real recorded playing.
 
 ### New in 3.11
 
@@ -303,7 +308,7 @@ Source/
   Separation/   audio decoding, Demucs inference (multi-threaded), lead/backing vocal split, model download
   Library/      stem cache (FLAC + manifest), export
   Engine/       real-time audio callback, stem player (loop, time-stretch), recorder, scope feed
-  Rig/          amps, drive, cab sim, NAM host, effects, tuner, presets
+  Rig/          amps, drive, speaker + mic model, cab sim, room mics, NAM host, effects, tuner, presets
   Daw/
     Model/      the song (tracks, buses, clips, notes, automation, markers; undo; save/load), drum grooves, MIDI loops, junk / finger-snap loops and sound spaces, vocal chains, chord keys, song analysis + drum generator, Daydream's chord logic, MIDI files, tempo detection
     Engine/     real-time multitrack engine (lock-free snapshots, routing graph, delay compensation), recording, export, audio cache + time-stretch
@@ -328,6 +333,7 @@ packaging/      installer script, end-user readme, release notes
 - The Studio's tempo is constant per song (no tempo changes during a song yet), there's no score view, and no track folders / stacks yet.
 - Vocal Tune works on one voice (or one note) at a time, like the classic hardware it imitates; it won't correct chords.
 - Daydream's chords play its own sounds: it can't send its generated chords and arpeggios to another instrument track yet, and its looper's loops aren't saved with the song (record the track to keep them).
+- The built-in cabinets and room mics are physical models designed from published speaker responses and acoustics, tuned by measurement (spectra, decay times, transients), not captured from real cabs. For a specific cab you know, load its impulse response (`.wav`) or a full-rig NAM capture.
 - Plugins are Windows / Linux formats: VST3, VST, CLAP and LV2 (no Audio Units, which are Mac-only).
 - Tempo detection for **Open in Studio** assumes a steady 4/4 beat. If it's off, type the right tempo in the LCD: the stems stay where they are, only the grid moves.
 

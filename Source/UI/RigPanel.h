@@ -31,6 +31,7 @@ public:
 
     Knob& addKnob (const char* paramId, const juce::String& label);
     juce::ComboBox& addChoice (const char* paramId);
+    juce::ComboBox* getChoice() noexcept { return choice.get(); }
     void addExtra (juce::Component& c, int width);    // shown in the selector row (after the selector)
     void addSide (juce::Component& c, int width);     // shown in the knob row after the knobs (width <= 0: fill)
     void setTooltipText (const juce::String& t) { tooltip = t; }
@@ -120,7 +121,7 @@ private:
     VStack inputSide;
     int clipHold = 0;
 
-    std::unique_ptr<EffectModule> inputModule, tunerModule, charM, gateM, compM, driveM, ampM, cabM, eqM, tapeM, chorusM, delayM, reverbM, outputM;
+    std::unique_ptr<EffectModule> inputModule, tunerModule, charM, gateM, compM, driveM, ampM, cabM, roomM, eqM, tapeM, chorusM, delayM, reverbM, outputM;
     juce::ComboBox micBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> micAttachment;
     juce::TextButton loadNam { "Load NAM..." }, loadIr { "Load IR..." };

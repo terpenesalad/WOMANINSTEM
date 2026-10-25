@@ -122,6 +122,7 @@ BuiltInAmp::Model BuiltInAmp::modelFor (AmpType t)
     m.powerDrive = 1.2f; m.sag = 0.2f; m.asym = 0.0f; m.nfb = 0.6f; m.resonanceHz = 100;
     m.voiceLowHz = 100; m.voiceLowDb = 0; m.voiceMidHz = 800; m.voiceMidQ = 0.8f; m.voiceMidDb = 0; m.voiceHighHz = 4000; m.voiceHighDb = 0;
     m.outputTrimDb = 0; m.cleanBlendHz = 0; m.cleanBlendDb = 0;
+    m.otSat = 0.0f; m.speakerCompDb = 0.0f;
 
     switch (t)
     {
@@ -207,6 +208,23 @@ BuiltInAmp::Model BuiltInAmp::modelFor (AmpType t)
             m.stages = 0; m.minGainDb = 0; m.maxGainDb = 0; m.nfb = 1.0f;
             break;
     }
+    // output transformer (big iron in the 100 W heads, small in the vintage combos) and how much the speaker gives
+    switch (t)
+    {
+        case AmpType::americanClean:   m.otSat = 1.2f;  m.speakerCompDb = 1.5f; break;
+        case AmpType::tweedBreakup:    m.otSat = 0.45f; m.speakerCompDb = 3.0f; break;
+        case AmpType::britishChime:    m.otSat = 0.55f; m.speakerCompDb = 2.5f; break;
+        case AmpType::britishCrunch:   m.otSat = 0.7f;  m.speakerCompDb = 2.5f; break;
+        case AmpType::britishLead:     m.otSat = 0.8f;  m.speakerCompDb = 2.0f; break;
+        case AmpType::modernHighGain:  m.otSat = 0.9f;  m.speakerCompDb = 2.0f; break;
+        case AmpType::smoothOverdrive: m.otSat = 0.8f;  m.speakerCompDb = 2.0f; break;
+        case AmpType::bassSixties:     m.otSat = 0.6f;  m.speakerCompDb = 2.0f; break;
+        case AmpType::bassClassicTube: m.otSat = 1.0f;  m.speakerCompDb = 1.5f; break;
+        case AmpType::bassFlipTop:     m.otSat = 0.7f;  m.speakerCompDb = 2.0f; break;
+        case AmpType::bassModernGrowl: m.otSat = 1.2f;  m.speakerCompDb = 1.0f; break;
+        case AmpType::bassPsychPop:    m.otSat = 0.7f;  m.speakerCompDb = 2.0f; break;
+        default: break;
+    }
     m.outputTrimDb = [t]
     {
         // loudness matching (measured by rigtest with a plucked note at default knobs)
@@ -251,6 +269,8 @@ void BuiltInAmp::prepare (double sr, int maxBlock)
     oversampling.initProcessing ((size_t) maxBlock);
     preGain.reset (sr, 0.03);
     masterGain.reset (sr, 0.03);
+    speakerAtk = std::exp (-1.0f / (float) (0.004 * sr));    // the cone and voice coil take a few ms to give, and recover slowly
+    speakerRel = std::exp (-1.0f / (float) (0.15 * sr));
     const double osRate = sr * (1 << osFactorLog2);
     sagCoeff = std::exp (-1.0f / (float) (0.08 * osRate));   // 80 ms sag recovery
     envAtk = std::exp (-1.0f / (float) (0.003 * osRate));
@@ -258,7 +278,7 @@ void BuiltInAmp::prepare (double sr, int maxBlock)
     cleanLow.assign ((size_t) maxBlock + 16, 0.0f);
     reserve ({ &inputHp, &brightShelf, &voiceLow, &voiceMid, &voiceHigh, &activeBass, &activeMid, &activeTreble,
                &couplingHp[0], &couplingHp[1], &couplingHp[2], &couplingHp[3], &stageLp[0], &stageLp[1], &stageLp[2], &stageLp[3],
-               &resonance, &nfbHigh, &presenceF, &outputLp, &dcBlock, &cleanLowLp, &cleanLowLp2, &toneOnlyBass, &toneOnlyMid, &toneOnlyTreble });
+               &resonance, &nfbHigh, &presenceF, &outputLp, &dcBlock, &cleanLowLp, &cleanLowLp2, &toneOnlyBass, &toneOnlyMid, &toneOnlyTreble, &otLow });
     filtersDirty = true;
     updateFilters();
     reset();
@@ -268,8 +288,10 @@ void BuiltInAmp::reset()
 {
     oversampling.reset();
     for (auto* f : { &inputHp, &brightShelf, &voiceLow, &voiceMid, &voiceHigh, &activeBass, &activeMid, &activeTreble,
-                     &resonance, &nfbHigh, &presenceF, &outputLp, &dcBlock, &cleanLowLp, &cleanLowLp2, &toneOnlyBass, &toneOnlyMid, &toneOnlyTreble })
+                     &resonance, &nfbHigh, &presenceF, &outputLp, &dcBlock, &cleanLowLp, &cleanLowLp2, &toneOnlyBass, &toneOnlyMid, &toneOnlyTreble, &otLow })
         f->reset();
+    speakerEnv = 0.0f;
+    speakerGain = 1.0f;
     for (auto& f : couplingHp) f.reset();
     for (auto& f : stageLp) f.reset();
     stack.reset();
@@ -345,6 +367,8 @@ void BuiltInAmp::updateFilters()
     assign (presenceF, AC::makeHighShelf (sampleRate, 4500.0, 0.7f, dbToGain (knobToDb (presenceKnob, 8.0f))));
     assign (outputLp, AC::makeLowPass (sampleRate, juce::jmin (sampleRate * 0.45, 16000.0), 0.707f));
     assign (dcBlock, AC::makeFirstOrderHighPass (sampleRate, ampTypeIsBass (type) ? 16.0f : 28.0f));
+    // the transformer's core is driven by the integral of the voltage: low notes and pick thumps saturate it first
+    assign (otLow, AC::makeLowPass (sampleRate, ampTypeIsBass (type) ? 90.0f : 140.0f, 0.6f));
     if (v.cleanBlendHz > 0.0f)
     {
         assign (cleanLowLp,  AC::makeLowPass (sampleRate, v.cleanBlendHz, 0.54f));
@@ -465,11 +489,29 @@ void BuiltInAmp::process (float* data, int numSamples)
         float x = data[i];
         if (blendLows)
             x += cleanLow[(size_t) i] * blendGain;
+        if (v.otSat > 0.0f)
+        {
+            // output transformer: only the low band is saturated (soft knee); small signals pass untouched
+            const float lf = otLow.processSample (x);
+            const float u = lf / v.otSat;
+            const float sat = u / std::pow (1.0f + std::pow (std::abs (u), 2.5f), 0.4f);
+            x += sat * v.otSat - lf;
+        }
         x = resonance.processSample (x);
         x = nfbHigh.processSample (x);
         x = presenceF.processSample (x);
         x = outputLp.processSample (x);
         x = dcBlock.processSample (x);
+        if (v.speakerCompDb > 0.0f)
+        {
+            // the speaker gives a little when it's pushed: a slow, gentle squash above a moderate level
+            const float e = x * x;
+            speakerEnv = e > speakerEnv ? e + (speakerEnv - e) * speakerAtk : e + (speakerEnv - e) * speakerRel;
+            const float over = juce::jmax (0.0f, std::sqrt (speakerEnv) / 0.22f - 1.0f);
+            const float db = -juce::jmin (v.speakerCompDb, 4.0f * std::log2 (1.0f + over));
+            speakerGain = dbToGain (db);
+            x *= speakerGain;
+        }
         data[i] = x * masterGain.getNextValue() * 2.0f;
     }
 }
@@ -759,6 +801,62 @@ void InstrumentCharacter::process (float* data, int n)
         }
         data[i] = x;
     }
+}
+
+// =====================================================================================================
+//  Guitar cable
+// =====================================================================================================
+void GuitarCable::prepare (double sr)
+{
+    sampleRate = sr;
+    z1 = z2 = 0.0;
+    design();
+}
+
+void GuitarCable::setLength (float m)
+{
+    m = juce::jlimit (0.0f, 12.0f, m);
+    if (std::abs (m - length) < 0.01f) return;
+    length = m;
+    design();
+}
+
+void GuitarCable::design()
+{
+    active = length > 0.05f;
+    if (! active) { b0 = 1; b1 = b2 = a1 = a2 = 0; return; }
+    // an average pickup (between a single coil and a humbucker), its pots, and the cable
+    const double L = 3.2, Rdc = 7000.0, Cpickup = 120e-12, Rload = 150e3, Cinput = 50e-12, perMetre = 100e-12;
+    const double Cold = Cpickup + Cinput + 3.0 * perMetre;
+    const double Cnew = juce::jmax (0.6 * Cold, Cpickup + Cinput + length * perMetre);
+    // H(s) = 1 / (L C s^2 + (L / Rload + Rdc C) s + 1 + Rdc / Rload): the ratio new / old
+    const double n2 = L * Cold, n1 = L / Rload + Rdc * Cold;
+    const double d2 = L * Cnew, d1 = L / Rload + Rdc * Cnew;
+    // bilinear transform, pre-warped at the new resonance
+    const double w0 = 1.0 / std::sqrt (L * Cnew);
+    const double K = w0 / std::tan (juce::jmin (3.0, w0 / (2.0 * sampleRate)));
+    const double B0 = n2 * K * K + n1 * K + 1.0, B1 = 2.0 - 2.0 * n2 * K * K, B2 = n2 * K * K - n1 * K + 1.0;
+    const double A0 = d2 * K * K + d1 * K + 1.0, A1 = 2.0 - 2.0 * d2 * K * K, A2 = d2 * K * K - d1 * K + 1.0;
+    b0 = B0 / A0; b1 = B1 / A0; b2 = B2 / A0; a1 = A1 / A0; a2 = A2 / A0;
+}
+
+void GuitarCable::process (float* d, int n) noexcept
+{
+    if (! active) return;
+    for (int i = 0; i < n; ++i)
+    {
+        const double x = d[i];
+        const double y = b0 * x + z1;
+        z1 = b1 * x - a1 * y + z2;
+        z2 = b2 * x - a2 * y;
+        d[i] = (float) y;
+    }
+}
+
+double GuitarCable::magnitudeAt (double hz) const
+{
+    const std::complex<double> z = std::polar (1.0, -juce::MathConstants<double>::twoPi * hz / sampleRate);
+    return std::abs ((b0 + b1 * z + b2 * z * z) / (1.0 + a1 * z + a2 * z * z));
 }
 
 // =====================================================================================================

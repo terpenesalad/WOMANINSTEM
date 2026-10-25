@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # ------------------------------------------------------------------------------
 #  WOMANINSTEM - stem separation + play-along amp rig
 # ------------------------------------------------------------------------------
-project(WOMANINSTEM VERSION 3.11.0 LANGUAGES C CXX)
+project(WOMANINSTEM VERSION 3.12.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -151,10 +151,12 @@ set(WIS_ENGINE_SOURCES
     Source/Separation/VocalSplitter.cpp
     Source/Library/SongLibrary.cpp
     Source/Rig/AmpModels.cpp
+    Source/Rig/AmpRoom.cpp
     Source/Rig/CabSim.cpp
     Source/Rig/Convolver.cpp
     Source/Rig/NamAmp.cpp
     Source/Rig/RigProcessor.cpp
+    Source/Rig/SpeakerModel.cpp
     Source/Rig/Tuner.cpp
     Source/Engine/AudioEngine.cpp
     Source/Engine/StemPlayer.cpp

@@ -107,6 +107,8 @@ public:
         float voiceLowHz, voiceLowDb, voiceMidHz, voiceMidQ, voiceMidDb, voiceHighHz, voiceHighDb;
         float outputTrimDb;            // loudness matching between models
         float cleanBlendHz, cleanBlendDb;   // > 0: clean low end blended under the drive (modern bass)
+        float otSat;                   // output transformer: level where its core saturates on low notes (0 = never)
+        float speakerCompDb;           // most the speaker compresses when pushed (voice coil and cone)
     };
     static Model modelFor (AmpType t);
 
@@ -132,7 +134,8 @@ private:
     float envAtk = 0, envRel = 0;
 
     // base-rate processing
-    juce::dsp::IIR::Filter<float> resonance, nfbHigh, presenceF, outputLp, dcBlock, cleanLowLp, cleanLowLp2, toneOnlyBass, toneOnlyMid, toneOnlyTreble;
+    juce::dsp::IIR::Filter<float> resonance, nfbHigh, presenceF, outputLp, dcBlock, cleanLowLp, cleanLowLp2, toneOnlyBass, toneOnlyMid, toneOnlyTreble, otLow;
+    float speakerEnv = 0.0f, speakerAtk = 0.0f, speakerRel = 0.0f, speakerGain = 1.0f;
     std::vector<float> cleanLow;
 
     juce::SmoothedValue<float> preGain, masterGain;
@@ -201,6 +204,28 @@ private:
     // dynamic low-pass (strings that lose their highs after the pluck)
     float lpState1 = 0, lpState2 = 0, envFast = 0, envSlow = 0, brightEnv = 0, sustainGain = 1.0f, sinceAttack = 0.0f;
     float fastA = 0, fastR = 0, slowA = 0, slowR = 0;
+};
+
+/** The guitar cable: a passive pickup (an inductor with its own resistance and capacitance) loaded by the cable's
+    capacitance and the amp's input. A longer cable moves the pickup's resonant peak down and rolls off the top: the
+    warm, slightly peaky sound of a guitar on a 6 m lead into an amp, instead of the brittle short cable into an
+    interface. It's the ratio of the loaded pickup with the chosen cable to the one the recording already went through
+    (a 3 m lead into a 1 MOhm interface input). Length 0 = off. */
+class GuitarCable
+{
+public:
+    void prepare (double sampleRate);
+    void setLength (float metres);
+    void process (float* data, int numSamples) noexcept;
+    /** |H| at a frequency (tests). */
+    double magnitudeAt (double hz) const;
+
+private:
+    void design();
+    double sampleRate = 48000.0;
+    float length = 0.0f;
+    bool active = false;
+    double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
 };
 
 /** 60s studio console + tape machine: transformer warmth, tape compression, head bump, soft top end. */

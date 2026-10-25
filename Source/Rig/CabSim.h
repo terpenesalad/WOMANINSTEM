@@ -3,6 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <atomic>
 #include "Convolver.h"
+#include "IrHandoff.h"
 
 namespace wis
 {
@@ -33,9 +34,9 @@ int migrateCabTypeV1 (int oldIndex);
 enum class MicType : int { dynamic = 0, ribbon, condenser, dynamicPlusRibbon, count };
 juce::StringArray micTypeNames();
 
-/** Speaker cabinet + microphone. Built-in cabinets are minimum-phase impulse responses designed from each
-    speaker's response, cone break-up and the chosen mic / position / room, rebuilt in the background when
-    you change them. You can also load any cabinet impulse response. */
+/** Speaker cabinet + microphone. Built-in cabinets are impulse responses from a physical model of the speaker and the
+    mic (see SpeakerModel.h): where the mic points, how far back it is, and which mic it is, rebuilt in the background
+    when you change them. You can also load any cabinet impulse response. */
 class CabSim
 {
 public:
@@ -45,8 +46,9 @@ public:
     void prepare (double sampleRate, int maxBlock);
     void reset();
 
-    /** micPosition 0 = centre of the cone (bright) .. 1 = edge (dark); room 0..1. */
-    void setParameters (CabType type, float lowCutHz, float highCutHz, MicType mic = MicType::dynamic, float micPosition = 0.3f, float room = 0.1f);
+    /** micPosition 0 = centre of the dust cap (bright) .. 1 = edge of the cone (dark, woofy);
+        distance 0..1 = 2 cm .. 1 m from the grille (see speaker::micDistanceMetres). */
+    void setParameters (CabType type, float lowCutHz, float highCutHz, MicType mic = MicType::dynamic, float micPosition = 0.3f, float distance = 0.1f);
     void process (float* data, int numSamples);
     /** Delay (samples) before the cabinet's sound arrives, for lining up a DI. */
     int getArrivalSamples() const noexcept { return type == CabType::impulseResponse ? 0 : conv.currentPeak(); }
@@ -58,10 +60,12 @@ public:
     bool hasImpulseResponse() const { return irReady.load(); }
 
     /** Builds a built-in cabinet's impulse response (any thread). Also used by the tests. */
-    static juce::AudioBuffer<float> designImpulseResponse (CabType type, MicType mic, float micPosition, float room, double sampleRate);
+    static juce::AudioBuffer<float> designImpulseResponse (CabType type, MicType mic, float micPosition, float distance, double sampleRate);
 
     /** Rebuilds the current cabinet right now (not real-time safe: tests, offline rendering). */
     void rebuildNow();
+    /** The cabinet asked for last is built (the convolver may still be crossfading to it). */
+    bool isUpToDate() const noexcept { return type == CabType::impulseResponse || builtKey.load() == wantedKey.load(); }
 
 private:
     struct Builder;
@@ -81,8 +85,10 @@ private:
     std::unique_ptr<Builder> builder;
 
     juce::dsp::Convolution convolution { juce::dsp::Convolution::NonUniform { 128 } };   // user IR
+    IrHandoff userIr;                     // a loaded file, on its way to the audio thread
     juce::File irFile;                    // message thread only
-    std::atomic<bool> irReady { false };  // read by the audio thread
+    std::atomic<bool> irReady { false };  // an IR has been loaded
+    std::atomic<bool> irInstalled { false };   // ...and the audio thread has it
 };
 
 } // namespace wis

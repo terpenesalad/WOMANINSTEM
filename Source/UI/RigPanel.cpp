@@ -183,6 +183,9 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     };
     inputModule->addExtra (inputBox, 0);
     inputModule->addKnob (pid::inputGain, "Gain");
+    inputModule->addKnob (pid::inputCable, "Cable").slider.setTooltip ("The guitar cable you'd plug into an amp, in metres: a longer lead "
+                                                                       "moves the pickup's peak down and softens the brittle top of a "
+                                                                       "short cable into an interface (0 = as recorded, 6 m = a classic 20 ft lead)");
     monitor.setClickingTogglesState (true);
     monitor.setToggleState (true, juce::dontSendNotification);
     monitor.setTooltip ("Hear your instrument through the rig");
@@ -249,20 +252,34 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     cabM->addChoice (pid::cabType);
     loadIr.setTooltip ("Load a speaker cabinet impulse response (.wav)");
     loadIr.onClick = [this] { chooseIrFile(); };
-    cabM->addExtra (loadIr, 76);
+    cabM->addExtra (loadIr, 64);
     if (auto* mp = dynamic_cast<juce::AudioParameterChoice*> (state.getParameter (pid::cabMic)))
         micBox.addItemList (mp->choices, 1);
     micAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, pid::cabMic, micBox);
     micBox.setTooltip ("Microphone on the speaker: dynamic (punchy), ribbon (warm, smooth), condenser (detailed) or a dynamic + ribbon blend");
-    cabM->addExtra (micBox, 128);
-    cabM->addKnob (pid::cabMicPos, "Mic Pos").slider.setTooltip ("Where the mic points: 0 = centre of the cone (bright), 10 = edge (dark, round)");
-    cabM->addKnob (pid::cabRoom, "Room").slider.setTooltip ("Distance from the cab: close and punchy, or a bit of studio room");
+    cabM->addExtra (micBox, 112);
+    cabM->addKnob (pid::cabMicPos, "Mic Pos").slider.setTooltip ("Where the mic points: 0 = the centre of the dust cap (bright, aggressive), "
+                                                                 "3 = the cap's edge (the classic spot), 10 = the edge of the cone (dark, woofy)");
+    cabM->addKnob (pid::cabRoom, "Distance").slider.setTooltip ("How far the mic is from the grille: 0 = touching it (most proximity bass), "
+                                                                "1 = 3 cm, 5 = 14 cm, 7 = 30 cm (the other speakers and the floor join in), 10 = 1 m");
     cabM->addKnob (pid::cabDiBlend, "DI Blend").slider.setTooltip ("Blend in a clean DI under the miked amp (time-aligned), the studio way to record bass");
     cabM->addKnob (pid::cabLowCut, "Low Cut");
     cabM->addKnob (pid::cabHighCut, "High Cut");
     irName.setFont (uiFont (11.0f));
     irName.setColour (juce::Label::textColourId, theme::textDim);
     irName.setJustificationType (juce::Justification::centredLeft);
+
+    roomM = std::make_unique<EffectModule> (state, "Room Mics", nullptr, juce::Colour (0xfffb923c));
+    {
+        auto& box = roomM->addChoice (pid::cabRoomType);
+        box.setTooltip ("The room the amp is in: a studio live room, a small room, a big live room, a concrete garage or a stage");
+        box.onChange = [this]
+        {
+            if (auto* b = roomM->getChoice()) b->setTooltip (AmpRoom::roomDescription (b->getSelectedItemIndex()));
+        };
+    }
+    roomM->addKnob (pid::cabRoomMic, "Level").slider.setTooltip ("A spaced pair of room mics a few metres back, blended with the close mic: "
+                                                                 "this is what puts the amp in a space (0 = close mic only)");
 
     eqM = std::make_unique<EffectModule> (state, "Studio EQ", pid::eqOn, juce::Colour (0xffa3e635));
     eqM->addKnob (pid::eqLow, "Low");
@@ -287,6 +304,8 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     delayM->addKnob (pid::delayMix, "Mix");
 
     reverbM = std::make_unique<EffectModule> (state, "Reverb", pid::reverbOn, juce::Colour (0xff2dd4bf));
+    reverbM->addChoice (pid::reverbType).setTooltip ("Classic: the rig's original reverb. Room, Plate, Spring (the amp's own tank) and Hall "
+                                                       "are real-sounding spaces");
     reverbM->addKnob (pid::reverbSize, "Size");
     reverbM->addKnob (pid::reverbDamp, "Damp");
     reverbM->addKnob (pid::reverbPreDelay, "Pre-Dly");
@@ -297,7 +316,7 @@ RigPanel::RigPanel (RigProcessor& r, AudioEngine* e)
     outputM->addSide (outputMeter, 10);
 
     for (auto* m : { inputModule.get(), tunerModule.get(), charM.get(), gateM.get(), compM.get(), driveM.get(), ampM.get(), cabM.get(),
-                     eqM.get(), tapeM.get(), chorusM.get(), delayM.get(), reverbM.get(), outputM.get() })
+                     roomM.get(), eqM.get(), tapeM.get(), chorusM.get(), delayM.get(), reverbM.get(), outputM.get() })
         addAndMakeVisible (m);
 
     refreshPresetList();
@@ -605,9 +624,9 @@ void RigPanel::resized()
             m.first->setBounds (row.removeFromLeft ((int) std::round (m.second * unit)));
     };
 
-    layoutRow (row1, { { inputModule.get(), 2.6f }, { charM.get(), 2.6f }, { gateM.get(), 2.1f }, { compM.get(), 4.6f }, { driveM.get(), 3.2f }, { ampM.get(), 6.2f } });
-    layoutRow (row2, { { tunerModule.get(), 2.6f }, { cabM.get(), 5.6f }, { eqM.get(), 3.6f }, { tapeM.get(), 1.5f }, { chorusM.get(), 2.7f },
-                       { delayM.get(), 3.6f }, { reverbM.get(), 3.6f }, { outputM.get(), 1.4f } });
+    layoutRow (row1, { { inputModule.get(), 3.3f }, { charM.get(), 2.6f }, { gateM.get(), 2.1f }, { compM.get(), 4.6f }, { driveM.get(), 3.2f }, { ampM.get(), 6.2f } });
+    layoutRow (row2, { { tunerModule.get(), 2.2f }, { cabM.get(), 6.6f }, { roomM.get(), 2.1f }, { eqM.get(), 3.0f }, { tapeM.get(), 1.3f }, { chorusM.get(), 2.5f },
+                       { delayM.get(), 3.3f }, { reverbM.get(), 3.5f }, { outputM.get(), 1.2f } });
 }
 
 } // namespace wis

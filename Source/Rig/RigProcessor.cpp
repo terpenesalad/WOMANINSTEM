@@ -22,8 +22,12 @@ static const char* allParamIds[] = {
     pid::delayOn, pid::delayTime, pid::delayFeedback, pid::delayTone, pid::delayMix, pid::delayPingPong,
     pid::reverbOn, pid::reverbSize, pid::reverbDamp, pid::reverbPreDelay, pid::reverbMix, pid::reverbWidth,
     pid::outLevel,
-    pid::charType, pid::charAmount, pid::cabMic, pid::cabMicPos, pid::cabRoom, pid::cabDiBlend, pid::tapeOn, pid::tapeDrive
+    pid::charType, pid::charAmount, pid::cabMic, pid::cabMicPos, pid::cabRoom, pid::cabDiBlend, pid::tapeOn, pid::tapeDrive,
+    pid::inputCable, pid::cabRoomMic, pid::cabRoomType, pid::reverbType
 };
+
+/** Wet level of the convolution reverbs against the classic one (their IRs have unit energy). Measured by rigtest. */
+static constexpr float spaceReverbWetGain = 1.7f;
 
 static Range freqRange (float lo, float hi)
 {
@@ -114,10 +118,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout RigProcessor::createLayout()
     l.add (std::make_unique<APF> (juce::ParameterID { pid::charAmount, 2 }, "Amount", knob, 7.0f));
     l.add (std::make_unique<APC> (juce::ParameterID { pid::cabMic, 2 }, "Mic", micTypeNames(), 0));
     l.add (std::make_unique<APF> (juce::ParameterID { pid::cabMicPos, 2 }, "Mic Position", knob, 3.0f));
-    l.add (std::make_unique<APF> (juce::ParameterID { pid::cabRoom, 2 }, "Room", knob, 1.0f));
+    l.add (std::make_unique<APF> (juce::ParameterID { pid::cabRoom, 2 }, "Mic Distance", knob, 1.0f));
     l.add (std::make_unique<APF> (juce::ParameterID { pid::cabDiBlend, 2 }, "DI Blend", pct, 0.0f));
     l.add (std::make_unique<APB> (juce::ParameterID { pid::tapeOn, 2 }, "Console & Tape", false));
     l.add (std::make_unique<APF> (juce::ParameterID { pid::tapeDrive, 2 }, "Tape Drive", knob, 4.0f));
+
+    // 3.12: the guitar cable, the amp in a room, convolution reverbs (defaults leave saved songs as they were)
+    l.add (std::make_unique<APF> (juce::ParameterID { pid::inputCable, 3 }, "Cable", Range (0.0f, 12.0f, 0.1f), 0.0f, unit ("m")));
+    l.add (std::make_unique<APF> (juce::ParameterID { pid::cabRoomMic, 3 }, "Room Mic", pct, 0.0f));
+    l.add (std::make_unique<APC> (juce::ParameterID { pid::cabRoomType, 3 }, "Room", AmpRoom::roomNames(), 0));
+    l.add (std::make_unique<APC> (juce::ParameterID { pid::reverbType, 3 }, "Reverb Type", SpaceReverb::typeNames(), 0));
 
     return l;
 }
@@ -151,6 +161,10 @@ void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     mono.assign ((size_t) maxBlock, 0.0f);
     wetL.assign ((size_t) maxBlock, 0.0f);
     wetR.assign ((size_t) maxBlock, 0.0f);
+    roomIn.assign ((size_t) maxBlock, 0.0f);
+    roomL.assign ((size_t) maxBlock, 0.0f);
+    roomR.assign ((size_t) maxBlock, 0.0f);
+    cable.prepare (sr);
 
     character.prepare (sr);
     tape.prepare (sr);
@@ -167,6 +181,11 @@ void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     cab.setParameters ((CabType) (int) p (pid::cabType), p (pid::cabLowCut), p (pid::cabHighCut),
                        (MicType) (int) p (pid::cabMic), p (pid::cabMicPos) / 10.0f, p (pid::cabRoom) / 10.0f);
     cab.prepare (sr, maxBlock);
+    room.setRoom ((int) p (pid::cabRoomType), (CabType) (int) p (pid::cabType));
+    room.prepare (sr, maxBlock);
+    if (p (pid::reverbType) > 0.5f)
+        spaceReverb.setSpace ((int) p (pid::reverbType), p (pid::reverbSize), p (pid::reverbDamp), p (pid::reverbPreDelay));
+    spaceReverb.prepare (sr, maxBlock);
     for (auto& f : eq) { f.coefficients->coefficients.ensureStorageAllocated (8); f.reset(); }
     for (size_t b = 0; b < eq.size(); ++b) { eqR[b].coefficients = eq[b].coefficients; eqR[b].reset(); }   // shared coefficients
     eqCache.fill (99.0f);
@@ -180,6 +199,7 @@ void RigProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     compMakeup.reset (sr, 0.02);
     outGain.reset (sr, 0.02);
     reverbMixSm.reset (sr, 0.05);
+    roomMixSm.reset (sr, 0.05);
 
     pedalMidi.ensureSize (256);
     for (auto& e : copyEntries())
@@ -229,6 +249,10 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
         juce::FloatVectorOperations::clear (outR, n);
         return;
     }
+
+    // ---- the guitar cable (more capacitance than the interface saw: the pickup's resonance moves down) ----
+    cable.setLength (p (pid::inputCable));
+    cable.process (x, n);
 
     // ---- strings & pickups ----
     character.setParameters ((CharacterType) (int) p (pid::charType), p (pid::charAmount));
@@ -300,7 +324,7 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
                 case RigBlock::ampCab:
                 {
                     const bool ampOn = on (pid::ampOn), cabOn = on (pid::cabOn);
-                    if (! ampOn && ! cabOn && diBlend <= 0.001f) break;
+                    if (! ampOn && ! cabOn && diBlend <= 0.001f) { roomRunning = false; break; }
                     toMono();
                     tapDi();
                     const auto model = (AmpType) (int) p (pid::ampModel);
@@ -322,6 +346,17 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
                             amp.process (x, n);
                         }
                     }
+                    // the room mics hear the speaker too: tap what drives it
+                    const float roomMix = cabOn ? p (pid::cabRoomMic) : 0.0f;
+                    roomMixSm.setTargetValue (roomMix);
+                    const bool roomActive = roomMix > 0.0005f || roomMixSm.isSmoothing();
+                    if (roomActive)
+                    {
+                        room.setRoom ((int) p (pid::cabRoomType), (CabType) (int) p (pid::cabType));
+                        std::copy (x, x + n, roomIn.begin());
+                        if (! roomRunning) room.reset();
+                    }
+                    roomRunning = roomActive;
                     if (cabOn)
                     {
                         cab.setParameters ((CabType) (int) p (pid::cabType), p (pid::cabLowCut), p (pid::cabHighCut),
@@ -347,6 +382,19 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
                             x[i] = x[i] * wet + (a + (b - a) * frac) * dry;
                         }
                         diTapped = false;
+                    }
+                    if (roomActive)
+                    {
+                        // close mic + a spaced pair of room mics (equal-power blend; the room IR is level-matched to the close mic)
+                        room.process (roomIn.data(), roomL.data(), roomR.data(), n);
+                        toStereo();
+                        for (int i = 0; i < n; ++i)
+                        {
+                            const float m = roomMixSm.getNextValue() * juce::MathConstants<float>::halfPi;
+                            const float cg = std::cos (m), rg = std::sin (m);
+                            outL[i] = outL[i] * cg + roomL[(size_t) i] * rg;
+                            outR[i] = outR[i] * cg + roomR[(size_t) i] * rg;
+                        }
                     }
                     break;
                 }
@@ -379,33 +427,57 @@ void RigProcessor::processMonoToStereo (const float* input, float* outL, float* 
                 {
                     // parallel send
                     reverbMixSm.setTargetValue (on (pid::reverbOn) ? p (pid::reverbMix) : 0.0f);
+                    if (! (on (pid::reverbOn) || reverbMixSm.isSmoothing()))
+                        spaceRunning = false;
                     if (on (pid::reverbOn) || reverbMixSm.isSmoothing())
                     {
                         toStereo();
-                        juce::dsp::Reverb::Parameters rp;
-                        rp.roomSize = 0.3f + 0.68f * p (pid::reverbSize);
-                        rp.damping  = p (pid::reverbDamp);
-                        rp.width    = p (pid::reverbWidth);
-                        rp.wetLevel = 1.0f;
-                        rp.dryLevel = 0.0f;
-                        rp.freezeMode = 0.0f;
-                        reverb.setParameters (rp);
-
                         std::copy (outL, outL + n, wetL.begin());
                         std::copy (outR, outR + n, wetR.begin());
-                        preDelay.setDelayMs (p (pid::reverbPreDelay));
-                        preDelay.process (wetL.data(), wetR.data(), n);
+                        const int type = (int) p (pid::reverbType);
+                        float wetGain = 0.6f;
+                        if (type > 0)
+                        {
+                            // a designed space by convolution (pre-delay is part of the space)
+                            spaceReverb.setSpace (type, p (pid::reverbSize), p (pid::reverbDamp), p (pid::reverbPreDelay));
+                            if (! spaceRunning) spaceReverb.reset();
+                            spaceReverb.process (wetL.data(), wetR.data(), n);
+                            spaceRunning = true;
+                            const float w = p (pid::reverbWidth);   // width: scale the side signal of the wet
+                            for (int i = 0; i < n; ++i)
+                            {
+                                const float mid = 0.5f * (wetL[(size_t) i] + wetR[(size_t) i]), side = 0.5f * (wetL[(size_t) i] - wetR[(size_t) i]) * w;
+                                wetL[(size_t) i] = mid + side;
+                                wetR[(size_t) i] = mid - side;
+                            }
+                            wetGain = spaceReverbWetGain;
+                        }
+                        else
+                        {
+                            spaceRunning = false;
+                            juce::dsp::Reverb::Parameters rp;
+                            rp.roomSize = 0.3f + 0.68f * p (pid::reverbSize);
+                            rp.damping  = p (pid::reverbDamp);
+                            rp.width    = p (pid::reverbWidth);
+                            rp.wetLevel = 1.0f;
+                            rp.dryLevel = 0.0f;
+                            rp.freezeMode = 0.0f;
+                            reverb.setParameters (rp);
 
-                        float* chans[] = { wetL.data(), wetR.data() };
-                        juce::dsp::AudioBlock<float> blk (chans, 2, (size_t) n);
-                        reverb.process (juce::dsp::ProcessContextReplacing<float> (blk));
+                            preDelay.setDelayMs (p (pid::reverbPreDelay));
+                            preDelay.process (wetL.data(), wetR.data(), n);
+
+                            float* chans[] = { wetL.data(), wetR.data() };
+                            juce::dsp::AudioBlock<float> blk (chans, 2, (size_t) n);
+                            reverb.process (juce::dsp::ProcessContextReplacing<float> (blk));
+                        }
 
                         for (int i = 0; i < n; ++i)
                         {
                             const float m = reverbMixSm.getNextValue();
                             const float dry = std::cos (m * juce::MathConstants<float>::halfPi * 0.5f);   // gentle dry dip
-                            outL[i] = outL[i] * dry + wetL[(size_t) i] * m * 0.6f;
-                            outR[i] = outR[i] * dry + wetR[(size_t) i] * m * 0.6f;
+                            outL[i] = outL[i] * dry + wetL[(size_t) i] * m * wetGain;
+                            outR[i] = outR[i] * dry + wetR[(size_t) i] * m * wetGain;
                         }
                     }
                     break;
@@ -795,6 +867,36 @@ bool RigProcessor::loadImpulseResponse (const juce::File& f)
     return true;
 }
 
+bool RigProcessor::waitForBackgroundWork (int timeoutMs)
+{
+    cab.setParameters ((CabType) (int) p (pid::cabType), p (pid::cabLowCut), p (pid::cabHighCut),
+                       (MicType) (int) p (pid::cabMic), p (pid::cabMicPos) / 10.0f, p (pid::cabRoom) / 10.0f);
+    const bool needRoom = p (pid::cabRoomMic) > 0.0005f && p (pid::cabOn) > 0.5f;
+    const bool needReverb = p (pid::reverbType) > 0.5f && p (pid::reverbOn) > 0.5f;
+    if (needRoom) room.setRoom ((int) p (pid::cabRoomType), (CabType) (int) p (pid::cabType));
+    if (needReverb) spaceReverb.setSpace ((int) p (pid::reverbType), p (pid::reverbSize), p (pid::reverbDamp), p (pid::reverbPreDelay));
+    const auto start = juce::Time::getMillisecondCounter();
+    while (! (cab.isUpToDate() && (! needRoom || room.isDesigned()) && (! needReverb || spaceReverb.isDesigned())))
+    {
+        if (juce::Time::getMillisecondCounter() - start > (juce::uint32) timeoutMs) return false;
+        juce::Thread::sleep (10);
+    }
+    if (needRoom || needReverb || cab.hasImpulseResponse())
+    {
+        // the convolutions take new rooms on the processing thread, then JUCE builds their engines in the background
+        // and crossfades to them: run silence through until that's done
+        std::vector<float> silence ((size_t) maxBlock, 0.0f), l ((size_t) maxBlock), r ((size_t) maxBlock);
+        processMonoToStereo (silence.data(), l.data(), r.data(), maxBlock);
+        juce::Thread::sleep (400);
+        for (int i = 0, blocks = (int) (0.2 * sr / maxBlock) + 2; i < blocks; ++i)
+        {
+            processMonoToStereo (silence.data(), l.data(), r.data(), maxBlock);
+            if (i == 0) juce::Thread::sleep (100);
+        }
+    }
+    return true;
+}
+
 void RigProcessor::setParam (const juce::String& id, float value)
 {
     if (auto* param = apvts.getParameter (id))
@@ -984,6 +1086,12 @@ void RigProcessor::loadFactoryPreset (int index)
         if (auto* bp = dynamic_cast<daw::BuiltinProcessor*> (getPedalProcessor (uid)))
             for (auto& [k, v] : values) bp->setParam (k, v);
     };
+    // 3.12: the amp in a room (room mics), the guitar cable, the reverb's kind of space
+    enum { liveRoom = 0, smallRoom, bigRoom, garage, hallStage };
+    enum { revRoom = 1, revPlate, revSpring, revHall };
+    auto roomMic = [&] (float level, int roomType) { set (pid::cabRoomMic, level); set (pid::cabRoomType, (float) roomType); };
+    auto cableSet = [&] (float metres) { set (pid::inputCable, metres); };
+    auto revType = [&] (int t) { set (pid::reverbType, (float) t); };
     auto chorusSet = [&] (float rate, float depth, float mix) { set (pid::chorusOn, 1); set (pid::chorusRate, rate); set (pid::chorusDepth, depth); set (pid::chorusMix, mix); };
     auto delaySet = [&] (float ms, float fb, float tone, float mix) { set (pid::delayOn, 1); set (pid::delayTime, ms); set (pid::delayFeedback, fb); set (pid::delayTone, tone); set (pid::delayMix, mix); };
 
@@ -995,85 +1103,96 @@ void RigProcessor::loadFactoryPreset (int index)
             comp (-26, 3.5f, 12, 160, 5);
             set (pid::chorusOn, 1); set (pid::chorusRate, 0.6f); set (pid::chorusDepth, 0.3f); set (pid::chorusMix, 0.35f);
             rev (0.65f, 0.4f, 25, 0.26f);
-            set (pid::outLevel, 0.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -1.3f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.3f, liveRoom); revType (revPlate);
             break;
         case 1: // American Clean
             amp (AmpType::americanClean, 4.5f, 5.5f, 4.5f, 6.0f, 5.5f, 6.8f);
             cabSet (CabType::american2x12, MicType::dynamic, 3, 1, 70, 11000);
             rev (0.55f, 0.45f, 18, 0.2f);
-            set (pid::outLevel, -6.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -4.4f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.25f, liveRoom); revType (revSpring);
             break;
         case 2: // Classic Rock Crunch
             amp (AmpType::britishCrunch, 6.0f, 5.0f, 6.5f, 6.0f, 5.5f, 5.0f);
             cabSet (CabType::brit4x12, MicType::dynamic, 3, 1, 80, 9000);
             set (pid::gateThresh, -62);
             rev (0.4f, 0.5f, 10, 0.12f);
-            set (pid::outLevel, -1.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 1.4f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.3f, bigRoom); revType (revRoom);
             break;
         case 3: // Blues Breakup
             amp (AmpType::tweedBreakup, 5.5f, 5.0f, 6.0f, 5.5f, 5.0f, 5.5f);
-            cabSet (CabType::tweed1x12, MicType::dynamicPlusRibbon, 4, 2, 80, 9000);
-            rev (0.5f, 0.55f, 15, 0.18f);
-            set (pid::outLevel, -0.5f);   // loudness-matched (rigtest --calibrate)
+            cabSet (CabType::tweed1x12, MicType::dynamicPlusRibbon, 4, 3, 80, 9000);
+            rev (0.45f, 0.55f, 12, 0.14f);
+            set (pid::outLevel, 1.4f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.3f, smallRoom); revType (revRoom);
             break;
         case 4: // 60s Merseybeat Jangle: chimey class-A combo, blue speakers, a bit of tape
             amp (AmpType::britishChime, 4.5f, 4.5f, 5.0f, 6.0f, 5.5f, 6.0f);
-            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 3, 90, 11000);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 90, 11000);
             chr (CharacterType::singleCoils, 5);
             comp (-22, 2.5f, 15, 150, 3);
             tapeSet (4);
             rev (0.45f, 0.5f, 12, 0.16f);
-            set (pid::outLevel, -2.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.1f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.3f, liveRoom); revType (revPlate);
             break;
         case 5: // Modern High Gain
             driveSet (DriveType::overdrive, 0.8f, 6.5f, 7.5f);
             amp (AmpType::modernHighGain, 6.5f, 5.5f, 4.5f, 6.0f, 6.0f, 5.3f);
-            cabSet (CabType::modern4x12, MicType::dynamic, 2, 0, 90, 8500);
+            cabSet (CabType::modern4x12, MicType::dynamic, 2, 1, 90, 8500);
             set (pid::gateThresh, -54); set (pid::gateRelease, 40);
             rev (0.35f, 0.6f, 8, 0.08f);
-            set (pid::outLevel, -0.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -4.4f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (5); roomMic (0.15f, bigRoom); revType (revRoom);
             break;
         case 6: // Lead Solo
             amp (AmpType::britishLead, 6.5f, 5.0f, 6.5f, 6.0f, 6.0f, 5.0f);
-            cabSet (CabType::brit4x12, MicType::dynamicPlusRibbon, 3, 2, 85, 9000);
+            cabSet (CabType::brit4x12, MicType::dynamicPlusRibbon, 3, 3, 85, 9000);
             set (pid::delayOn, 1); set (pid::delayTime, 420); set (pid::delayFeedback, 0.35f); set (pid::delayMix, 0.22f); set (pid::delayPingPong, 1);
             set (pid::gateThresh, -60);
             rev (0.6f, 0.5f, 20, 0.2f);
-            set (pid::outLevel, -1.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -1.5f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.3f, bigRoom); revType (revPlate);
             break;
         case 7: // Smooth Blues Lead
             amp (AmpType::smoothOverdrive, 6.0f, 5.0f, 6.0f, 5.0f, 5.0f, 5.5f);
-            cabSet (CabType::openBack1x12, MicType::ribbon, 3, 2, 80, 9000);
+            cabSet (CabType::openBack1x12, MicType::ribbon, 3, 5, 80, 9000);
             chr (CharacterType::humbuckers, 4);
             set (pid::delayOn, 1); set (pid::delayTime, 380); set (pid::delayFeedback, 0.25f); set (pid::delayMix, 0.15f);
             rev (0.55f, 0.5f, 20, 0.18f);
-            set (pid::outLevel, -2.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -3.2f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.25f, liveRoom); revType (revPlate);
             break;
         case 8: // Dream Pop Wash
             amp (AmpType::americanClean, 5.0f, 5.0f, 5.0f, 5.5f, 5.0f, 6.5f);
-            cabSet (CabType::american2x12, MicType::ribbon, 5, 4, 90, 9000);
+            cabSet (CabType::american2x12, MicType::ribbon, 5, 5, 90, 9000);
             set (pid::chorusOn, 1); set (pid::chorusRate, 0.35f); set (pid::chorusDepth, 0.6f); set (pid::chorusMix, 0.5f);
             set (pid::delayOn, 1); set (pid::delayTime, 520); set (pid::delayFeedback, 0.45f); set (pid::delayTone, 2500); set (pid::delayMix, 0.3f); set (pid::delayPingPong, 1);
             tapeSet (5);
             rev (0.9f, 0.4f, 40, 0.42f);
-            set (pid::outLevel, -1.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -0.3f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.45f, bigRoom); revType (revHall);
             break;
         case 9: // Garage Fuzz
             driveSet (DriveType::fuzz, 7.0f, 5.5f, 6.0f);
             amp (AmpType::britishChime, 5.0f, 5.0f, 5.0f, 5.5f, 5.0f, 5.5f);
-            cabSet (CabType::britBlue2x12, MicType::dynamic, 2, 3, 90, 9000);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 2, 1, 90, 9000);
             rev (0.35f, 0.5f, 8, 0.12f);
-            set (pid::outLevel, 0.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -2.9f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.4f, garage); revType (revRoom);
             break;
 
         case 10: // 60s Merseybeat bass: hollow-body violin bass with flats into a British valve amp and a 2x15, on tape
             chr (CharacterType::violinBass, 9);
             amp (AmpType::bassSixties, 4.5f, 6.0f, 5.5f, 4.0f, 4.0f, 6.0f);
-            cabSet (CabType::bass2x15Sixties, MicType::dynamic, 5, 3, 40, 6000);
+            cabSet (CabType::bass2x15Sixties, MicType::dynamic, 5, 2, 40, 6000);
             comp (-24, 3.0f, 25, 220, 4);
             tapeSet (5);
             bassBasics();
-            set (pid::outLevel, -2.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.7f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.15f, liveRoom);
             break;
         case 11: // Late 60s studio: a bright pick bass, DI'd into the console with a little valve amp underneath
             chr (CharacterType::roundwoundsBright, 4);
@@ -1083,16 +1202,18 @@ void RigProcessor::loadFactoryPreset (int index)
             comp (-24, 4.0f, 10, 160, 5);
             tapeSet (4);
             bassBasics();
-            set (pid::outLevel, 0.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.2f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.1f, liveRoom);
             break;
         case 12: // Motown flatwound: flats with a foam mute, flip-top 1x15, warm and fat
             chr (CharacterType::foamMute, 8);
             amp (AmpType::bassFlipTop, 5.0f, 6.0f, 5.0f, 4.5f, 4.5f, 6.0f);
-            cabSet (CabType::bass1x15Vintage, MicType::ribbon, 5, 2, 35, 5500);
+            cabSet (CabType::bass1x15Vintage, MicType::ribbon, 5, 4, 35, 5500);
             comp (-26, 3.0f, 20, 200, 4);
             tapeSet (3);
             bassBasics();
-            set (pid::outLevel, -3.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -3.3f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.12f, liveRoom);
             break;
         case 13: // Classic Rock 8x10
             chr (CharacterType::precisionPickup, 5);
@@ -1101,7 +1222,8 @@ void RigProcessor::loadFactoryPreset (int index)
             set (pid::cabDiBlend, 0.3f);
             comp (-24, 3.0f, 20, 200, 4);
             bassBasics();
-            set (pid::outLevel, -2.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -2.6f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.15f, bigRoom);
             break;
         case 14: // Modern Growl
             chr (CharacterType::roundwoundsBright, 5);
@@ -1110,7 +1232,8 @@ void RigProcessor::loadFactoryPreset (int index)
             comp (-26, 5.0f, 10, 150, 5);
             set (pid::gateThresh, -66);
             rev (0.3f, 0.6f, 0, 0.0f);
-            set (pid::outLevel, 2.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -10.4f);   // loudness-matched (rigtest --calibrate)
+            cableSet (3);
             break;
         case 15: // Modern Clean Hi-Fi: tight, punchy, piano-like (slap, fingerstyle, pop)
             chr (CharacterType::roundwoundsBright, 7);
@@ -1119,7 +1242,8 @@ void RigProcessor::loadFactoryPreset (int index)
             set (pid::cabDiBlend, 0.5f);
             comp (-28, 6.0f, 6, 120, 6);
             bassBasics();
-            set (pid::outLevel, 6.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -2.7f);   // loudness-matched (rigtest --calibrate)
+            cableSet (3);
             break;
         case 16: // Punk Pick: driven tube bass, mids up
             chr (CharacterType::precisionPickup, 6);
@@ -1127,15 +1251,17 @@ void RigProcessor::loadFactoryPreset (int index)
             cabSet (CabType::bass8x10, MicType::dynamic, 2, 1, 45, 7000);
             comp (-22, 4.0f, 8, 120, 4);
             bassBasics();
-            set (pid::outLevel, 1.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -0.0f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.2f, garage);
             break;
         case 17: // Dub Deep: round, sub-heavy, no top
             chr (CharacterType::flatwounds, 8);
             amp (AmpType::bassFlipTop, 4.0f, 7.5f, 4.0f, 3.0f, 3.5f, 6.2f);
-            cabSet (CabType::bass1x15Vintage, MicType::ribbon, 7, 2, 30, 3500);
+            cabSet (CabType::bass1x15Vintage, MicType::ribbon, 7, 4, 30, 3500);
             comp (-24, 3.0f, 30, 250, 4);
             bassBasics();
-            set (pid::outLevel, -8.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -13.4f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.1f, smallRoom);
             break;
         case 18: // Fuzz Bass
             driveSet (DriveType::bassDrive, 7.0f, 5.5f, 6.0f);
@@ -1143,6 +1269,8 @@ void RigProcessor::loadFactoryPreset (int index)
             cabSet (CabType::bass4x10Horn, MicType::dynamic, 3, 1, 40, 8000);
             set (pid::cabDiBlend, 0.25f);
             bassBasics();
+            cableSet (4); roomMic (0.15f, garage);
+            set (pid::outLevel, -5.5f);   // loudness-matched (rigtest --calibrate)
             break;
         case 19: // Bass Clean DI
             amp (AmpType::flatDi, 5.0f, 5.5f, 5.0f, 5.0f, 5.0f, 6.8f);
@@ -1172,11 +1300,12 @@ void RigProcessor::loadFactoryPreset (int index)
             driveSet (DriveType::fuzz, 6.0f, 5.5f, 6.0f);
             pedal ("phaser", { { "rate", 0.35f }, { "depth", 0.85f }, { "centre", 900.0f }, { "feedback", 0.55f }, { "mix", 0.5f } });
             amp (AmpType::britishChime, 5.0f, 5.0f, 6.0f, 6.0f, 5.5f, 5.5f);
-            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 80, 9000);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 1, 80, 9000);
             tapeSet (5);
             delaySet (360, 0.35f, 3000, 0.22f);
             rev (0.55f, 0.5f, 15, 0.14f);
-            set (pid::outLevel, 2.2f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -1.6f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.3f, liveRoom); revType (revSpring);
             break;
         case 23: // Psych pop bass: a hollow-body with flats, compressed until it doesn't move, round valve amp, tape
             chr (CharacterType::violinBass, 7);
@@ -1185,36 +1314,40 @@ void RigProcessor::loadFactoryPreset (int index)
             cabSet (CabType::bass1x15Vintage, MicType::dynamic, 4, 2, 35, 6000);
             tapeSet (5);
             bassBasics();
-            set (pid::outLevel, -1.6f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.7f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.1f, smallRoom);
             break;
         case 24: // Garage fuzz: a treble booster into a cranked fuzz into a crunchy amp in a roomy garage
             pedal ("boost", { { "type", 1.0f }, { "gain", 10.0f }, { "tone", 5.0f } }, false, 0);
             driveSet (DriveType::fuzz, 9.0f, 6.0f, 6.0f);
             amp (AmpType::britishCrunch, 7.0f, 5.0f, 6.5f, 6.0f, 5.5f, 5.5f);
-            cabSet (CabType::brit4x12, MicType::dynamic, 2, 3, 80, 8500);
+            cabSet (CabType::brit4x12, MicType::dynamic, 2, 1, 80, 8500);
             set (pid::gateThresh, -60);
             tapeSet (6);
             rev (0.3f, 0.5f, 5, 0.1f);
-            set (pid::outLevel, 0.8f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -1.0f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.45f, garage); revType (revRoom);
             break;
         case 25: // Heavy 70s fuzz riffs: an octave-up pedal first, a big fuzz, a plexi-style lead amp, 4x12
             pedal ("octaver", { { "dry", 1.0f }, { "sub1", 0.0f }, { "sub2", 0.0f }, { "up", 0.3f } }, false, 0);
             driveSet (DriveType::fuzz, 7.0f, 4.5f, 6.0f);
             amp (AmpType::britishLead, 6.5f, 5.5f, 6.0f, 5.5f, 5.5f, 5.0f);
-            cabSet (CabType::brit4x12, MicType::dynamicPlusRibbon, 3, 2, 80, 8000);
+            cabSet (CabType::brit4x12, MicType::dynamicPlusRibbon, 3, 3, 80, 8000);
             set (pid::gateThresh, -58);
             rev (0.4f, 0.5f, 10, 0.1f);
-            set (pid::outLevel, -1.2f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -1.8f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.35f, bigRoom); revType (revRoom);
             break;
         case 26: // 60s jazz box: neck humbucker on a hollow-body, tone rolled back, a small clean amp, a ribbon mic, a room
             chr (CharacterType::humbuckers, 9);
             comp (-24, 2.5f, 20, 200, 3);
             amp (AmpType::americanClean, 2.5f, 6.5f, 5.0f, 3.5f, 3.5f, 6.5f);
-            cabSet (CabType::openBack1x12, MicType::ribbon, 5, 3, 70, 6000);
+            cabSet (CabType::openBack1x12, MicType::ribbon, 5, 5, 70, 6000);
             set (pid::eqOn, 1); set (pid::eqLow, 1.0f); set (pid::eqHigh, -3.0f);
             tapeSet (3);
             rev (0.45f, 0.6f, 20, 0.18f);
-            set (pid::outLevel, 1.5f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 1.2f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.25f, liveRoom); revType (revPlate);
             break;
         case 27: // 12-string jangle: bright single coils, compressed, an octave string added, a touch of course detune, chimey combo
             chr (CharacterType::singleCoils, 6);
@@ -1222,30 +1355,33 @@ void RigProcessor::loadFactoryPreset (int index)
             pedal ("pitchshift", { { "semis", 12.0f }, { "fine", 4.0f }, { "level2", 0.0f }, { "spread", 6.0f }, { "window", 30.0f }, { "mix", 0.28f } });
             chorusSet (0.3f, 0.15f, 0.2f);
             amp (AmpType::britishChime, 4.0f, 5.0f, 5.5f, 6.5f, 6.0f, 6.0f);
-            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 90, 11000);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 1, 90, 11000);
             tapeSet (4);
             rev (0.4f, 0.5f, 10, 0.14f);
-            set (pid::outLevel, 3.0f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 2.7f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (5); roomMic (0.3f, liveRoom); revType (revPlate);
             break;
         case 28: // Casino crunch: hollow-body P-90s straight into a cranked class-A combo and a saturated desk
             chr (CharacterType::singleCoils, 4);
             driveSet (DriveType::distortion, 7.5f, 6.0f, 5.5f);
             amp (AmpType::britishChime, 7.5f, 5.0f, 6.0f, 6.0f, 5.5f, 5.5f);
-            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 2, 90, 9000);
+            cabSet (CabType::britBlue2x12, MicType::dynamic, 3, 1, 90, 9000);
             set (pid::gateThresh, -60);
             tapeSet (7);
             rev (0.35f, 0.5f, 8, 0.1f);
-            set (pid::outLevel, 2.2f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.8f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.35f, liveRoom); revType (revRoom);
             break;
         case 29: // Doom sludge: a fuzz with the tone all the way down, a sub octave under it, a dark high-gain stack
             driveSet (DriveType::fuzz, 9.5f, 3.0f, 6.0f);
             pedal ("octaver", { { "dry", 1.0f }, { "sub1", 0.35f }, { "sub2", 0.0f }, { "up", 0.0f }, { "tone", 400.0f } });
             amp (AmpType::modernHighGain, 7.5f, 7.5f, 4.0f, 4.5f, 4.5f, 5.5f);
-            cabSet (CabType::modern4x12, MicType::dynamic, 4, 2, 50, 6500);
+            cabSet (CabType::modern4x12, MicType::dynamic, 4, 1, 50, 6500);
             set (pid::gateThresh, -48); set (pid::gateRelease, 60);
             set (pid::eqOn, 1); set (pid::eqLow, 2.0f);
             rev (0.7f, 0.6f, 20, 0.12f);
-            set (pid::outLevel, -0.6f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -2.6f);   // loudness-matched on real playing (rigtest --render-file)
+            cableSet (6); roomMic (0.35f, bigRoom); revType (revHall);
             break;
         case 30: // Doom sludge bass: bass fuzz into a tube head and an 8x10
             driveSet (DriveType::bassDrive, 8.5f, 4.0f, 6.0f);
@@ -1254,7 +1390,8 @@ void RigProcessor::loadFactoryPreset (int index)
             comp (-24, 3.0f, 15, 180, 3);
             bassBasics();
             set (pid::gateThresh, -60);
-            set (pid::outLevel, -4.9f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, -3.3f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.2f, bigRoom);
             break;
         case 31: // Is It True: a 60s violin bass DI'd into a hot valve preamp, squashed flat, round and bouncy, mostly DI
             chr (CharacterType::violinBass, 6);
@@ -1264,7 +1401,8 @@ void RigProcessor::loadFactoryPreset (int index)
             set (pid::cabDiBlend, 0.6f);
             tapeSet (4);
             bassBasics();
-            set (pid::outLevel, 1.35f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.2f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.08f, smallRoom);
             break;
         case 32: // Feels Like We Only Go Backwards: the same bass woollier - a warm fuzz, compressed harder, darker, a slow phaser, saturated tape
             chr (CharacterType::violinBass, 8);
@@ -1276,7 +1414,8 @@ void RigProcessor::loadFactoryPreset (int index)
             pedal ("phaser", { { "rate", 0.2f }, { "depth", 0.6f }, { "centre", 600.0f }, { "feedback", 0.4f }, { "mix", 0.25f } }, true);
             tapeSet (7);
             bassBasics();
-            set (pid::outLevel, 2.2f);   // loudness-matched (rigtest --calibrate)
+            set (pid::outLevel, 0.1f);   // loudness-matched (rigtest --calibrate)
+            cableSet (4); roomMic (0.08f, smallRoom);
             break;
         case 33: case 34: case 35: case 36: case 37: case 38: case 39: case 40: case 41: case 42:
         {

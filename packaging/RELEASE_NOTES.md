@@ -1,11 +1,24 @@
-## WOMANINSTEM 3.11.0 for Windows (64-bit): Daydream, a chord machine for finding song ideas
+## WOMANINSTEM 3.12.0 for Windows (64-bit): guitar and bass that sound like an amp in a room
 
 **Download one of these:**
 - `WOMANINSTEM-x.y.z-setup.exe`: installer with Start Menu / desktop shortcuts, "Open with WOMANINSTEM" for MP3/FLAC, and double-click to open Studio songs (`.wisproj`).
 - `WOMANINSTEM-x.y.z-windows-x64.zip`: portable. Unzip anywhere and run `WOMANINSTEM.exe`.
 
 Windows SmartScreen may warn because the app isn't code-signed: click **More info → Run anyway**.
-Songs and rig presets from 2.0 to 3.10 open unchanged (old amp and cabinet choices are mapped to the closest new models).
+Songs and rig presets from 2.0 to 3.11 open as before, with the new cabinets (old amp and cabinet choices are mapped to the closest models; the old *Room* knob is now the mic's *Distance*). The room mics, cable and new reverb spaces start switched off in old songs: pick a factory preset, or turn them up.
+
+### New in 3.12
+
+**Your guitar and bass through an amp in a room, not a DI.** Everything here is in the *Amp & Pedals* rig, so it works on the Studio's *Audio: Guitar or Bass* tracks and in Play Along.
+
+- **New cabinets: the speaker and the mic, modelled.** The old cabinets were smooth EQ curves, which is a big part of why a DI'd guitar still sounded like a DI. Each of the 11 cabinets is now a physical model: the sound of every part of the cone as the microphone hears it from where it really is, averaged over the mic's diaphragm. Above about 1 kHz the cone stops moving as one piece: waves run out from the voice coil and bounce off the surround, the outer cone goes quiet, and the cone's break-up modes ring. That's where the jagged peaks and notches and the short metallic ring of a real speaker come from. The cab's other speakers (heard off axis), its box resonances and the floor are in there too, and each speaker is shaped to the published response of its family (Greenback-style and Vintage-30-style 4x12s, an open-back American 2x12, an alnico Blue 2x12, open-back and tweed 1x12s, and the classic bass cabs).
+- **Mic placement that behaves like moving a real mic.** *Mic Pos* goes from the centre of the dust cap (bright, aggressive) through the cap's edge (the classic spot) to the edge of the cone (dark, woofy). The cabinet's old *Room* knob is now **Distance**: from touching the grille (lots of proximity bass) through 3 cm and 14 cm to 30 cm (where the other speakers and the floor join in) and 1 m. A ribbon up close is boomy and gets smoother as it moves back, as it does in a studio. Mics: dynamic, ribbon, condenser, dynamic + ribbon.
+- **Room mics: the amp in a space.** A new *Room Mics* section puts the amp in a **Studio Live Room**, a **Small Room**, a **Big Live Room**, a **Concrete Garage** or on a **Hall Stage**, with a spaced pair of room mics a few metres back. The rooms are real-sized boxes: you hear the amp's direct sound arrive, the floor bounce, the walls and ceiling (bright straight ahead of the speaker, dull to the sides, only lows from behind a closed back) and a tail whose length and level follow the room's size. **Level** blends them with the close mic, in stereo, without changing the overall loudness.
+- **Amps that react like amps.** Every amp model now has an **output transformer** whose core saturates on big low notes and pick thumps (early in the small vintage combos, late in the 100-watt heads), and a **speaker** that gives a little when you dig in. Together with the new cabinets, pick attacks lose the DI's clanky edge: on a real DI recording, the click of each pick attack measured 2 to 3 dB softer than in 3.11.
+- **Guitar cable.** A new *Cable* knob in *Input*: a real lead adds capacitance across the pickup, which moves its resonant peak down and softens the brittle top you get from a short cable into an interface. 0 = as recorded; 6 m is a classic 20-foot lead.
+- **Reverb spaces.** The rig's reverb has a *Type*: **Room**, **Plate**, **Spring** (the amp's own tank) and **Hall** are real-sounding spaces; **Classic** is the reverb from before.
+- **All factory presets use them** (cable, mic placement, room mics and reverb space to suit each sound) and were **re-levelled on real recorded guitar**, so switching presets doesn't jump in volume and none of them clip. A new *Audio: Guitar or Bass* track starts on *Classic Rock Crunch* in a big live room.
+- For a cabinet you know, loading its impulse response (`.wav`) still works, and so does a full-rig NAM capture.
 
 ### New in 3.11
 

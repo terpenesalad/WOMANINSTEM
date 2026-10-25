@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include "AmpModels.h"
 #include "CabSim.h"
+#include "AmpRoom.h"
 #include "Effects.h"
 #include "NamAmp.h"
 #include "Tuner.h"
@@ -73,6 +74,11 @@ namespace pid
     inline constexpr const char* cabDiBlend  = "cab_di";
     inline constexpr const char* tapeOn      = "tape_on";
     inline constexpr const char* tapeDrive   = "tape_drive";
+    // 3.12
+    inline constexpr const char* inputCable  = "input_cable";
+    inline constexpr const char* cabRoomMic  = "cab_roommic";
+    inline constexpr const char* cabRoomType = "cab_roomtype";
+    inline constexpr const char* reverbType  = "reverb_type";
 }
 
 /** The reorderable blocks of the rig's pedalboard (the rig's own effects; added pedals sit between them). */
@@ -161,6 +167,11 @@ public:
 
     void setParam (const juce::String& id, float value);
 
+    /** Offline rendering and tests only (nothing else may be processing this rig): applies the current settings to the
+        cabinet, room and reverb, waits for their background builders, then runs a little silence through so the new
+        rooms are installed and faded in before the real audio starts. Returns false on timeout. */
+    bool waitForBackgroundWork (int timeoutMs = 20000);
+
     // ---- pedalboard (message thread) ----
     /** One block on the board, in signal order. key = a RigBlock key, or the pedal's uid. */
     struct BoardItem { juce::String key, name, builtinId; bool isPedal = false; bool on = false; int block = -1; };
@@ -226,6 +237,10 @@ private:
     BuiltInAmp amp;
     NamAmp nam;
     CabSim cab;
+    AmpRoom room;
+    SpaceReverb spaceReverb;
+    bool roomRunning = false, spaceRunning = false;   // so a room / space that restarts doesn't replay an old tail
+    GuitarCable cable;
     std::array<juce::dsp::IIR::Filter<float>, 4> eq, eqR;
     std::array<float, 4> eqCache { 99, 99, 99, 99 };
     juce::dsp::Chorus<float> chorus;
@@ -234,8 +249,8 @@ private:
     juce::dsp::Reverb reverb;
     Tuner tuner;
 
-    juce::SmoothedValue<float> inGain, compMakeup, outGain, reverbMixSm;
-    std::vector<float> mono, wetL, wetR;
+    juce::SmoothedValue<float> inGain, compMakeup, outGain, reverbMixSm, roomMixSm;
+    std::vector<float> mono, wetL, wetR, roomIn, roomL, roomR;
 
     std::atomic<float> inputPeak { 0 }, outputPeak { 0 };
     std::atomic<bool> inputClip { false };
